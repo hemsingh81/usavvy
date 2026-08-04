@@ -19,3 +19,14 @@ app.listen({ port: config.port, host: "0.0.0.0" }, (err, address) => {
   }
   logger.info("gateway listening", { address });
 });
+
+// Review finding: without this, a restart (docker, process manager) drops in-flight
+// requests instead of draining them.
+async function shutdown(signal: string): Promise<void> {
+  logger.info("gateway shutting down", { signal });
+  await app.close();
+  process.exit(0);
+}
+
+process.on("SIGTERM", () => void shutdown("SIGTERM"));
+process.on("SIGINT", () => void shutdown("SIGINT"));

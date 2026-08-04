@@ -18,7 +18,7 @@ describe("createCoreClient().fetchHealth", () => {
     const result = await client.fetchHealth();
 
     expect(result).toEqual({ status: "ok", db: true, storage: true });
-    expect(fetchMock).toHaveBeenCalledWith("http://localhost:3001/health");
+    expect(fetchMock).toHaveBeenCalledWith("http://localhost:3001/health", expect.objectContaining({ signal: expect.any(AbortSignal) }));
   });
 
   it("returns unreachable, never throws, when the HTTP call itself fails (AD-17)", async () => {

@@ -41,6 +41,19 @@ describe("GET /health", () => {
     await app.close();
   });
 
+  it("returns 200 with core reported unreachable (never 500) even if fetchCoreHealth violates its contract and rejects (Review finding: defensive backstop)", async () => {
+    const app = buildApp({
+      fetchCoreHealth: vi.fn().mockRejectedValue(new Error("unexpected")),
+      corsOrigin: "http://localhost:5173",
+    });
+
+    const response = await app.inject({ method: "GET", url: "/health" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ gateway: { status: "ok" }, core: { status: "unreachable" } });
+    await app.close();
+  });
+
   it("responds with the correct CORS header for the dev web origin", async () => {
     const app = buildApp({
       fetchCoreHealth: vi.fn().mockResolvedValue({ status: "ok", db: true, storage: true }),

@@ -26,4 +26,8 @@ describe("loadCoreConfig", () => {
   it("throws a descriptive error when PORT is not a number", () => {
     expect(() => loadCoreConfig({ PORT: "not-a-number" })).toThrow();
   });
+
+  it("throws when DATABASE_URL is not a valid URL (Review finding: was under-validated as a bare non-empty string)", () => {
+    expect(() => loadCoreConfig({ DATABASE_URL: "not-a-url" })).toThrow();
+  });
 });

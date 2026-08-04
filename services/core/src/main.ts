@@ -24,3 +24,15 @@ app.listen({ port: config.port, host: "0.0.0.0" }, (err, address) => {
   }
   logger.info("core listening", { address });
 });
+
+// Review finding: without this, a restart (docker, process manager) leaks the postgres
+// connection and drops in-flight requests instead of draining them.
+async function shutdown(signal: string): Promise<void> {
+  logger.info("core shutting down", { signal });
+  await app.close();
+  await sql.end();
+  process.exit(0);
+}
+
+process.on("SIGTERM", () => void shutdown("SIGTERM"));
+process.on("SIGINT", () => void shutdown("SIGINT"));

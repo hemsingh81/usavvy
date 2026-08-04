@@ -22,4 +22,20 @@ describe("pingDb", () => {
     expect(errorSpy).toHaveBeenCalledTimes(1);
     expect(errorSpy.mock.calls[0]?.[0]).toBe("db ping failed");
   });
+
+  it("returns false and logs, never hangs forever, when the query executor never resolves (Review finding: no timeout)", async () => {
+    vi.useFakeTimers();
+    const execute = vi.fn().mockReturnValue(new Promise(() => {}));
+    const logger = createLogger("test");
+    const errorSpy = vi.spyOn(logger, "error");
+
+    const resultPromise = pingDb(execute, logger);
+    await vi.advanceTimersByTimeAsync(5000);
+    const result = await resultPromise;
+
+    expect(result).toBe(false);
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    expect(errorSpy.mock.calls[0]?.[1]).toMatchObject({ reason: expect.stringContaining("timed out") });
+    vi.useRealTimers();
+  });
 });

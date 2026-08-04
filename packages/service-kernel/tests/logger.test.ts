@@ -33,4 +33,16 @@ describe("createLogger", () => {
     const payload = JSON.parse(errorSpy.mock.calls[0]?.[0] as string);
     expect(payload).toMatchObject({ level: "error", module: "core", message: "db ping failed", reason: "ECONNREFUSED" });
   });
+
+  it("never throws when the context is not JSON-serializable, falling back to a safe payload (Review finding)", () => {
+    const logger = createLogger("core");
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+
+    expect(() => logger.error("boom", { circular })).not.toThrow();
+
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    const payload = JSON.parse(errorSpy.mock.calls[0]?.[0] as string);
+    expect(payload).toMatchObject({ level: "error", module: "core", message: "boom", contextSerializationFailed: true });
+  });
 });
