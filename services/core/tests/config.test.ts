@@ -6,7 +6,7 @@ describe("loadCoreConfig", () => {
     const cfg = loadCoreConfig({});
     expect(cfg.port).toBe(3001);
     expect(cfg.notificationAdapter).toBe("mock");
-    expect(cfg.databaseUrl).toBe("postgres://usavvy:usavvy@localhost:5432/usavvy_core");
+    expect(cfg.databaseUrl).toBe("postgres://usavvy:usavvy@localhost:5433/usavvy_core");
     expect(cfg.storageEndpoint).toBe("http://localhost:8333");
   });
 

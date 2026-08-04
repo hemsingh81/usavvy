@@ -10,7 +10,7 @@ const notificationAdapterSchema = z.enum(["mock"]);
 
 const coreEnvSchema = baseServiceEnvSchema.extend({
   PORT: z.coerce.number().int().positive().default(3001),
-  DATABASE_URL: z.url().default("postgres://usavvy:usavvy@localhost:5432/usavvy_core"),
+  DATABASE_URL: z.url().default("postgres://usavvy:usavvy@localhost:5433/usavvy_core"),
   STORAGE_ENDPOINT: z.url().default("http://localhost:8333"),
   NOTIFICATION_ADAPTER: notificationAdapterSchema.default("mock"),
 });

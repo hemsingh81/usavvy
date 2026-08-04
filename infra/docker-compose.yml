@@ -12,10 +12,12 @@ services:
       # AD-14: database-per-service. This is the default/admin database; each service's
       # own database (e.g. usavvy_core) is created by init-db.sh below.
       POSTGRES_DB: usavvy
+    # Host port 5433, not 5432: avoids colliding with a locally-installed Postgres
+    # some dev machines already run on the standard port.
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      - postgres-data:/var/lib/postgresql
       - ./init-db.sh:/docker-entrypoint-initdb.d/init-db.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U usavvy"]

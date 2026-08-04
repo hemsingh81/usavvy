@@ -33,7 +33,7 @@ To bring the stateful dependencies down: `pnpm infra:down`.
 | `apps/web` (Vite dev server) | 5173 |
 | `services/gateway` | 3000 |
 | `services/core` | 3001 |
-| Postgres | 5432 |
+| Postgres | 5433 (mapped from the container's 5432 to avoid clashing with a local install) |
 | Redis | 6379 |
 | SeaweedFS (S3 gateway) | 8333 |
 
@@ -51,7 +51,7 @@ directory (each service's `dev` script loads it automatically via Node's
 
 ```
 PORT=3001
-DATABASE_URL=postgres://usavvy:usavvy@localhost:5432/usavvy_core
+DATABASE_URL=postgres://usavvy:usavvy@localhost:5433/usavvy_core
 STORAGE_ENDPOINT=http://localhost:8333
 NOTIFICATION_ADAPTER=mock
 ```
