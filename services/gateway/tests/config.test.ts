@@ -7,18 +7,25 @@ describe("loadGatewayConfig", () => {
     expect(cfg.port).toBe(3000);
     expect(cfg.coreServiceUrl).toBe("http://localhost:3001");
     expect(cfg.webOrigin).toBe("http://localhost:5173");
+    expect(cfg.jwtSecret).toBe("usavvy-dev-only-jwt-secret-do-not-use-in-production");
   });
 
-  it("reads CORE_SERVICE_URL and WEB_ORIGIN from the given env object", () => {
+  it("reads CORE_SERVICE_URL, WEB_ORIGIN, and JWT_SECRET from the given env object", () => {
     const cfg = loadGatewayConfig({
       CORE_SERVICE_URL: "http://core:3001",
       WEB_ORIGIN: "http://web:5173",
+      JWT_SECRET: "a-real-secret",
     });
     expect(cfg.coreServiceUrl).toBe("http://core:3001");
     expect(cfg.webOrigin).toBe("http://web:5173");
+    expect(cfg.jwtSecret).toBe("a-real-secret");
   });
 
   it("throws a descriptive error when PORT is not a number", () => {
     expect(() => loadGatewayConfig({ PORT: "not-a-number" })).toThrow();
+  });
+
+  it("throws when JWT_SECRET is set but empty", () => {
+    expect(() => loadGatewayConfig({ JWT_SECRET: "" })).toThrow();
   });
 });

@@ -13,6 +13,14 @@ const coreEnvSchema = baseServiceEnvSchema.extend({
   DATABASE_URL: z.url().default("postgres://usavvy:usavvy@localhost:5433/usavvy_core"),
   STORAGE_ENDPOINT: z.url().default("http://localhost:8333"),
   NOTIFICATION_ADAPTER: notificationAdapterSchema.default("mock"),
+  // Dev-only default (AD-12's dev-default pattern) — unsafe for any non-local
+  // deployment; must be overridden alongside gateway's own JWT_SECRET (same value,
+  // symmetric secret, AD-7).
+  JWT_SECRET: z.string().min(1).default("usavvy-dev-only-jwt-secret-do-not-use-in-production"),
+  // No dev default, unlike everything else above: Google OAuth needs a real registered
+  // client id even in dev — a `mock` adapter can't stand in for it. Optional so the
+  // rest of the service (and the email+password path) works with zero external setup.
+  GOOGLE_CLIENT_ID: z.string().min(1).optional(),
 });
 
 export interface CoreConfig {
@@ -20,6 +28,8 @@ export interface CoreConfig {
   databaseUrl: string;
   storageEndpoint: string;
   notificationAdapter: z.infer<typeof notificationAdapterSchema>;
+  jwtSecret: string;
+  googleClientId: string | undefined;
 }
 
 export function loadCoreConfig(env: Record<string, string | undefined>): CoreConfig {
@@ -29,5 +39,7 @@ export function loadCoreConfig(env: Record<string, string | undefined>): CoreCon
     databaseUrl: parsed.DATABASE_URL,
     storageEndpoint: parsed.STORAGE_ENDPOINT,
     notificationAdapter: parsed.NOTIFICATION_ADAPTER,
+    jwtSecret: parsed.JWT_SECRET,
+    googleClientId: parsed.GOOGLE_CLIENT_ID,
   };
 }

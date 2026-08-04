@@ -16,8 +16,9 @@ for the full set of architectural decisions.
 
 ```sh
 pnpm install
-pnpm infra:up   # Postgres+pgvector, Redis, SeaweedFS — the only containerized services
-pnpm dev        # gateway + core + web, running natively for fast HMR
+pnpm infra:up                          # Postgres+pgvector, Redis, SeaweedFS
+pnpm --filter @usavvy/core db:migrate  # applies the users/email_verification_tokens schema
+pnpm dev                               # gateway + core + web, running natively for fast HMR
 ```
 
 Then open `http://localhost:5173` — the home page calls `gateway`'s `/health`, which in
@@ -57,6 +58,19 @@ NOTIFICATION_ADAPTER=mock
 ```
 
 See each service's `src/config.ts` for its full schema and defaults.
+
+**Two auth-related values need attention beyond the defaults:**
+
+- `JWT_SECRET` (on both `core` and `gateway` — same value on both, `core` signs, `gateway`
+  verifies) has a **dev-only default** committed in both services' `config.ts`. It is
+  unsafe for any non-local deployment — override it (identically on both services)
+  before deploying anywhere.
+- `GOOGLE_CLIENT_ID` (`core`, server-side) and `VITE_GOOGLE_CLIENT_ID` (`apps/web`,
+  client-side) have **no default at all**, unlike every other value above. Google
+  sign-in needs a real registered OAuth client even in dev — there's no `mock` adapter
+  for a client-facing identity flow. Leave both unset and the email+password path works
+  fully; the Google Sign-In button simply doesn't render, and `/auth/google` returns a
+  clear `503` if called anyway.
 
 ## Project structure
 

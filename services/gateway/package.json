@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@fastify/cors": "^11.3.0",
+    "@fastify/jwt": "^10.2.1",
     "@usavvy/config": "workspace:*",
     "@usavvy/service-kernel": "workspace:*",
     "@usavvy/shared-types": "workspace:*",

@@ -3,10 +3,15 @@ import { createLogger, pingDb, pingStorage } from "@usavvy/service-kernel";
 import { loadCoreConfig } from "./config.js";
 import { buildApp } from "./app.js";
 import { createNotificationAdapter } from "./modules/notification/index.js";
+import { createDb } from "./db/client.js";
 
 const config = loadCoreConfig(process.env);
 const logger = createLogger("core");
 const sql = postgres(config.databaseUrl);
+
+// Wraps the same `sql` instance above — not a second connection. Story 1.1 onward
+// imports this instance rather than each module opening its own Drizzle client.
+export const db = createDb(sql);
 
 // Bound here, at boot, from config (AD-12) — Story 1.1 imports this instance rather
 // than constructing its own adapter.
@@ -15,6 +20,11 @@ export const notificationPort = createNotificationAdapter(config.notificationAda
 const app = buildApp({
   checkDb: () => pingDb(() => sql`select 1`, logger),
   checkStorage: () => pingStorage(config.storageEndpoint, logger),
+  db,
+  notificationPort,
+  jwtSecret: config.jwtSecret,
+  googleClientId: config.googleClientId,
+  logger,
 });
 
 app.listen({ port: config.port, host: "0.0.0.0" }, (err, address) => {

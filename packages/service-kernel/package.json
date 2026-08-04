@@ -9,6 +9,10 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
+  "dependencies": {
+    "@usavvy/shared-types": "workspace:*",
+    "fastify": "^5.11.2"
+  },
   "devDependencies": {
     "@types/node": "^26.1.2",
     "typescript": "^6.0.3",

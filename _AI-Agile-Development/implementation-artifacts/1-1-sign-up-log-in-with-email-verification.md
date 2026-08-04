@@ -24,34 +24,34 @@ so that I can securely access my account before starting to learn.
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1: Wire Drizzle for real — `users` + `email_verification_tokens` schema** (AC: #1, #2, #3)
-  - [ ] `services/core/src/db/schema.ts`: Drizzle table definitions (see Dev Notes for exact columns)
-  - [ ] `services/core/drizzle.config.ts` pointing at the schema file and a `services/core/drizzle/` migrations output folder; `db:generate`/`db:migrate` scripts in `services/core/package.json` (migration client must use `postgres(url, { max: 1 })` per Drizzle's own postgres-js guidance — a pooled connection breaks migrations)
-  - [ ] `services/core/src/db/client.ts`: the real Drizzle client (`drizzle(sql)` wrapping the existing `postgres` instance `main.ts` already creates) — replace the raw-SQL-ping-only usage with a shared `sql`/`db` pair main.ts exports for the rest of the service to import, rather than each module opening its own connection
-  - [ ] Document the one new manual setup step in `README.md`'s quick start: `pnpm --filter @usavvy/core db:migrate`, run once after `docker compose up` and before `pnpm dev`
+- [x] **Task 1: Wire Drizzle for real — `users` + `email_verification_tokens` schema** (AC: #1, #2, #3)
+  - [x] `services/core/src/db/schema.ts`: Drizzle table definitions (see Dev Notes for exact columns)
+  - [x] `services/core/drizzle.config.ts` pointing at the schema file and a `services/core/drizzle/` migrations output folder; `db:generate`/`db:migrate` scripts in `services/core/package.json` (migration client must use `postgres(url, { max: 1 })` per Drizzle's own postgres-js guidance — a pooled connection breaks migrations)
+  - [x] `services/core/src/db/client.ts`: the real Drizzle client (`drizzle(sql)` wrapping the existing `postgres` instance `main.ts` already creates) — replace the raw-SQL-ping-only usage with a shared `sql`/`db` pair main.ts exports for the rest of the service to import, rather than each module opening its own connection
+  - [x] Document the one new manual setup step in `README.md`'s quick start: `pnpm --filter @usavvy/core db:migrate`, run once after `docker compose up` and before `pnpm dev`
 
-- [ ] **Task 2: RBAC seed data + `can()` guard** (AD-7 — foundational; exercised by AC #1–#3 via `/me`)
-  - [ ] `packages/config/src/rbac.ts`: `Role` enum (`superadmin`/`admin`/`mentor`/`student`), a versioned `PERMISSION_MATRIX` seed object, and one `can(role, action, resource)` guard function — this is the *only* place an authorization decision is made, per AD-7's "one guard" rule
-  - [ ] Seed the matrix with only what this story actually exercises: every role can `read` the `self` resource (`/me`). Do not fabricate unused permission entries for features that don't exist yet — later stories extend this matrix as their own protected resources land
-  - [ ] New user defaults to `student` (no signup flow grants any other role)
+- [x] **Task 2: RBAC seed data + `can()` guard** (AD-7 — foundational; exercised by AC #1–#3 via `/me`)
+  - [x] `packages/config/src/rbac.ts`: `Role` enum (`superadmin`/`admin`/`mentor`/`student`), a versioned `PERMISSION_MATRIX` seed object, and one `can(role, action, resource)` guard function — this is the *only* place an authorization decision is made, per AD-7's "one guard" rule
+  - [x] Seed the matrix with only what this story actually exercises: every role can `read` the `self` resource (`/me`). Do not fabricate unused permission entries for features that don't exist yet — later stories extend this matrix as their own protected resources land
+  - [x] New user defaults to `student` (no signup flow grants any other role)
 
-- [ ] **Task 3: Password hashing + JWT plugin wiring** (AC: #1, #2, #3)
-  - [ ] `argon2` (argon2id, the 2026 OWASP-recommended default for a new project — no legacy bcrypt deployment to preserve) for `password_hash`; never store or log a raw password
-  - [ ] Register `@fastify/jwt` in **both** `core` (signs access+refresh on successful auth) and `gateway` (verifies the client-presented access token) — both read the same `JWT_SECRET` from their own config (AD-12), matching the "shared symmetric secret" the architecture's single-hop-verification design requires. Access token TTL 15m, refresh TTL 30d
-  - [ ] `JWT_SECRET` gets a dev-only default (documented in `README.md`, clearly flagged as unsafe for any non-local deployment) — same pattern as `DATABASE_URL`'s dev default, not a config gap
-  - [ ] Refresh token: store only its hash (`argon2` or a plain SHA-256 — a refresh token isn't a low-entropy secret being brute-forced the way a password is, so SHA-256 is sufficient and cheaper) in `users.refresh_token_hash`, single active refresh token per user (MVP scope — no multi-device session list; note this as a scope decision, not an oversight), rotated on every use via `POST /auth/refresh`
+- [x] **Task 3: Password hashing + JWT plugin wiring** (AC: #1, #2, #3)
+  - [x] `argon2` (argon2id, the 2026 OWASP-recommended default for a new project — no legacy bcrypt deployment to preserve) for `password_hash`; never store or log a raw password
+  - [x] Register `@fastify/jwt` in **both** `core` (signs access+refresh on successful auth) and `gateway` (verifies the client-presented access token) — both read the same `JWT_SECRET` from their own config (AD-12), matching the "shared symmetric secret" the architecture's single-hop-verification design requires. Access token TTL 15m, refresh TTL 30d
+  - [x] `JWT_SECRET` gets a dev-only default (documented in `README.md`, clearly flagged as unsafe for any non-local deployment) — same pattern as `DATABASE_URL`'s dev default, not a config gap
+  - [x] Refresh token: store only its hash (`argon2` or a plain SHA-256 — a refresh token isn't a low-entropy secret being brute-forced the way a password is, so SHA-256 is sufficient and cheaper) in `users.refresh_token_hash`, single active refresh token per user (MVP scope — no multi-device session list; note this as a scope decision, not an oversight), rotated on every use via `POST /auth/refresh`
 
-- [ ] **Task 4: `services/core`'s `auth` module — signup, login, verify-email, refresh, Google OAuth** (AC: #1, #2, #3)
-  - [ ] `POST /auth/signup` `{ email, password }` → reject if email already registered; hash password; insert `users` row (`role: "student"`, `email_verified_at: null`); generate a random verification token (32 bytes, base64url), store only its SHA-256 hash + a 24h expiry in `email_verification_tokens`; send the **raw** token in a verification link via `notificationPort.sendEmail(...)` (import the `notificationPort` instance `main.ts` already exports — do not construct a second adapter instance, `main.ts`'s own comment says as much); return `201` with `{ userId }`, no tokens issued yet (unverified)
-  - [ ] `POST /auth/login` `{ email, password }` → verify password via `argon2.verify`; if `email_verified_at` is null, return a `403` with a specific `error.code` (e.g. `EMAIL_NOT_VERIFIED`) per the central error-mapper shape (`{ error: { code, message, details? } }`, Consistency Conventions) — never a generic 401; on success issue access+refresh JWTs (`role` claim included, since `gateway`'s trusted header forwards it)
-  - [ ] `POST /auth/verify-email` `{ token }` → hash the incoming token, look up by hash, reject if not found/expired/already used; mark `users.email_verified_at = now()` and the token row `used_at = now()` in one transaction; issue access+refresh JWTs so the learner lands verified *and* logged in, not just verified-but-logged-out
-  - [ ] `POST /auth/refresh` `{ refreshToken }` → verify against the stored hash, reject if mismatched (the account's single active refresh token was already rotated/revoked); issue a new access+refresh pair, overwrite the stored hash (rotation)
-  - [ ] `POST /auth/google` `{ idToken }` → verify via `google-auth-library`'s `OAuth2Client.verifyIdToken({ idToken, audience: GOOGLE_CLIENT_ID })`; find user by `google_id`, else by matching `email` (link the Google account to an existing email+password account rather than creating a duplicate), else create new (`email_verified_at: now()` — pre-verified per AC #2, `password_hash: null`); issue tokens directly, no separate login step
-  - [ ] `GOOGLE_CLIENT_ID` has **no dev default** (unlike every other config value in this codebase so far) — a real Google Cloud OAuth client must be registered to exercise this path at all, even in dev, since it's a client-facing identity flow rather than a generation/voice/notification call that a `mock` adapter can stand in for. If unset, `/auth/google` returns a clear `503`-with-explanation rather than crashing at boot or on first call (AD-17) — document this in `README.md` next to `JWT_SECRET`
+- [x] **Task 4: `services/core`'s `auth` module — signup, login, verify-email, refresh, Google OAuth** (AC: #1, #2, #3)
+  - [x] `POST /auth/signup` `{ email, password }` → reject if email already registered; hash password; insert `users` row (`role: "student"`, `email_verified_at: null`); generate a random verification token (32 bytes, base64url), store only its SHA-256 hash + a 24h expiry in `email_verification_tokens`; send the **raw** token in a verification link via `notificationPort.sendEmail(...)` (import the `notificationPort` instance `main.ts` already exports — do not construct a second adapter instance, `main.ts`'s own comment says as much); return `201` with `{ userId }`, no tokens issued yet (unverified)
+  - [x] `POST /auth/login` `{ email, password }` → verify password via `argon2.verify`; if `email_verified_at` is null, return a `403` with a specific `error.code` (e.g. `EMAIL_NOT_VERIFIED`) per the central error-mapper shape (`{ error: { code, message, details? } }`, Consistency Conventions) — never a generic 401; on success issue access+refresh JWTs (`role` claim included, since `gateway`'s trusted header forwards it)
+  - [x] `POST /auth/verify-email` `{ token }` → hash the incoming token, look up by hash, reject if not found/expired/already used; mark `users.email_verified_at = now()` and the token row `used_at = now()` in one transaction; issue access+refresh JWTs so the learner lands verified *and* logged in, not just verified-but-logged-out
+  - [x] `POST /auth/refresh` `{ refreshToken }` → verify against the stored hash, reject if mismatched (the account's single active refresh token was already rotated/revoked); issue a new access+refresh pair, overwrite the stored hash (rotation)
+  - [x] `POST /auth/google` `{ idToken }` → verify via `google-auth-library`'s `OAuth2Client.verifyIdToken({ idToken, audience: GOOGLE_CLIENT_ID })`; find user by `google_id`, else by matching `email` (link the Google account to an existing email+password account rather than creating a duplicate), else create new (`email_verified_at: now()` — pre-verified per AC #2, `password_hash: null`); issue tokens directly, no separate login step
+  - [x] `GOOGLE_CLIENT_ID` has **no dev default** (unlike every other config value in this codebase so far) — a real Google Cloud OAuth client must be registered to exercise this path at all, even in dev, since it's a client-facing identity flow rather than a generation/voice/notification call that a `mock` adapter can stand in for. If unset, `/auth/google` returns a clear `503`-with-explanation rather than crashing at boot or on first call (AD-17) — document this in `README.md` next to `JWT_SECRET`
 
-- [ ] **Task 5: `services/core`'s `users` module — `/me`** (supports AC #1–#3: the "am I logged in and verified" check every later protected page will reuse)
-  - [ ] `GET /me` reads the trusted `x-user-id`/`x-user-role` headers `gateway` sets (never re-verifies the JWT itself, per AD-7) and returns `{ id, email, emailVerified, role }` for the resolved user, gated through `can(role, "read", "self")` from Task 2
-  - [ ] If the trusted headers are absent (a request that somehow reached `core` without going through `gateway`'s preHandler — shouldn't happen given `core` isn't publicly bound, but AD-17 forbids assuming a guarantee an interface doesn't state), return `401`, not a crash
+- [x] **Task 5: `services/core`'s `users` module — `/me`** (supports AC #1–#3: the "am I logged in and verified" check every later protected page will reuse)
+  - [x] `GET /me` reads the trusted `x-user-id`/`x-user-role` headers `gateway` sets (never re-verifies the JWT itself, per AD-7) and returns `{ id, email, emailVerified, role }` for the resolved user, gated through `can(role, "read", "self")` from Task 2
+  - [x] If the trusted headers are absent (a request that somehow reached `core` without going through `gateway`'s preHandler — shouldn't happen given `core` isn't publicly bound, but AD-17 forbids assuming a guarantee an interface doesn't state), return `401`, not a crash
 
 - [ ] **Task 6: `services/gateway` — JWT verification + trusted-header forwarding + `/auth/*` proxy** (AC: #1, #2, #3; this is the first story to give `gateway` an actual authorization responsibility, not just pass-through health aggregation)
   - [ ] A `preHandler` hook (applied to `/me` and any future protected route, **not** to `/auth/*` — those are pre-authentication by definition) that calls `request.jwtVerify()`; on failure, returns `401` via the central error-mapper shape rather than letting `@fastify/jwt`'s default error surface raw
@@ -202,4 +202,48 @@ Claude Sonnet 5
 
 ### Completion Notes List
 
+- **Tasks 1–5 (backend: Drizzle, RBAC, JWT, auth, users):** `db.transaction()` used for `verifyEmail` (mark-used + mark-verified atomically). Auth business logic in `service.ts` stays Fastify-free (testable directly against the real Postgres container, same integration-test philosophy as Story 1.0's `db.test.ts`); JWT sign/verify lives in `routes.ts` since it needs the `app.jwt` decorator. Added a shared `AppError`/`registerErrorHandler` to `packages/service-kernel` and an `ErrorEnvelope`/`MeResponse`/`AuthSessionResponse` DTO set to `packages/shared-types` — genuinely cross-service contracts (every service's error shape; `/me` and session responses gateway proxies verbatim), not story-local additions. `noUncheckedIndexedAccess` (root tsconfig) required explicit undefined-checks on every `.returning()` call — caught at typecheck time, not runtime. 96 tests green across the touched workspaces (up from 54 after Story 1.0), `tsc --noEmit`/`eslint .` clean.
+
 ### File List
+
+- `packages/shared-types/src/errors.ts` (new — `ErrorEnvelope`)
+- `packages/shared-types/src/auth.ts` (new — `MeResponse`, `AuthSessionResponse`)
+- `packages/shared-types/src/index.ts` (updated — barrel exports)
+- `packages/service-kernel/package.json` (updated — `fastify`, `@usavvy/shared-types` deps)
+- `packages/service-kernel/src/errors.ts` (new — `AppError`, `registerErrorHandler`)
+- `packages/service-kernel/src/index.ts` (updated — barrel exports)
+- `packages/config/src/rbac.ts` (new — `Role`, `PERMISSION_MATRIX`, `can()`)
+- `packages/config/src/index.ts` (updated — barrel exports)
+- `packages/config/tests/rbac.test.ts` (new)
+- `services/core/package.json` (updated — `@fastify/jwt`, `argon2`, `drizzle-kit`, `google-auth-library`; `db:generate`/`db:migrate` scripts)
+- `services/core/drizzle.config.ts` (new)
+- `services/core/drizzle/0000_fixed_captain_stacy.sql` (new — generated migration)
+- `services/core/src/db/schema.ts` (new — `users`, `email_verification_tokens`)
+- `services/core/src/db/client.ts` (new — `createDb`)
+- `services/core/src/db/migrate.ts` (new — migration CLI script)
+- `services/core/src/config.ts` (updated — `JWT_SECRET`, `GOOGLE_CLIENT_ID`)
+- `services/core/src/main.ts` (updated — wires `db`, passes new deps to `buildApp`)
+- `services/core/src/app.ts` (updated — registers `@fastify/jwt`, error handler, auth/users routes)
+- `services/core/src/modules/auth/tokens.ts` (new)
+- `services/core/src/modules/auth/validation.ts` (new — `parseOrThrow`)
+- `services/core/src/modules/auth/service.ts` (new — signup/login/verifyEmail/refreshSession/googleAuth)
+- `services/core/src/modules/auth/routes.ts` (new — HTTP layer, JWT issuance)
+- `services/core/src/modules/auth/index.ts` (updated — real barrel, replaces shell)
+- `services/core/src/modules/users/service.ts` (new — `getMe`)
+- `services/core/src/modules/users/routes.ts` (new — `GET /me`)
+- `services/core/src/modules/users/index.ts` (updated — real barrel, replaces shell)
+- `services/core/tests/config.test.ts` (updated — new config fields)
+- `services/core/tests/health.test.ts` (updated — uses new `createTestAppDeps` helper)
+- `services/core/tests/testHelpers.ts` (new)
+- `services/core/tests/db/schema.test.ts` (new)
+- `services/core/tests/modules/auth/tokens.test.ts` (new)
+- `services/core/tests/modules/auth/service.test.ts` (new)
+- `services/core/tests/modules/auth/routes.test.ts` (new)
+- `services/core/tests/modules/users/service.test.ts` (new)
+- `services/core/tests/modules/users/routes.test.ts` (new)
+- `services/gateway/package.json` (updated — `@fastify/jwt` dep)
+- `services/gateway/src/config.ts` (updated — `JWT_SECRET`)
+- `services/gateway/tests/config.test.ts` (updated — new config field)
+- `apps/web/package.json` (updated — `@react-oauth/google`, `radix-ui`, `react-router-dom` deps; not in original story task list, added as the mechanical minimum needed for Task 7's multi-page routing — noted here rather than silently)
+- `README.md` (updated — migration quick-start step, `JWT_SECRET`/`GOOGLE_CLIENT_ID` docs)
+- `infra/docker-compose.yml`, `services/core/src/config.ts` DATABASE_URL, `services/core/tests/config.test.ts` (port 5433 fix — landed in the prior commit, before this story's dev work began, not part of this story's own changes)
