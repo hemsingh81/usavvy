@@ -22,11 +22,11 @@ so that I can verify the environment is correctly set up before building real fe
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1: Monorepo scaffold** (AC: #2)
-  - [ ] Init pnpm workspace at repo root (`pnpm-workspace.yaml` listing `apps/*`, `packages/*`)
-  - [ ] Create `packages/shared-types` (empty package, TS project, will hold DTOs/event contracts later)
-  - [ ] Create `packages/config` (empty package, will hold the typed `zod`-validated config loader — AD-12)
-  - [ ] Root `tsconfig.json` with strict mode on (AD-9); each package/app extends it
+- [x] **Task 1: Monorepo scaffold** (AC: #2)
+  - [x] Init pnpm workspace at repo root (`pnpm-workspace.yaml` listing `apps/*`, `packages/*`)
+  - [x] Create `packages/shared-types` (TS project; seeded with the `HealthStatus` zod schema/type, the first real cross-app contract, rather than left fully empty)
+  - [x] Create `packages/config` (TS project; `loadServerConfig`/`loadWebConfig` zod-validated loaders built now since Tasks 2-4 need them immediately — env-agnostic, take `env` as a parameter, AD-12)
+  - [x] Root `tsconfig.json` with strict mode on (AD-9); each package/app extends it
 - [ ] **Task 2: `apps/api` skeleton** (AC: #1, #2)
   - [ ] Fastify 5.x + TypeScript 6.x app, listens on port `3001` by default (configurable via `packages/config`)
   - [ ] Create empty module-shell folders under `apps/api/src/modules/` — per the Structural Seed's module list (informed by AD-14 for the entity-owning modules): `auth`, `users`, `courses`, `ingestion`, `board-orchestration`, `generation`, `voice`, `notification`, `plans-progress`, `cohorts`, `assignments`, `engagement`, `admin`, `shared-kernel` (config, logging, db, event-bus, PubSubPort, JobQueuePort live here)
@@ -126,6 +126,10 @@ No alignment conflicts possible — this is the first story, so there is no exis
 - [Source: `_AI-Agile-Development/planning-artifacts/architecture/architecture-USavvy-2026-08-04/ARCHITECTURE-SPINE.md` — AD-1, AD-8, AD-9, AD-11, AD-12, AD-14, AD-17, Stack table, Structural Seed]
 - [Source: `_AI-Agile-Development/planning-artifacts/ux-designs/ux-USavvy-2026-08-04/EXPERIENCE.md` — Foundation (Radix UI primitives assumption, flagged `[ASSUMPTION]` — not required for this story, but note it before `apps/web`'s component base solidifies in later stories)]
 
+## Change Log
+
+- 2026-08-04: Checkpoint 1 — monorepo scaffold (pnpm workspace, root tsconfig, `packages/shared-types`, `packages/config`), all tests green.
+
 ## Dev Agent Record
 
 ### Agent Model Used
@@ -134,4 +138,22 @@ No alignment conflicts possible — this is the first story, so there is no exis
 
 ### Completion Notes List
 
+- **Checkpoint 1 (Task 1 — monorepo scaffold):** TypeScript pinned to `^6.0.3` (latest stable 6.x), not the newly-stable `7.x` (native-compiler rewrite) — honors the architecture spine's explicit "6.x" pin rather than opportunistically jumping a major the spine never evaluated. ESLint/typescript-eslint/@types/node/concurrently pinned to their actual current npm registry versions (verified live via `npm view`, not guessed) since the spine didn't pin these itself. `packages/shared-types` seeded with a real `HealthStatus` schema (not left empty) since it's the first genuine cross-app contract `/health` needs. `packages/config` built out fully now (not deferred) since Tasks 2-4 all depend on it existing.
+
 ### File List
+
+- `pnpm-workspace.yaml` (new)
+- `package.json` (new)
+- `tsconfig.json` (new)
+- `packages/shared-types/package.json` (new)
+- `packages/shared-types/tsconfig.json` (new)
+- `packages/shared-types/src/health.ts` (new)
+- `packages/shared-types/src/index.ts` (new)
+- `packages/shared-types/tests/health.test.ts` (new)
+- `packages/config/package.json` (new)
+- `packages/config/tsconfig.json` (new)
+- `packages/config/src/server.ts` (new)
+- `packages/config/src/web.ts` (new)
+- `packages/config/src/index.ts` (new)
+- `packages/config/tests/server.test.ts` (new)
+- `packages/config/tests/web.test.ts` (new)

@@ -14,14 +14,14 @@
     "prepare": "husky"
   },
   "devDependencies": {
-    "@eslint/js": "^9.39.0",
-    "@types/node": "^24.10.1",
-    "concurrently": "^9.2.1",
-    "eslint": "^9.39.0",
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.1.2",
+    "concurrently": "^10.0.4",
+    "eslint": "^10.8.0",
     "eslint-plugin-import": "^2.32.0",
     "husky": "^9.1.7",
-    "typescript": "^5.9.3",
-    "typescript-eslint": "^8.46.4"
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.66.0"
   },
   "packageManager": "pnpm@11.20.0"
 }

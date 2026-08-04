@@ -37,6 +37,7 @@ pnpm-debug.log*
 .pnpm-store/
 .turbo/
 .cache/
+*.tsbuildinfo
 
 # Python
 __pycache__/
