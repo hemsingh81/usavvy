@@ -6,7 +6,7 @@
     "node": ">=24"
   },
   "scripts": {
-    "dev": "concurrently -n api,web -c blue,green \"pnpm --filter @usavvy/api dev\" \"pnpm --filter @usavvy/web dev\"",
+    "dev": "concurrently -n gateway,core,web -c blue,magenta,green \"pnpm --filter @usavvy/gateway dev\" \"pnpm --filter @usavvy/core dev\" \"pnpm --filter @usavvy/web dev\"",
     "build": "pnpm -r build",
     "test": "pnpm -r test",
     "lint": "eslint .",

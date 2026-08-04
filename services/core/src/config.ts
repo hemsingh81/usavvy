@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { baseServiceEnvSchema } from "@usavvy/config";
 
 /**
  * AD-1/AD-12: this is the one place the mock/real binding for NotificationPort (and
@@ -7,25 +8,26 @@ import { z } from "zod";
  */
 const notificationAdapterSchema = z.enum(["mock"]);
 
-const serverEnvSchema = z.object({
+const coreEnvSchema = baseServiceEnvSchema.extend({
   PORT: z.coerce.number().int().positive().default(3001),
+  DATABASE_URL: z.string().min(1).default("postgres://usavvy:usavvy@localhost:5432/usavvy_core"),
+  STORAGE_ENDPOINT: z.url().default("http://localhost:8333"),
   NOTIFICATION_ADAPTER: notificationAdapterSchema.default("mock"),
 });
 
-export interface ServerConfig {
+export interface CoreConfig {
   port: number;
+  databaseUrl: string;
+  storageEndpoint: string;
   notificationAdapter: z.infer<typeof notificationAdapterSchema>;
 }
 
-/**
- * Validates and returns the backend's structural runtime config (AD-12: boot-time,
- * zod-validated, loaded once). Takes the raw env object as a parameter rather than
- * reading `process.env` itself, so this module stays environment-agnostic and testable.
- */
-export function loadServerConfig(env: Record<string, string | undefined>): ServerConfig {
-  const parsed = serverEnvSchema.parse(env);
+export function loadCoreConfig(env: Record<string, string | undefined>): CoreConfig {
+  const parsed = coreEnvSchema.parse(env);
   return {
     port: parsed.PORT,
+    databaseUrl: parsed.DATABASE_URL,
+    storageEndpoint: parsed.STORAGE_ENDPOINT,
     notificationAdapter: parsed.NOTIFICATION_ADAPTER,
   };
 }

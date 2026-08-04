@@ -1,0 +1,26 @@
+{
+  "name": "@usavvy/gateway",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.3.0",
+    "@usavvy/config": "workspace:*",
+    "@usavvy/service-kernel": "workspace:*",
+    "@usavvy/shared-types": "workspace:*",
+    "fastify": "^5.11.2",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.2",
+    "tsx": "^4.23.5",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
+  }
+}

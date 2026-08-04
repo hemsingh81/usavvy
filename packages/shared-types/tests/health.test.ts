@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { healthStatusSchema } from "../src/health.js";
+import { healthStatusSchema, gatewayHealthSchema } from "../src/health.js";
 
 describe("healthStatusSchema", () => {
   it("accepts a valid ok status", () => {
@@ -18,5 +18,24 @@ describe("healthStatusSchema", () => {
 
   it("rejects a payload missing required fields", () => {
     expect(() => healthStatusSchema.parse({ status: "ok" })).toThrow();
+  });
+});
+
+describe("gatewayHealthSchema", () => {
+  it("accepts core reporting a full HealthStatus", () => {
+    const parsed = gatewayHealthSchema.parse({
+      gateway: { status: "ok" },
+      core: { status: "ok", db: true, storage: true },
+    });
+    expect(parsed.core).toEqual({ status: "ok", db: true, storage: true });
+  });
+
+  it("accepts core reporting unreachable", () => {
+    const parsed = gatewayHealthSchema.parse({ gateway: { status: "ok" }, core: { status: "unreachable" } });
+    expect(parsed.core).toEqual({ status: "unreachable" });
+  });
+
+  it("rejects an unknown core status literal", () => {
+    expect(() => gatewayHealthSchema.parse({ gateway: { status: "ok" }, core: { status: "offline" } })).toThrow();
   });
 });

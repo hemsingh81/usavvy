@@ -3,7 +3,7 @@ name: 'Usavvy'
 type: architecture-spine
 purpose: build-substrate
 altitude: initiative
-paradigm: 'modular layering + hexagonal ports-and-adapters at every external boundary'
+paradigm: 'microservices, each internally hexagonal ports-and-adapters at every external boundary'
 scope: 'Whole-system invariants for Usavvy (initiative altitude) — the AI-avatar interactive learning platform: self-paced / planned / cohort learning, the Interactive Board (Epic 3), generation + voice pipeline, ingestion, assignments/evaluation, engagement, back office.'
 status: final
 created: '2026-08-04'
@@ -17,15 +17,17 @@ companions: []
 
 ## Design Paradigm
 
-Modular feature-module layering internally; hexagonal ports-and-adapters at every external integration boundary (LLM generation, TTS/ASR, retrieval, object storage, notifications, realtime pub/sub, async jobs). Feature modules live under `apps/api/src/modules/*`; each depends on a shared kernel (config, logging, db, event bus) and on **ports**, never on a concrete adapter or on another module's internals.
+**Microservices** — each backend bounded context (per the ownership table, AD-14) is its own independently-deployable service under `services/*`, with its own process, port, and database. A `gateway` service is the single entry point for `apps/web` (BFF: JWT verification, request routing/aggregation, CORS). Internally, each service still applies hexagonal ports-and-adapters at every external integration boundary (LLM generation, TTS/ASR, retrieval, object storage, notifications, realtime pub/sub, async jobs) — a service depends on `packages/service-kernel` (config, logging, db, Redis pub/sub client) and on **ports**, never on a concrete adapter. Adopted 2026-08-04 (pivoted from an initially-planned modular monolith) specifically so high-load capabilities — `generation`, `voice`, `board-orchestration` — can scale and deploy independently of low-load ones, per the user's explicit request for a project structure that scales and handles load without tight coupling.
+
+Cross-service communication is never a TypeScript import — see AD-13's inter-service rule. This is the microservices-specific tightening of the module-boundary principle a modular monolith enforces only by lint convention (an `index.ts`-only import rule); here it's structurally impossible to violate, since there is no shared process to import across.
 
 ## Invariants & Rules
 
-### AD-1 — Modular layering + hexagonal ports-and-adapters
+### AD-1 — Microservices, each internally hexagonal (ports-and-adapters)
 
-- **Binds:** all backend modules; generation, voice, retrieval, storage, and notification integrations
-- **Prevents:** a module hard-depending on a specific vendor SDK, making swap (NFR-10, R-10) or config-driven behavior impossible
-- **Rule:** any module consuming generation, voice, retrieval, storage, or notification capability depends only on its Port interface (`GenerationPort`, `VoicePort`, `VectorStorePort`, `StoragePort`, `NotificationPort`). Concrete adapters (`generation/mock`, `generation/anthropic`, `voice/mock`, `storage/minio-compatible`, `notification/mock`, `vectorstore/pgvector`) implement a port and are wired in by config (AD-12) — never imported directly by a feature module. A `mock` adapter is the default binding for generation, voice, and notification until a real provider is configured. `VectorStorePort` calls carry a required metadata contract (`documentId`, `courseId`, `conceptId`, `chunkId`) defined in `packages/shared-types` — `ingestion` (writer) and `generation` (reader) share this contract rather than each inventing their own chunk-tagging scheme.
+- **Binds:** every `services/*` process; generation, voice, retrieval, storage, and notification integrations within each
+- **Prevents:** a service hard-depending on a specific vendor SDK, making swap (NFR-10, R-10) or config-driven behavior impossible; and any service reaching around another's HTTP API to call a vendor adapter it doesn't own
+- **Rule:** each backend bounded context is its own deployable service under `services/<name>` (list: `gateway`, `core` [auth/users], `courses`, `plans-progress`, `board-orchestration`, `ingestion`, `assignments`, `engagement`, `cohorts`, `generation`, `voice`, `notification`, `admin` — 1:1 with AD-14's ownership rows, plus `gateway` as the BFF entry point). Within a service, any code consuming generation, voice, retrieval, storage, or notification capability depends only on its Port interface (`GenerationPort`, `VoicePort`, `VectorStorePort`, `StoragePort`, `NotificationPort`). Concrete adapters (`generation/mock`, `generation/anthropic`, `voice/mock`, `storage/minio-compatible`, `notification/mock`, `vectorstore/pgvector`) implement a port and are wired in by config (AD-12) — never imported directly. A `mock` adapter is the default binding for generation, voice, and notification until a real provider is configured. `VectorStorePort` calls carry a required metadata contract (`documentId`, `courseId`, `conceptId`, `chunkId`) defined in `packages/shared-types` — `ingestion` (writer) and `generation` (reader) share this contract via their HTTP contract rather than each inventing their own chunk-tagging scheme. **Scaffold-on-demand:** only `gateway` and `core` are built as part of Story 1.0; every other service's folder is created when its owning epic starts (same "don't pre-build for stories that haven't started" convention Story 1.0 already applies to individual module code) — a `services/*` directory that doesn't exist yet simply hasn't had its epic started.
 
 ### AD-2 — Generation caching, tiered routing, and rate-limiting are GenerationPort responsibilities
 
@@ -41,7 +43,7 @@ Modular feature-module layering internally; hexagonal ports-and-adapters at ever
 
 ### AD-4 — User-facing text: static copy vs. generated content are two distinct rules
 
-- **Binds:** `apps/web`, `apps/api` (UI copy, notifications, error messages) and `GenerationPort`/`VoicePort` (Beat narration, generated feedback)
+- **Binds:** `apps/web`, every `services/*` (UI copy, notifications, error messages) and `GenerationPort`/`VoicePort` (Beat narration, generated feedback)
 - **Prevents:** English text baked directly into components/templates, which would block adding Hindi + 2 more languages later without a rewrite (§3.3, NFR-12) — and conflating that static-string problem with the separate problem of "what language does the AI generate content in"
 - **Rule:** (a) *Static copy* — all user-facing UI/notification/error text resolves through a locale layer via lookup key; only a single English bundle ships at launch; no module concatenates or hardcodes a user-facing string inline. (b) *Generated content* — every `GenerationPort`/`VoicePort` call carries a required `locale`/`language` parameter, enforced at the port per AD-2/AD-3's pattern; a `generation` or `voice` engineer cannot ship a call site that omits it. Locale library and translation tooling are Deferred.
 
@@ -49,7 +51,7 @@ Modular feature-module layering internally; hexagonal ports-and-adapters at ever
 
 - **Binds:** Board streaming (FR-B-*), cohort live sessions (FR-G-9..17), narration audio delivery
 - **Prevents:** building a second, heavier realtime transport (WebRTC/media servers) nothing requires; a hard dependency on single-instance fan-out that would require a rewrite to meet NFR-3's "must scale horizontally to 10×"; and independently-built WS payloads drifting from each other or leaking internal fields
-- **Rule:** all realtime fan-out (Beat streaming, cohort board sync, chat, polls, live narration audio) goes over WebSocket, server-authoritative — no WebRTC in v1. Fan-out itself goes through a `PubSubPort`; the dev/default adapter is single-instance in-memory, and a Redis adapter is the sanctioned, config-only swap to reach NFR-3's horizontal-scale requirement — the port exists specifically so that swap needs no redesign. Every WS message type is a named, versioned contract defined in `packages/shared-types`, structurally distinct from internal domain-event/entity shapes — never a raw serialization of an internal `Beat`/`LearningSession` entity (this is how internal fields like model-routing tier or per-call cost stay out of client payloads). Narration audio streams progressively over the same Beat WebSocket channel with word-level timing (matching the PRD's own §19 direction and the NFR-B-4 ≤200ms drift budget) — it is never a `StoragePort`-hosted file the client fetches after the fact; `StoragePort` (AD-6) is for durable artifacts only (recordings, exports), never live narration.
+- **Rule:** all realtime fan-out (Beat streaming, cohort board sync, chat, polls, live narration audio) goes over WebSocket, server-authoritative — no WebRTC in v1. Fan-out itself goes through a `PubSubPort` backed by **Redis pub/sub, active from day one** (not deferred — the microservices pivot (AD-1) makes cross-process fan-out and cross-service domain-event delivery a day-one requirement, not a later-scale optimization; previously this was a Deferred single-instance→Redis swap, now there is no single instance to begin with). Every WS message type is a named, versioned contract defined in `packages/shared-types`, structurally distinct from internal domain-event/entity shapes — never a raw serialization of an internal `Beat`/`LearningSession` entity (this is how internal fields like model-routing tier or per-call cost stay out of client payloads). Narration audio streams progressively over the same Beat WebSocket channel with word-level timing (matching the PRD's own §19 direction and the NFR-B-4 ≤200ms drift budget) — it is never a `StoragePort`-hosted file the client fetches after the fact; `StoragePort` (AD-6) is for durable artifacts only (recordings, exports), never live narration.
 
 ### AD-6 — Object storage behind a StoragePort
 
@@ -61,19 +63,19 @@ Modular feature-module layering internally; hexagonal ports-and-adapters at ever
 
 - **Binds:** all authenticated routes and UI gating
 - **Prevents:** role/permission checks scattered as ad-hoc string comparisons across modules, roles hardcoded where they can't be extended without a code change, and an `admin` back-office feature (per-user permission overrides) being built against a data path `auth` never agreed to serve
-- **Rule:** roles are `SuperAdmin`, `Admin`, `Mentor`, `Student` (the PRD's Content-Ops and Admin/Moderation personas both map to `Admin`; split later only if their permission sets diverge materially). The role list and default permission matrix live in `packages/config` as versioned seed data; a user's assigned role(s) live in the DB. Every authorization check goes through one guard, `can(user, action, resource)`, evaluated purely from `role → permission matrix` — **no per-user/per-resource permission overrides exist in v1**; an admin UI must not be built assuming one until a follow-on AD adds it. Auth is JWT (access + refresh), custom-built, verified once in a single Fastify `preHandler` hook.
+- **Rule:** roles are `SuperAdmin`, `Admin`, `Mentor`, `Student` (the PRD's Content-Ops and Admin/Moderation personas both map to `Admin`; split later only if their permission sets diverge materially). The role list and default permission matrix live in `packages/config` as versioned seed data; a user's assigned role(s) live in the DB (`core`, per AD-14). Every authorization check goes through one guard, `can(user, action, resource)`, evaluated purely from `role → permission matrix` — **no per-user/per-resource permission overrides exist in v1**; an admin UI must not be built assuming one until a follow-on AD adds it. Auth is JWT (access + refresh), custom-built. **Under the microservices paradigm (AD-1), the JWT is verified exactly once, in `gateway`'s Fastify `preHandler` hook** — `gateway` then forwards a trusted internal identity header (user id + roles) to whichever downstream service it routes to, over the private docker network; downstream services trust that header rather than re-verifying the JWT on every hop. A service reachable only from `gateway` (never directly from `apps/web`) is how that trust boundary is enforced in dev — no downstream service binds its port to a public interface.
 
 ### AD-8 — Test structure mirrors source structure 1:1
 
-- **Binds:** `apps/web`, `apps/api`
+- **Binds:** `apps/web`, every `services/*`, `packages/*`
 - **Prevents:** tests drifting from the module boundaries they're meant to verify, making coverage gaps invisible
-- **Rule:** each app has a `tests/` tree that mirrors `src/` path-for-path (`tests/modules/x/y.test.ts` ↔ `src/modules/x/y.ts`). Vitest for unit/component, React Testing Library for FE components, Playwright for e2e.
+- **Rule:** each app/service/package has its own `tests/` tree that mirrors its own `src/` path-for-path (`tests/modules/x/y.test.ts` ↔ `src/modules/x/y.ts`) — never a shared cross-service test tree, matching the "no shared process" rule in AD-13. Vitest for unit/component, React Testing Library for FE components, Playwright for e2e.
 
 ### AD-9 — No dead code and no boundary violations, enforced mechanically
 
-- **Binds:** `apps/web`, `apps/api`, `packages/*`
-- **Prevents:** unused exports, unreachable branches, circular imports, stray adapter imports (AD-1), cross-module internal imports (AD-13), and hardcoded user-facing strings (AD-4) accumulating silently instead of failing the build
-- **Rule:** TypeScript `strict: true` everywhere; ESLint with `no-unused-vars`, `no-unreachable`, `import/no-cycle` as build-breaking errors; `eslint-plugin-boundaries` (or `import/no-restricted-paths`) configured to enforce AD-1's port-only imports and AD-13's module-boundary rule; an i18n lint rule flags string literals in JSX/user-facing paths that bypass AD-4's locale layer. A Husky pre-commit hook runs all of it. Backstopped by `bmad-code-review` at story time.
+- **Binds:** `apps/web`, every `services/*`, `packages/*`
+- **Prevents:** unused exports, unreachable branches, circular imports, stray adapter imports (AD-1), cross-service TypeScript imports (AD-13), and hardcoded user-facing strings (AD-4) accumulating silently instead of failing the build
+- **Rule:** TypeScript `strict: true` everywhere; ESLint with `no-unused-vars`, `no-unreachable`, `import/no-cycle` as build-breaking errors; `eslint-plugin-boundaries` (or `import/no-restricted-paths`) configured to enforce AD-1's port-only imports, each module-within-a-service's `index.ts`-only public surface, and — the microservices-specific rule — that no file under `services/<a>/src/**` may import anything from `services/<b>/src/**` for any `a != b`; the only legal ways to reach another service are an HTTP call via `packages/shared-types` DTOs or a subscribed Redis event (AD-13). This is checked at lint time as a defense-in-depth backstop — it's already structurally near-impossible since each service is a separate `package.json`/workspace with no dependency on another service's package. An i18n lint rule flags string literals in JSX/user-facing paths that bypass AD-4's locale layer. A Husky pre-commit hook runs all of it. Backstopped by `bmad-code-review` at story time.
 
 ### AD-10 — Entity naming disambiguates the PRD's "Session" collision
 
@@ -84,8 +86,8 @@ Modular feature-module layering internally; hexagonal ports-and-adapters at ever
 ### AD-11 — Local-only dev environment, no deployment target yet
 
 - **Binds:** local dev setup
-- **Prevents:** dev-environment sprawl (containerizing everything) that slows the fast-iteration loop the phased/visible-together goal depends on
-- **Rule:** one `docker-compose.yml` runs only stateful deps — Postgres+pgvector, the S3-compatible storage adapter. `apps/api` and `apps/web` run natively (`tsx watch`, `vite dev`) for fast HMR, not containerized in dev.
+- **Prevents:** dev-environment sprawl (containerizing every service) that slows the fast-iteration loop the phased/visible-together goal depends on; and the microservices pivot (AD-1) being read as "therefore containerize everything in dev," which would recreate exactly the Docker-rebuild-per-change loop this AD exists to avoid
+- **Rule:** one `docker-compose.yml` runs only stateful deps — Postgres+pgvector (one server, one database per service per AD-14), Redis (AD-5), the S3-compatible storage adapter. Every `services/*` process and `apps/web` run natively (`tsx watch`, `vite dev`) for fast HMR, not containerized in dev — real inter-service HTTP/Redis traffic over `localhost` ports proves the microservices communication pattern genuinely works, without paying a container-rebuild tax on every code change. `pnpm dev` runs all currently-scaffolded services plus `web` concurrently (extends as each new service is scaffolded per AD-1's scaffold-on-demand rule). Per-service independent container deployment is Deferred alongside the rest of the deployment topology.
 
 ### AD-12 — Config-driven runtime behavior: boot-time structure vs. live-toggleable flags
 
@@ -93,34 +95,46 @@ Modular feature-module layering internally; hexagonal ports-and-adapters at ever
 - **Prevents:** `process.env` reads scattered through business logic; untyped/unvalidated config; and an `admin` "toggle this feature" UI silently doing nothing because it was built against a config model that only reloads on restart
 - **Rule:** structural configuration (active adapter per port, RBAC seed data) is defined in `packages/config` with a `zod` schema, loaded and validated once at process boot — no module reads `process.env` directly. Operator-facing feature flags are a distinct, explicitly DB-backed sub-system: read on each request (or push-invalidated), still `zod`-validated, and exempt from the "loaded once at boot" clause — an `admin` toggle takes effect live, by design.
 
-### AD-13 — Module boundary, dependency direction, and state-fact propagation
+### AD-13 — Service boundary, inter-service communication, and state-fact propagation
 
-- **Binds:** `apps/api/src/modules/*`, `apps/web`, `packages/shared-types`
-- **Prevents:** one feature module reaching into another's internals or writing a foreign key into a table it doesn't own; the frontend importing backend implementation details; and a state change (mastery, submission-graded, session-completed) that other modules depend on being delivered only via a direct synchronous call that a listening module never subscribed to
-- **Rule:** see diagram. Cross-module communication happens only via a module's public service API (synchronous reads/commands) — never a direct import of another module's internal path, and never a schema write (FK, migration) into a table owned by another module (see AD-14's ownership map). Any state transition other modules are known to consume **must** additionally be published as a domain event on the shared bus, regardless of whether a synchronous call also occurred — event emission is not optional just because a caller also invoked a service method directly. `apps/web` imports only `packages/shared-types`, never anything under `apps/api/src`.
+- **Binds:** every `services/*`, `apps/web`, `packages/shared-types`, `packages/service-kernel`
+- **Prevents:** one service reaching into another's database or internal code, or writing a foreign key into a table it doesn't own; the frontend importing backend implementation details or any service's internals directly; and a state change (mastery, submission-graded, session-completed) that other services depend on being delivered only via a direct call that a listening service never subscribed to
+- **Rule:** see diagram. Cross-service communication happens only two ways: (a) a **synchronous HTTP call** to another service's public API using request/response DTOs defined in `packages/shared-types` (via a thin typed fetch wrapper, not raw `fetch` scattered per call site — this is what keeps a caller decoupled from HTTP mechanics, matching AD-1's port philosophy), or (b) a **published domain event on Redis pub/sub** (AD-5) — never a direct import of another service's code (there is none to import — separate `package.json`, separate process), and never a schema write (FK, migration, or even a read) into a database owned by another service (see AD-14's ownership map; enforced physically by database-per-service, not just convention). Any state transition other services are known to consume **must** additionally be published as a domain event on Redis, regardless of whether a synchronous call also occurred — event emission is not optional just because a caller also invoked the HTTP API directly. `apps/web` imports only `packages/shared-types` and talks HTTP/WebSocket only to `gateway`, never directly to any other service.
+- **Public surface, mechanically enforced:** within a service, code is further organized into `modules/<name>/` folders (mirroring the pre-pivot module-boundary discipline at a smaller scale — e.g. `core`'s own `auth` vs `notification` code should still stay decoupled from each other even though they now share a process); each module's *only* importable file from outside itself is its `index.ts` barrel. `shared-kernel` (now `packages/service-kernel`, a real shared package) is exempt — every service depends on it directly; it has no "owner" to be decoupled from. AD-9's `eslint-plugin-boundaries` config is where both the intra-service and inter-service (no `services/a` importing `services/b`) rules are actually enforced — see AD-9.
 
 ```mermaid
 graph TD
   Web["apps/web"] -->|imports types only| Shared["packages/shared-types"]
-  Web -->|HTTP / WebSocket| HTTP["apps/api :: HTTP+WS layer"]
-  HTTP --> Modules["Feature modules: auth, courses, board-orchestration,
-plans-progress, cohorts, assignments, engagement, admin, ingestion"]
-  Modules --> Kernel["shared-kernel: config, logging, db, event-bus"]
-  Modules --> Ports["Ports: GenerationPort, VoicePort, VectorStorePort,
+  Web -->|HTTP / WebSocket| GW["gateway :: JWT verify, routing, CORS"]
+  GW -->|HTTP + trusted identity header| Core["core :: auth/users, RBAC, Notification"]
+  GW -->|HTTP + trusted identity header| Others["courses, plans-progress, board-orchestration,
+ingestion, assignments, engagement, cohorts,
+generation, voice, notification, admin
+(scaffolded per-epic, AD-1)"]
+  Core --> Kernel["packages/service-kernel: config, logging, db, PubSubPort client"]
+  Others --> Kernel
+  GW --> Kernel
+  Core --> Ports["Ports: GenerationPort, VoicePort, VectorStorePort,
 StoragePort, NotificationPort, PubSubPort, JobQueuePort"]
+  Others --> Ports
   Ports --> Adapters["Adapters: mock / anthropic / s3-compatible / pgvector / pg-boss"]
-  Modules -->|contracts + state-fact events only| Shared
+  Core -.->|domain events| Redis[("Redis pub/sub")]
+  Others -.->|domain events| Redis
+  Redis -.->|subscribed events| Core
+  Redis -.->|subscribed events| Others
+  Core -->|contracts + DTOs only| Shared
+  Others -->|contracts + DTOs only| Shared
 ```
 
-### AD-14 — Entity ownership and cross-module data access
+### AD-14 — Entity ownership and database-per-service
 
-- **Binds:** every module that reads or writes a shared ERD entity
-- **Prevents:** two modules each believing they own the same entity (duplicate tables, duplicate writers), or a module reaching around AD-13 by writing a foreign key into a table another module owns
-- **Rule:** every ERD entity has exactly one owning module (table below). Any other module accesses it only through the owner's public service API or subscribed domain events — never a direct schema reference or FK into a table it doesn't own. `COHORT_SESSION` references the canonical "current beat" pointer owned by `board-orchestration` (via `LEARNING_SESSION`/`BEAT`), it does not maintain its own parallel playback state.
+- **Binds:** every service that reads or writes a shared ERD entity
+- **Prevents:** two services each believing they own the same entity (duplicate tables, duplicate writers), or a service reaching around AD-13 by writing a foreign key into a table another service owns
+- **Rule:** every ERD entity has exactly one owning service (table below), and that service's database is the *only* database that entity's table lives in — **database-per-service**: each service gets its own Postgres database (schema-level isolation; one shared Postgres server container in dev for resource economy — a separate physical server per service is a Deferred infra swap, not a code change). Any other service accesses an entity it doesn't own only through the owner's HTTP API or a subscribed domain event (AD-13) — never a direct schema reference, cross-database query, or FK into a table it doesn't own. `COHORT_SESSION` references the canonical "current beat" pointer owned by `board-orchestration` (via `LEARNING_SESSION`/`BEAT`) through that service's API, it does not maintain its own parallel playback state or a local copy of `board-orchestration`'s tables.
 
-| Entity | Owning module |
+| Entity | Owning service |
 | --- | --- |
-| User, LearnerProfile, Notification | auth / users |
+| User, LearnerProfile, Notification | core (auth/users) |
 | Enrollment, Course, Module, Topic, Concept | courses |
 | LearningPlan, PlannedSession, ConceptProgress | plans-progress |
 | LearningSession, Beat, SessionEvent | board-orchestration |
@@ -177,15 +191,18 @@ StoragePort, NotificationPort, PubSubPort, JobQueuePort"]
 | Vitest / React Testing Library / Playwright | latest stable |
 | S3-compatible object storage (dev) | SeaweedFS (actively maintained; MinIO's OSS edition was discontinued in the lead-up to this spine and is not a safe pin — swap is config-only via `StoragePort`, AD-6) |
 | pg-boss | latest stable (Postgres-native job queue, AD-15) |
+| Redis | latest stable (7.x) — `PubSubPort` adapter, active from day one (AD-5); free/self-hosted via `docker-compose` |
 
 ## Structural Seed
+
+Every `modules/<name>/` folder *within* a service exposes exactly one public entry point, `index.ts`; everything else inside it is private to that module (AD-13). Every `services/<name>` is its own workspace package (own `package.json`, own `tests/` mirroring its own `src/` 1:1 per AD-8) — there is no shared backend workspace to reach across.
 
 ```text
 usavvy/
   apps/
     web/                       # React + Vite SPA
       src/
-        modules/                # mirrors backend module boundaries in UI terms
+        modules/                # mirrors backend service boundaries in UI terms
           auth/
           board/
           courses/
@@ -197,29 +214,33 @@ usavvy/
         shared/                 # design system, layout, cross-module UI
         app/                    # routing, providers, entry
       tests/                    # mirrors src/ 1:1 (AD-8)
-    api/                       # Fastify + TypeScript backend
+  services/                     # each an independently-deployable Fastify + TypeScript backend (AD-1)
+    gateway/                    # BFF: JWT verify (AD-7), routing/aggregation to other services, CORS
+      src/
+      tests/                    # mirrors src/ 1:1 (AD-8)
+    core/                       # auth/users: RBAC, JWT issuance (AD-7), User/LearnerProfile/Notification (AD-14)
       src/
         modules/
-          auth/                  # RBAC, JWT (AD-7)
+          auth/
           users/
-          courses/
-          ingestion/              # + JobQueuePort consumer (AD-15)
-          board-orchestration/   # the Lesson Orchestration "crown jewel" (PRD S19); owns LearningSession/Beat (AD-14)
-          generation/             # GenerationPort + adapters (AD-1, AD-2)
-          voice/                  # VoicePort + adapters (AD-1)
-          notification/           # NotificationPort + adapters (AD-1)
-          plans-progress/
-          cohorts/
-          assignments/
-          engagement/
-          admin/
-          shared-kernel/          # config, logging, db, event-bus, PubSubPort, JobQueuePort
+          notification/          # NotificationPort + adapters (AD-1)
       tests/                    # mirrors src/ 1:1 (AD-8)
+    courses/                   # scaffolded when Epic 2 starts (AD-1 scaffold-on-demand)
+    ingestion/                  # + JobQueuePort consumer (AD-15); scaffolded when Epic 2 starts
+    board-orchestration/       # the Lesson Orchestration "crown jewel" (PRD S19); owns LearningSession/Beat (AD-14); scaffolded when Epic 3 starts
+    generation/                 # GenerationPort + adapters (AD-1, AD-2); scaffolded when Epic 3/4 starts
+    voice/                      # VoicePort + adapters (AD-1); scaffolded when Epic 3 starts
+    plans-progress/             # scaffolded when Epic 4 starts
+    cohorts/                    # scaffolded when Epic 7 starts
+    assignments/                # scaffolded when Epic 6 starts
+    engagement/                 # scaffolded when its epic starts
+    admin/                      # scaffolded when Epic 9 starts
   packages/
-    shared-types/               # DTOs, Beat schema, WS message contracts, role/permission enums, event contracts
-    config/                     # typed runtime config + RBAC seed data (AD-12)
+    shared-types/               # DTOs, Beat schema, WS message contracts, role/permission enums, event contracts — the only cross-service dependency
+    config/                     # composable base config-schema builder + RBAC seed data (AD-12)
+    service-kernel/             # shared by every service: structured logger, db-ping, storage-ping, PubSubPort client
   infra/
-    docker-compose.yml           # Postgres+pgvector, SeaweedFS (AD-11) — local dev only
+    docker-compose.yml           # Postgres (one server, one DB per service, AD-14), Redis (AD-5), SeaweedFS (AD-11) — local dev only, stateful deps only
 ```
 
 ```mermaid
@@ -258,7 +279,8 @@ erDiagram
 ## Deferred
 
 - **Cloud provider, staging/production topology, CI/CD pipeline, secrets management** — no deployment target exists yet; revisit once a workable vertical slice is ready to leave localhost, and once OQ-2 (market/region) is resolved (drives data residency, NFR-15).
-- **Redis `PubSubPort` adapter activation** — the port exists from day one (AD-5) so the swap is config-only; activating it is deferred until NFR-3's concurrency targets are being tested against real load, not before.
+- **Per-service independent container deployment** — dev runs every service natively (AD-11) for fast HMR; real per-service Docker images/deploy targets are part of the deployment-topology work above, not before a vertical slice is ready to leave localhost.
+- **Separate physical Postgres server per service** — dev uses one Postgres server container hosting one database per service (AD-14); splitting to genuinely separate servers is a config/infra swap when a specific service's load actually demands it, not a code change.
 - **Dedicated vector DB (e.g. Qdrant)** — pgvector is sufficient at current scale; swap is a `VectorStorePort` adapter change if retrieval performance demands it later.
 - **Real LLM/TTS/ASR provider selection** — not yet chosen among Anthropic/OpenAI/other; ships behind `GenerationPort`/`VoicePort` with a `mock` adapter as the default until a provider is chosen and funded.
 - **WebRTC** — explicitly rejected for v1 (AD-5); revisit only if a future requirement introduces live peer-to-peer audio/video.

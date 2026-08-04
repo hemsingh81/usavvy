@@ -1,0 +1,21 @@
+import { createLogger } from "@usavvy/service-kernel";
+import { loadGatewayConfig } from "./config.js";
+import { createCoreClient } from "./coreClient.js";
+import { buildApp } from "./app.js";
+
+const config = loadGatewayConfig(process.env);
+const logger = createLogger("gateway");
+const coreClient = createCoreClient(config.coreServiceUrl, logger);
+
+const app = buildApp({
+  fetchCoreHealth: () => coreClient.fetchHealth(),
+  corsOrigin: config.webOrigin,
+});
+
+app.listen({ port: config.port, host: "0.0.0.0" }, (err, address) => {
+  if (err) {
+    logger.error("gateway failed to start", { reason: err.message });
+    process.exit(1);
+  }
+  logger.info("gateway listening", { address });
+});

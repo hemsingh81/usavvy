@@ -1,2 +1,2 @@
-export { loadServerConfig, type ServerConfig } from "./server.js";
+export { baseServiceEnvSchema, loadBaseServiceConfig, type BaseServiceConfig } from "./base.js";
 export { loadWebConfig, type WebConfig } from "./web.js";

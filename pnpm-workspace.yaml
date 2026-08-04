@@ -1,6 +1,9 @@
 packages:
   - "apps/*"
   - "packages/*"
+  - "services/*"
+allowBuilds:
+  esbuild: true
 minimumReleaseAgeExclude:
   - '@typescript-eslint/eslint-plugin@8.66.0'
   - '@typescript-eslint/parser@8.66.0'
