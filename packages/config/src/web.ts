@@ -2,10 +2,15 @@ import { z } from "zod";
 
 const webEnvSchema = z.object({
   VITE_API_URL: z.url().default("http://localhost:3000"),
+  // No default, matching GOOGLE_CLIENT_ID's server-side treatment (core's config.ts) —
+  // Google sign-in needs a real registered OAuth client even in dev. Unset means the
+  // Google Sign-In button simply doesn't render.
+  VITE_GOOGLE_CLIENT_ID: z.string().min(1).optional(),
 });
 
 export interface WebConfig {
   apiUrl: string;
+  googleClientId: string | undefined;
 }
 
 /**
@@ -19,5 +24,6 @@ export function loadWebConfig(env: Record<string, string | undefined>): WebConfi
   const parsed = webEnvSchema.parse(env);
   return {
     apiUrl: parsed.VITE_API_URL,
+    googleClientId: parsed.VITE_GOOGLE_CLIENT_ID,
   };
 }

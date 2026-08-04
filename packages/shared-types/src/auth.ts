@@ -22,3 +22,7 @@ export const authSessionResponseSchema = z.object({
 });
 
 export type AuthSessionResponse = z.infer<typeof authSessionResponseSchema>;
+
+export const signupResponseSchema = z.object({ userId: z.string() });
+
+export type SignupResponse = z.infer<typeof signupResponseSchema>;

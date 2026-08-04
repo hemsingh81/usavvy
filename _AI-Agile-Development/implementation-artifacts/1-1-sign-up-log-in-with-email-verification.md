@@ -4,7 +4,7 @@ baseline_commit: 23e85cd
 
 # Story 1.1: Sign Up & Log In with Email Verification
 
-Status: ready-for-dev
+Status: review
 
 *(Epic 1, FR-A-1. First real auth story — wires JWT + RBAC end to end per the architecture spine's own "walking-skeleton delivery direction," and is the first story to touch a real database table, so it also wires Drizzle for real.)*
 
@@ -58,21 +58,21 @@ so that I can securely access my account before starting to learn.
   - [x] On success, set `x-user-id`/`x-user-role` headers on the proxied request to `core` from the verified JWT payload — this is the one and only place these headers are set; `core` trusts them unconditionally because nothing but `gateway` can reach it (AD-7)
   - [x] Proxy routes: `POST /auth/signup`, `/auth/login`, `/auth/verify-email`, `/auth/refresh`, `/auth/google` (unauthenticated, forwarded as-is to `core`) and `GET /me` (authenticated, per above) — extend `coreClient.ts`'s typed-fetch-wrapper pattern from Story 1.0 rather than introducing a second way to call `core`
 
-- [ ] **Task 7: `apps/web`'s `auth` module — sign-up, log-in, verify-email screens; Google Sign-In; component base decision** (AC: #1, #2, #3)
-  - [ ] **Resolve the `EXPERIENCE.md` `[ASSUMPTION]`:** adopt Radix UI primitives (package `radix-ui`) as `apps/web`'s component base, styled from `DESIGN.md`'s tokens — this is the first story building real form UI, exactly the point `EXPERIENCE.md` flagged as needing "engineering confirmation" before the base solidifies. Confirmed compatible with React 19 (verified live, not assumed)
-  - [ ] Sign-up form (email, password, submit), login form (email, password, submit) — both built from Radix `Form`/primitive inputs, not raw unstyled `<input>` — client-side validation (non-empty, basic email shape) before submit, server error surfaced inline (never a silent failure, AD-17)
-  - [ ] "Check your email" confirmation screen after signup (no auto-login — matches AC #1's "cannot obtain a session until verified")
-  - [ ] Verify-email landing route reads `?token=` from the URL, calls `/auth/verify-email`, shows a distinguishable success/expired/already-used state (never a blank page while the call is in flight or on failure)
-  - [ ] Google Sign-In via `@react-oauth/google` (wraps Google Identity Services; confirmed React-version-agnostic peer dep, so React 19-safe) — renders only if `VITE_GOOGLE_CLIENT_ID` is configured client-side; omit the button entirely rather than rendering a button that 503s on click when it isn't. Add `VITE_GOOGLE_CLIENT_ID` to `packages/config/src/web.ts`'s `webEnvSchema` as `z.string().optional()` (no default, matching `GOOGLE_CLIENT_ID`'s server-side treatment in Task 4) alongside the existing `VITE_API_URL` field — don't read `import.meta.env` directly in the component, same rule `VITE_API_URL` already follows
-  - [ ] A small `useAuth` hook/context: holds the access token in memory (not `localStorage` — an XSS-exfiltrable long-lived token in `localStorage` is a real, avoidable risk; losing it on hard refresh is an acceptable MVP trade-off, silently re-fetch via `/auth/refresh` using a refresh token kept in an httpOnly-equivalent... **no** — this codebase has no cookie infrastructure yet, so for this story the refresh token also lives in memory alongside the access token; document this as a known MVP gap, not a silent decision, since a page refresh currently logs the learner out. This is honest scope, not a security hole given nothing sensitive is reachable yet yet (Board doesn't exist))
+- [x] **Task 7: `apps/web`'s `auth` module — sign-up, log-in, verify-email screens; Google Sign-In; component base decision** (AC: #1, #2, #3)
+  - [x] **Resolve the `EXPERIENCE.md` `[ASSUMPTION]`:** adopt Radix UI primitives (package `radix-ui`) as `apps/web`'s component base, styled from `DESIGN.md`'s tokens — this is the first story building real form UI, exactly the point `EXPERIENCE.md` flagged as needing "engineering confirmation" before the base solidifies. Confirmed compatible with React 19 (verified live, not assumed)
+  - [x] Sign-up form (email, password, submit), login form (email, password, submit) — both built from Radix `Form`/primitive inputs, not raw unstyled `<input>` — client-side validation (non-empty, basic email shape) before submit, server error surfaced inline (never a silent failure, AD-17)
+  - [x] "Check your email" confirmation screen after signup (no auto-login — matches AC #1's "cannot obtain a session until verified")
+  - [x] Verify-email landing route reads `?token=` from the URL, calls `/auth/verify-email`, shows a distinguishable success/expired/already-used state (never a blank page while the call is in flight or on failure)
+  - [x] Google Sign-In via `@react-oauth/google` (wraps Google Identity Services; confirmed React-version-agnostic peer dep, so React 19-safe) — renders only if `VITE_GOOGLE_CLIENT_ID` is configured client-side; omit the button entirely rather than rendering a button that 503s on click when it isn't. Added `VITE_GOOGLE_CLIENT_ID` to `packages/config/src/web.ts`'s `webEnvSchema` as `z.string().optional()` (no default, matching `GOOGLE_CLIENT_ID`'s server-side treatment) alongside the existing `VITE_API_URL` field — doesn't read `import.meta.env` directly in the component, same rule `VITE_API_URL` already follows
+  - [x] A small `useAuth` hook/context: holds the access token in memory (not `localStorage`); refresh token also lives in memory for this story (documented MVP gap: a hard page refresh currently logs the learner out — acceptable since nothing sensitive is reachable yet, Board doesn't exist)
 
-- [ ] **Task 8: Tests mirroring `src/` 1:1** (AD-8; extends Story 1.0's established pattern rather than inventing a new one)
-  - [ ] `services/core/tests/db/schema.test.ts` or equivalent — schema constraints actually enforced (unique email, FK behavior)
-  - [ ] `services/core/tests/modules/auth/*.test.ts` — signup/login/verify/refresh/google handlers, including the unverified-login-rejected and duplicate-email-rejected paths
-  - [ ] `services/core/tests/modules/users/*.test.ts` — `/me` with and without trusted headers
-  - [ ] `packages/config/tests/rbac.test.ts` — `can()` guard, including a role with no matching matrix entry denying by default (never fail-open)
-  - [ ] `services/gateway/tests/*.test.ts` — JWT verify preHandler (valid/expired/missing token), trusted-header forwarding, proxy routes
-  - [ ] `apps/web/tests/modules/auth/*.test.tsx` — sign-up/login forms (success + inline error states), verify-email landing page's three states
+- [x] **Task 8: Tests mirroring `src/` 1:1** (AD-8; extends Story 1.0's established pattern rather than inventing a new one)
+  - [x] `services/core/tests/db/schema.test.ts` or equivalent — schema constraints actually enforced (unique email, FK behavior)
+  - [x] `services/core/tests/modules/auth/*.test.ts` — signup/login/verify/refresh/google handlers, including the unverified-login-rejected and duplicate-email-rejected paths
+  - [x] `services/core/tests/modules/users/*.test.ts` — `/me` with and without trusted headers
+  - [x] `packages/config/tests/rbac.test.ts` — `can()` guard, including a role with no matching matrix entry denying by default (never fail-open)
+  - [x] `services/gateway/tests/*.test.ts` — JWT verify preHandler (valid/expired/missing token), trusted-header forwarding, proxy routes
+  - [x] `apps/web/tests/modules/auth/*.test.tsx` — sign-up/login forms (success + inline error states), verify-email landing page's three states
 
 ## Dev Notes
 
@@ -192,6 +192,12 @@ apps/web/
 - [Source: `Doc/00-Requirement.md` — FR-A-1, NFR-16 (minor protections, not this story's concern but adjacent — see Story 1.2), NFR-17 (PII minimization)]
 - [Source: `_AI-Agile-Development/implementation-artifacts/1-0-environment-walking-skeleton-health-check.md` — established config/logging/timeout/testing conventions, `notificationPort` export, port-5433 change]
 
+## Change Log
+
+- 2026-08-05: Checkpoint 1 — Drizzle schema (`users`, `email_verification_tokens`), RBAC seed + `can()` guard, argon2/`@fastify/jwt` wiring, `core`'s auth module (signup/login/verify-email/refresh/google) and users module (`/me`), shared `AppError`/error-mapper. 96 tests green.
+- 2026-08-05: Checkpoint 2 — `gateway`'s JWT verify `preHandler` + trusted-header forwarding + `/auth/*` proxy. Fixed a real ESM bug (`PostgresError` named import) and a Story 1.0 gap (mock notification adapter not logging email body) found by actually restarting the dev servers. Full manual smoke test through the live gateway→core chain. 107 tests green.
+- 2026-08-05: Checkpoint 3 — `apps/web`'s auth UI: resolved `EXPERIENCE.md`'s Radix UI `[ASSUMPTION]`, sign-up/login/verify-email pages, Google Sign-In, `useAuth`. Manual browser testing (not just the test suite) surfaced a real React 19 StrictMode double-invoke bug in `VerifyEmailPage` that silently discarded a successful verification — fixed with the standard mounted-ref pattern and locked in with a StrictMode-wrapped regression test. 134 tests green, full flow (signup → verify → login → /me) confirmed working in a real browser. Status → `review`.
+
 ## Dev Agent Record
 
 ### Agent Model Used
@@ -203,6 +209,7 @@ Claude Sonnet 5
 ### Completion Notes List
 
 - **Tasks 1–5 (backend: Drizzle, RBAC, JWT, auth, users):** `db.transaction()` used for `verifyEmail` (mark-used + mark-verified atomically). Auth business logic in `service.ts` stays Fastify-free (testable directly against the real Postgres container, same integration-test philosophy as Story 1.0's `db.test.ts`); JWT sign/verify lives in `routes.ts` since it needs the `app.jwt` decorator. Added a shared `AppError`/`registerErrorHandler` to `packages/service-kernel` and an `ErrorEnvelope`/`MeResponse`/`AuthSessionResponse` DTO set to `packages/shared-types` — genuinely cross-service contracts (every service's error shape; `/me` and session responses gateway proxies verbatim), not story-local additions. `noUncheckedIndexedAccess` (root tsconfig) required explicit undefined-checks on every `.returning()` call — caught at typecheck time, not runtime. 96 tests green across the touched workspaces (up from 54 after Story 1.0), `tsc --noEmit`/`eslint .` clean.
+- **Final AC verification (all three confirmed live in a real browser/via curl against the running stack, not just unit-tested):** AC #1 — signed up through the real form, confirmed the account is unverified and `POST /auth/login` returns `403 EMAIL_NOT_VERIFIED` until the link is followed. AC #2 — `/auth/google` correctly returns `503 GOOGLE_OAUTH_NOT_CONFIGURED` when unset (no Google Cloud OAuth client exists to test the real credential-verification path against; the button correctly doesn't render either, confirmed in-browser) — the account create/link/pre-verified logic itself is covered by `service.test.ts`'s tests, which exercise `google-auth-library`'s real `verifyIdToken` rejecting a fabricated token. AC #3 — followed the real verification link from the mock-logged email in a live browser, landed on "Email verified" with a working session, confirmed `/me` returns the verified user. 134 tests green across all touched workspaces, `tsc --noEmit`/`eslint .` clean, no regressions in Story 1.0's existing tests.
 
 ### File List
 
@@ -262,3 +269,20 @@ Claude Sonnet 5
 - `services/gateway/tests/authProxy.test.ts` (new)
 - `services/core/src/modules/auth/service.ts` (fixed — `import { PostgresError } from "postgres"` doesn't exist as a named ESM export under Node's native loader, though vitest's resolution silently tolerated it; caught only by actually restarting the dev server, not by the test suite. Switched to the default import (`postgres.PostgresError`).
 - `services/core/src/modules/notification/mock.ts`, `services/core/tests/modules/notification/mock.test.ts` (Story 1.0 file — `sendEmail`'s mock adapter now logs the message body too, not just to/subject; without it there was no way to manually retrieve a verification link/token during local dev testing)
+
+**Task 7 (apps/web):**
+- `apps/web/package.json` (updated — `@react-oauth/google`, `radix-ui`, `react-router-dom` — the last one wasn't in the story's original task list; added as the mechanical minimum needed for multi-page routing, noted here rather than silently)
+- `packages/config/src/web.ts`, `packages/config/tests/web.test.ts` (updated — `VITE_GOOGLE_CLIENT_ID`)
+- `packages/shared-types/src/auth.ts` (updated — `signupResponseSchema`/`SignupResponse`), `packages/shared-types/src/index.ts` (updated), `packages/shared-types/tests/auth.test.ts` (new)
+- `apps/web/src/shared/tokens.css`, `apps/web/src/shared/components.css` (new — DESIGN.md's real token values, not approximated)
+- `apps/web/src/shared/Button.tsx`, `apps/web/src/shared/TextField.tsx` (new — Radix Form-based), `apps/web/src/shared/index.ts` (updated — real barrel, replaces shell)
+- `apps/web/src/main.tsx` (updated — imports the two new CSS files)
+- `apps/web/src/app/HomePage.tsx` (updated — takes `apiUrl` as a prop instead of resolving config itself, avoiding duplicating config-error handling now that `App.tsx` needs `apiUrl` upfront for `AuthProvider`)
+- `apps/web/src/app/App.tsx` (updated — resolves config once, wraps in `AuthProvider` + `BrowserRouter`, defines `/`, `/signup`, `/login`, `/verify-email` routes)
+- `apps/web/src/modules/auth/api.ts` (new — `createAuthApi`, `AuthApiError`), `useAuth.tsx` (new), `GoogleSignInButton.tsx` (new), `SignUpPage.tsx` (new), `LoginPage.tsx` (new), `VerifyEmailPage.tsx` (new), `index.ts` (updated — real barrel, replaces shell)
+- `apps/web/tests/app/HomePage.test.tsx` (updated — passes `apiUrl` prop, removed the config-error case now covered by `App.test.tsx`), `apps/web/tests/app/App.test.tsx` (new)
+- `apps/web/tests/modules/auth/*.test.{ts,tsx}` (new — `api`, `useAuth`, `SignUpPage`, `LoginPage`, `VerifyEmailPage`, `GoogleSignInButton`), `testHelpers.tsx` (new)
+
+**Bugs found only via manual browser testing (not caught by the test suite until reproduced and regression-tested):**
+- `services/core/src/modules/auth/service.ts`'s `PostgresError` import (see Task 6 entry above).
+- `VerifyEmailPage.tsx`: React 19 StrictMode's dev-only double-invoke of `useEffect` fired the one-time-use `verify-email` mutation twice — the first call succeeded server-side, but the second (correctly rejected as already-used) call clobbered the UI state with a false "Verification failed". A dedup ref alone wasn't sufficient, since the naive `cancelled`-flag cleanup from the *first* (StrictMode-simulated) invocation discarded the only real response. Fixed with the standard mounted-ref pattern (see code comment) and locked in with a StrictMode-wrapped regression test.

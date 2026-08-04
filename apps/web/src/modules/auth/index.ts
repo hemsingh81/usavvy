@@ -1,2 +1,5 @@
-// Module shell (mirrors services/core's auth). Implemented starting Story 1.1.
-export {};
+export { AuthProvider, useAuth, type AuthContextValue } from "./useAuth.js";
+export { SignUpPage } from "./SignUpPage.js";
+export { LoginPage } from "./LoginPage.js";
+export { VerifyEmailPage } from "./VerifyEmailPage.js";
+export { AuthApiError, createAuthApi, type AuthApi } from "./api.js";

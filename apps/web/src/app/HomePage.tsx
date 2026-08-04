@@ -1,16 +1,13 @@
-import { getWebConfig } from "./config.js";
 import { useHealthCheck } from "./useHealthCheck.js";
 
-function ConfigError({ message }: { message: string }) {
-  return (
-    <main>
-      <h1>Usavvy</h1>
-      <p role="alert">Configuration error — {message}</p>
-    </main>
-  );
+export interface HomePageProps {
+  apiUrl: string;
 }
 
-function HealthDisplay({ apiUrl }: { apiUrl: string }) {
+// Config-error handling (a misconfigured VITE_API_URL, AD-17) now lives in App.tsx,
+// which resolves apiUrl once for both this page and AuthProvider — no longer duplicated
+// here.
+export function HomePage({ apiUrl }: HomePageProps) {
   const health = useHealthCheck(apiUrl);
 
   return (
@@ -22,17 +19,4 @@ function HealthDisplay({ apiUrl }: { apiUrl: string }) {
       {health.kind === "error" && <p role="alert">Unable to reach system — {health.detail}</p>}
     </main>
   );
-}
-
-export function HomePage() {
-  // Review finding: getWebConfig() throws on an invalid VITE_API_URL; without this catch,
-  // React unmounts to a blank page instead of a distinguishable error state (AD-17).
-  let apiUrl: string;
-  try {
-    apiUrl = getWebConfig().apiUrl;
-  } catch (error) {
-    return <ConfigError message={error instanceof Error ? error.message : String(error)} />;
-  }
-
-  return <HealthDisplay apiUrl={apiUrl} />;
 }

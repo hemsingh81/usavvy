@@ -15,4 +15,14 @@ describe("loadWebConfig", () => {
   it("throws a descriptive error when VITE_API_URL is not a valid URL", () => {
     expect(() => loadWebConfig({ VITE_API_URL: "not-a-url" })).toThrow();
   });
+
+  it("leaves googleClientId undefined when VITE_GOOGLE_CLIENT_ID is unset", () => {
+    const cfg = loadWebConfig({});
+    expect(cfg.googleClientId).toBeUndefined();
+  });
+
+  it("reads VITE_GOOGLE_CLIENT_ID from the given env object", () => {
+    const cfg = loadWebConfig({ VITE_GOOGLE_CLIENT_ID: "abc.apps.googleusercontent.com" });
+    expect(cfg.googleClientId).toBe("abc.apps.googleusercontent.com");
+  });
 });
