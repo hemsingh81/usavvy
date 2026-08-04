@@ -9,7 +9,10 @@ const coreClient = createCoreClient(config.coreServiceUrl, logger);
 
 const app = buildApp({
   fetchCoreHealth: () => coreClient.fetchHealth(),
+  forwardToCore: (method, path, options) => coreClient.forward(method, path, options),
   corsOrigin: config.webOrigin,
+  jwtSecret: config.jwtSecret,
+  logger,
 });
 
 app.listen({ port: config.port, host: "0.0.0.0" }, (err, address) => {

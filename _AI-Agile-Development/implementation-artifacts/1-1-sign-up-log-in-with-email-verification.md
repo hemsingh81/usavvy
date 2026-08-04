@@ -53,10 +53,10 @@ so that I can securely access my account before starting to learn.
   - [x] `GET /me` reads the trusted `x-user-id`/`x-user-role` headers `gateway` sets (never re-verifies the JWT itself, per AD-7) and returns `{ id, email, emailVerified, role }` for the resolved user, gated through `can(role, "read", "self")` from Task 2
   - [x] If the trusted headers are absent (a request that somehow reached `core` without going through `gateway`'s preHandler — shouldn't happen given `core` isn't publicly bound, but AD-17 forbids assuming a guarantee an interface doesn't state), return `401`, not a crash
 
-- [ ] **Task 6: `services/gateway` — JWT verification + trusted-header forwarding + `/auth/*` proxy** (AC: #1, #2, #3; this is the first story to give `gateway` an actual authorization responsibility, not just pass-through health aggregation)
-  - [ ] A `preHandler` hook (applied to `/me` and any future protected route, **not** to `/auth/*` — those are pre-authentication by definition) that calls `request.jwtVerify()`; on failure, returns `401` via the central error-mapper shape rather than letting `@fastify/jwt`'s default error surface raw
-  - [ ] On success, set `x-user-id`/`x-user-role` headers on the proxied request to `core` from the verified JWT payload — this is the one and only place these headers are set; `core` trusts them unconditionally because nothing but `gateway` can reach it (AD-7)
-  - [ ] Proxy routes: `POST /auth/signup`, `/auth/login`, `/auth/verify-email`, `/auth/refresh`, `/auth/google` (unauthenticated, forwarded as-is to `core`) and `GET /me` (authenticated, per above) — extend `coreClient.ts`'s typed-fetch-wrapper pattern from Story 1.0 rather than introducing a second way to call `core`
+- [x] **Task 6: `services/gateway` — JWT verification + trusted-header forwarding + `/auth/*` proxy** (AC: #1, #2, #3; this is the first story to give `gateway` an actual authorization responsibility, not just pass-through health aggregation)
+  - [x] A `preHandler` hook (applied to `/me` and any future protected route, **not** to `/auth/*` — those are pre-authentication by definition) that calls `request.jwtVerify()`; on failure, returns `401` via the central error-mapper shape rather than letting `@fastify/jwt`'s default error surface raw
+  - [x] On success, set `x-user-id`/`x-user-role` headers on the proxied request to `core` from the verified JWT payload — this is the one and only place these headers are set; `core` trusts them unconditionally because nothing but `gateway` can reach it (AD-7)
+  - [x] Proxy routes: `POST /auth/signup`, `/auth/login`, `/auth/verify-email`, `/auth/refresh`, `/auth/google` (unauthenticated, forwarded as-is to `core`) and `GET /me` (authenticated, per above) — extend `coreClient.ts`'s typed-fetch-wrapper pattern from Story 1.0 rather than introducing a second way to call `core`
 
 - [ ] **Task 7: `apps/web`'s `auth` module — sign-up, log-in, verify-email screens; Google Sign-In; component base decision** (AC: #1, #2, #3)
   - [ ] **Resolve the `EXPERIENCE.md` `[ASSUMPTION]`:** adopt Radix UI primitives (package `radix-ui`) as `apps/web`'s component base, styled from `DESIGN.md`'s tokens — this is the first story building real form UI, exactly the point `EXPERIENCE.md` flagged as needing "engineering confirmation" before the base solidifies. Confirmed compatible with React 19 (verified live, not assumed)
@@ -247,3 +247,18 @@ Claude Sonnet 5
 - `apps/web/package.json` (updated — `@react-oauth/google`, `radix-ui`, `react-router-dom` deps; not in original story task list, added as the mechanical minimum needed for Task 7's multi-page routing — noted here rather than silently)
 - `README.md` (updated — migration quick-start step, `JWT_SECRET`/`GOOGLE_CLIENT_ID` docs)
 - `infra/docker-compose.yml`, `services/core/src/config.ts` DATABASE_URL, `services/core/tests/config.test.ts` (port 5433 fix — landed in the prior commit, before this story's dev work began, not part of this story's own changes)
+
+**Task 6 (gateway):**
+- `services/gateway/package.json` (updated — `@fastify/jwt` dep)
+- `services/gateway/src/authPlugin.ts` (new — `registerJwtPlugin`, `requireAuth`, `trustedHeaders`)
+- `services/gateway/src/authProxy.ts` (new — `/auth/*` + `/me` route registration)
+- `services/gateway/src/coreClient.ts` (updated — `forward()` generic proxy method)
+- `services/gateway/src/app.ts` (updated — registers JWT plugin, error handler, auth proxy routes)
+- `services/gateway/src/main.ts` (updated — wires `forwardToCore`, `jwtSecret`, `logger`)
+- `services/gateway/tests/testHelpers.ts` (new)
+- `services/gateway/tests/health.test.ts` (updated — uses `createTestAppDeps`)
+- `services/gateway/tests/coreClient.test.ts` (updated — `forward()` tests)
+- `services/gateway/tests/authPlugin.test.ts` (new)
+- `services/gateway/tests/authProxy.test.ts` (new)
+- `services/core/src/modules/auth/service.ts` (fixed — `import { PostgresError } from "postgres"` doesn't exist as a named ESM export under Node's native loader, though vitest's resolution silently tolerated it; caught only by actually restarting the dev server, not by the test suite. Switched to the default import (`postgres.PostgresError`).
+- `services/core/src/modules/notification/mock.ts`, `services/core/tests/modules/notification/mock.test.ts` (Story 1.0 file — `sendEmail`'s mock adapter now logs the message body too, not just to/subject; without it there was no way to manually retrieve a verification link/token during local dev testing)

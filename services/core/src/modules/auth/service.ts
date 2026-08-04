@@ -1,6 +1,6 @@
 import argon2 from "argon2";
 import { eq } from "drizzle-orm";
-import { PostgresError } from "postgres";
+import postgres from "postgres";
 import { OAuth2Client } from "google-auth-library";
 import { AppError } from "@usavvy/service-kernel";
 import type { Db } from "../../db/client.js";
@@ -24,7 +24,7 @@ function toSummary(user: UserRow): UserSummary {
 }
 
 function isUniqueViolation(error: unknown): boolean {
-  return error instanceof PostgresError && error.code === UNIQUE_VIOLATION;
+  return error instanceof postgres.PostgresError && error.code === UNIQUE_VIOLATION;
 }
 
 export async function signup(

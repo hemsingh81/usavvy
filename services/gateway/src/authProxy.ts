@@ -1,0 +1,24 @@
+import type { FastifyInstance } from "fastify";
+import type { ProxyOptions, ProxyResult } from "./coreClient.js";
+import { requireAuth, trustedHeaders } from "./authPlugin.js";
+
+export interface AuthProxyDeps {
+  forwardToCore: (method: string, path: string, options?: ProxyOptions) => Promise<ProxyResult>;
+}
+
+// Unauthenticated by definition — forwarded to `core` as-is, no trusted headers set.
+const AUTH_PATHS = ["/auth/signup", "/auth/login", "/auth/verify-email", "/auth/refresh", "/auth/google"];
+
+export function registerAuthProxyRoutes(app: FastifyInstance, deps: AuthProxyDeps): void {
+  for (const path of AUTH_PATHS) {
+    app.post(path, async (request, reply) => {
+      const result = await deps.forwardToCore("POST", path, { body: request.body });
+      reply.code(result.status).send(result.body);
+    });
+  }
+
+  app.get("/me", { preHandler: requireAuth }, async (request, reply) => {
+    const result = await deps.forwardToCore("GET", "/me", { headers: trustedHeaders(request) });
+    reply.code(result.status).send(result.body);
+  });
+}

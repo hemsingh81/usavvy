@@ -1,11 +1,23 @@
 import { healthStatusSchema, type DownstreamHealth } from "@usavvy/shared-types";
 import type { Logger } from "@usavvy/service-kernel";
 
+export interface ProxyResult {
+  status: number;
+  body: unknown;
+}
+
+export interface ProxyOptions {
+  body?: unknown;
+  headers?: Record<string, string>;
+}
+
 export interface CoreClient {
   fetchHealth(): Promise<DownstreamHealth>;
+  forward(method: string, path: string, options?: ProxyOptions): Promise<ProxyResult>;
 }
 
 const HEALTH_CHECK_TIMEOUT_MS = 5000;
+const PROXY_TIMEOUT_MS = 5000;
 
 /**
  * AD-13: the typed, decoupled way `gateway` calls `core` over HTTP — callers depend on
@@ -26,6 +38,22 @@ export function createCoreClient(coreServiceUrl: string, logger: Logger): CoreCl
       } catch (error) {
         logger.error("core health check failed", { reason: error instanceof Error ? error.message : String(error) });
         return { status: "unreachable" };
+      }
+    },
+
+    async forward(method: string, path: string, options?: ProxyOptions): Promise<ProxyResult> {
+      try {
+        const response = await fetch(`${coreServiceUrl}${path}`, {
+          method,
+          headers: { "content-type": "application/json", ...options?.headers },
+          signal: AbortSignal.timeout(PROXY_TIMEOUT_MS),
+          ...(options?.body !== undefined ? { body: JSON.stringify(options.body) } : {}),
+        });
+        const body: unknown = await response.json().catch(() => undefined);
+        return { status: response.status, body };
+      } catch (error) {
+        logger.error("proxy to core failed", { path, reason: error instanceof Error ? error.message : String(error) });
+        return { status: 503, body: { error: { code: "CORE_UNREACHABLE", message: "unable to reach core service" } } };
       }
     },
   };

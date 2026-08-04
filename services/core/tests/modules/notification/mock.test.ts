@@ -21,7 +21,7 @@ describe("createMockNotificationAdapter", () => {
     expect(result).toEqual({ success: true });
     expect(logSpy).toHaveBeenCalledTimes(1);
     const payload = JSON.parse(logSpy.mock.calls[0]?.[0] as string);
-    expect(payload).toMatchObject({ to: "learner@example.com", subject: "Welcome" });
+    expect(payload).toMatchObject({ to: "learner@example.com", subject: "Welcome", body: "Hi there" });
   });
 
   it("sendInApp logs the payload and resolves success, never throws", async () => {
