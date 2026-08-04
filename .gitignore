@@ -1,0 +1,68 @@
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Editors / IDEs
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+logs/
+
+# Node / JS / TS
+node_modules/
+dist/
+build/
+out/
+.next/
+.nuxt/
+coverage/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-store/
+.turbo/
+.cache/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# .NET
+bin/
+obj/
+*.dll
+*.pdb
+
+# Java
+target/
+*.class
+
+# Terraform / infra
+.terraform/
+*.tfstate
+*.tfstate.*
+
+# Claude Code / tooling local state
+.claude/
+.slingshot/
+.agent/
+_bmad/
+.vscode/
