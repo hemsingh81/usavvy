@@ -1,2 +1,3 @@
-// Module shell (AD-14 ownership: Notification). NotificationPort + mock adapter land in Task 4.
-export {};
+export type { NotificationPort, SendEmailInput, SendInAppInput, NotificationResult } from "./port.js";
+export { createMockNotificationAdapter } from "./mock.js";
+export { createNotificationAdapter, type NotificationAdapterName } from "./factory.js";
