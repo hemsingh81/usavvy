@@ -4,7 +4,7 @@ import { loadWebConfig } from "../src/web.js";
 describe("loadWebConfig", () => {
   it("applies the default API URL when VITE_API_URL is unset", () => {
     const cfg = loadWebConfig({});
-    expect(cfg.apiUrl).toBe("http://localhost:3001");
+    expect(cfg.apiUrl).toBe("http://localhost:3000");
   });
 
   it("reads VITE_API_URL from the given env object", () => {

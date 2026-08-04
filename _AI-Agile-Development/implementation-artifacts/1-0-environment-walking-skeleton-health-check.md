@@ -34,13 +34,13 @@ so that I can verify the environment is correctly set up before building real fe
   - [x] `services/core`: Fastify 5.x + TypeScript 6.x app, listens on port `3001` by default; module-shell folders under `services/core/src/modules/`: `auth`, `users`, `notification` (AD-14: this service owns User, LearnerProfile, Notification); `GET /health` checks DB connectivity (Drizzle ping) and storage adapter reachability (SeaweedFS), returns `{ status: "ok" | "degraded", db: bool, storage: bool }` with 200 in both cases — never 500 for a degraded-but-responding check
   - [x] Enable CORS on `gateway` for `http://localhost:5173` (the dev web origin) — `core` has no public CORS surface, it's reachable only from `gateway` over the private docker/localhost network (AD-7's trust boundary)
   - [x] `services/gateway/tests/` and `services/core/tests/`, each mirroring its own `src/` path-for-path (AD-8)
-- [ ] **Task 3: `apps/web` skeleton** (AC: #1, #2)
-  - [ ] React 19 + Vite 8 SPA, dev server on port `5173` (Vite default)
-  - [ ] Empty module-shell folders under `apps/web/src/modules/`: `auth`, `board`, `courses`, `plans`, `cohorts`, `assignments`, `engagement`, `admin` (per Structural Seed — these mirror backend service boundaries in UI terms, not 1:1 identical names)
-  - [ ] `apps/web/src/shared/` (design system/layout placeholder) and `apps/web/src/app/` (routing, providers, entry)
-  - [ ] Backend base URL — always `gateway`, never any other service directly — is read through `packages/config` (a validated `VITE_API_URL`, default `http://localhost:3000`) — never hardcoded inline in the fetch call (AD-12)
-  - [ ] Home page component calls `GET /health` on `gateway` on mount and renders "System OK" (or a clear degraded/error state — no silent failure, AD-17) — this is a real page, not a stub
-  - [ ] `apps/web/tests/` tree mirroring `src/` 1:1 (AD-8)
+- [x] **Task 3: `apps/web` skeleton** (AC: #1, #2)
+  - [x] React 19 + Vite 8 SPA, dev server on port `5173` (Vite default)
+  - [x] Empty module-shell folders under `apps/web/src/modules/`: `auth`, `board`, `courses`, `plans`, `cohorts`, `assignments`, `engagement`, `admin` (per Structural Seed — these mirror backend service boundaries in UI terms, not 1:1 identical names)
+  - [x] `apps/web/src/shared/` (design system/layout placeholder) and `apps/web/src/app/` (routing, providers, entry)
+  - [x] Backend base URL — always `gateway`, never any other service directly — is read through `packages/config` (a validated `VITE_API_URL`, default `http://localhost:3000`) — never hardcoded inline in the fetch call (AD-12)
+  - [x] Home page component calls `GET /health` on `gateway` on mount and renders "System OK" (or a clear degraded/error state — no silent failure, AD-17) — this is a real page, not a stub
+  - [x] `apps/web/tests/` tree mirroring `src/` 1:1 (AD-8)
 - [ ] **Task 4: `NotificationPort` + mock adapter** (AC: #3)
   - [ ] Define `NotificationPort` interface in `services/core/src/modules/notification/` (email + in-app send methods — in-app channel is used later by Story 1.10's Notification Center, email by Story 1.1)
   - [ ] Implement `notification/mock` adapter: writes to console/file, never a real network call
@@ -140,6 +140,7 @@ No alignment conflicts possible — this is the first story, so there is no exis
 - 2026-08-04: Checkpoint 1 — monorepo scaffold (pnpm workspace, root tsconfig, `packages/shared-types`, `packages/config`), all tests green.
 - 2026-08-04: **Architecture pivot** — user explicitly requested a fully decoupled, independently-scalable project structure ("microservice mode... so that we can scale it easily in future and handle it load etc."). Re-ran the architecture spine's paradigm decision (AD-1) from modular monolith to microservices; rescoped this story's remaining tasks (2-6) and both ACs #1/#2 accordingly before continuing implementation. No committed code was discarded — Task 1's `packages/shared-types`/`packages/config` are unchanged in kind (config gets a small composable-schema amendment); Task 2's not-yet-committed RED tests are being relocated from the planned `apps/api` into `services/gateway`/`services/core` rather than rewritten from scratch.
 - 2026-08-04: Checkpoint 2 — `packages/service-kernel` (logger/db-ping/storage-ping), `services/core` (config, `/health`, module shells), `services/gateway` (config, `coreClient`, aggregated `/health` with real HTTP call to `core`), `packages/config` split into composable base schema, `packages/shared-types` gains `GatewayHealth`/`DownstreamHealth`. 36 tests green across 5 packages/services, `tsc --noEmit` clean.
+- 2026-08-04: Checkpoint 3 — `apps/web` (React 19 + Vite 8, module shells, `HomePage` health-check display with a 4-state `loading`/`ok`/`degraded`/`error` union, `VITE_API_URL` default corrected to gateway's port). 39 tests green across 6 packages/services/apps, `tsc --noEmit` clean.
 
 ## Dev Agent Record
 
@@ -151,6 +152,7 @@ No alignment conflicts possible — this is the first story, so there is no exis
 
 - **Checkpoint 1 (Task 1 — monorepo scaffold):** TypeScript pinned to `^6.0.3` (latest stable 6.x), not the newly-stable `7.x` (native-compiler rewrite) — honors the architecture spine's explicit "6.x" pin rather than opportunistically jumping a major the spine never evaluated. ESLint/typescript-eslint/@types/node/concurrently pinned to their actual current npm registry versions (verified live via `npm view`, not guessed) since the spine didn't pin these itself. `packages/shared-types` seeded with a real `HealthStatus` schema (not left empty) since it's the first genuine cross-app contract `/health` needs. `packages/config` built out fully now (not deferred) since Tasks 2-4 all depend on it existing.
 - **Checkpoint 2 (Task 2 — `services/gateway` + `services/core` + `packages/service-kernel`):** implemented after the microservices pivot; `apps/api`'s never-committed RED tests were relocated (adjusted import paths and split by service) rather than rewritten from first principles, so no design work was thrown away. `packages/config`'s `loadServerConfig` was split into `baseServiceEnvSchema`/`loadBaseServiceConfig` (just `PORT`) — `services/core/src/config.ts` and `services/gateway/src/config.ts` each `.extend()` it with their own fields, proving the composable-schema design actually works for two different services rather than just being asserted in the architecture doc. Added `GatewayHealth`/`DownstreamHealth` to `packages/shared-types` so `gateway`'s aggregated `/health` response is a typed contract, not an ad hoc object shape. `gateway`'s `coreClient.ts` is the first real inter-service HTTP client (AD-13) — unit-tested in isolation (mocked `fetch`) to prove a network failure or non-ok response maps to `{ status: "unreachable" }` rather than throwing or hanging (AD-17); the full real-network proof (start both services, kill `core`, confirm `gateway` degrades) happens at Task 5 once `docker-compose`/`pnpm dev` exist to run them together. All 5 packages/services green: 36 tests total, `tsc --noEmit` clean across the board.
+- **Checkpoint 3 (Task 3 — `apps/web`):** `packages/config`'s `loadWebConfig` default updated to `http://localhost:3000` (gateway's port; it was still `3001` from the pre-pivot `apps/api` design). `HomePage` uses a small `useHealthCheck` hook with an explicit 4-state union (`loading`/`ok`/`degraded`/`error`) so every outcome of the gateway call — success, a degraded `GatewayHealth` body, a non-ok HTTP response, or the `fetch` itself throwing — renders a distinguishable, non-blank state (AD-17); tests mock `global.fetch` for all three externally-visible states (ok/degraded/error) via React Testing Library. `react`/`vite`/`@testing-library/*`/`jsdom` versions verified live via `npm view` before pinning, same discipline as checkpoint 1.
 
 ### File List
 
@@ -204,3 +206,18 @@ No alignment conflicts possible — this is the first story, so there is no exis
 - `services/gateway/tests/health.test.ts` (new — checkpoint 2)
 - `pnpm-workspace.yaml` (updated checkpoint 2 — `services/*` glob)
 - `package.json` (updated checkpoint 2 — `dev` script runs gateway/core/web)
+- `packages/config/src/web.ts` (updated checkpoint 3 — default `VITE_API_URL` now `http://localhost:3000`)
+- `packages/config/tests/web.test.ts` (updated checkpoint 3)
+- `apps/web/package.json` (new — checkpoint 3)
+- `apps/web/tsconfig.json` (new — checkpoint 3)
+- `apps/web/vite.config.ts` (new — checkpoint 3)
+- `apps/web/index.html` (new — checkpoint 3)
+- `apps/web/src/main.tsx` (new — checkpoint 3)
+- `apps/web/src/app/App.tsx` (new — checkpoint 3)
+- `apps/web/src/app/HomePage.tsx` (new — checkpoint 3)
+- `apps/web/src/app/config.ts` (new — checkpoint 3)
+- `apps/web/src/app/useHealthCheck.ts` (new — checkpoint 3)
+- `apps/web/src/shared/index.ts` (new — checkpoint 3, shell)
+- `apps/web/src/modules/{auth,board,courses,plans,cohorts,assignments,engagement,admin}/index.ts` (new — checkpoint 3, shells)
+- `apps/web/tests/setup.ts` (new — checkpoint 3)
+- `apps/web/tests/app/HomePage.test.tsx` (new — checkpoint 3)
