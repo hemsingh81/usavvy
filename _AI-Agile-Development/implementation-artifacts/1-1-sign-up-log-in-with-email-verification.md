@@ -63,7 +63,7 @@ so that I can securely access my account before starting to learn.
   - [ ] Sign-up form (email, password, submit), login form (email, password, submit) — both built from Radix `Form`/primitive inputs, not raw unstyled `<input>` — client-side validation (non-empty, basic email shape) before submit, server error surfaced inline (never a silent failure, AD-17)
   - [ ] "Check your email" confirmation screen after signup (no auto-login — matches AC #1's "cannot obtain a session until verified")
   - [ ] Verify-email landing route reads `?token=` from the URL, calls `/auth/verify-email`, shows a distinguishable success/expired/already-used state (never a blank page while the call is in flight or on failure)
-  - [ ] Google Sign-In via `@react-oauth/google` (wraps Google Identity Services; confirmed React-version-agnostic peer dep, so React 19-safe) — renders only if `VITE_GOOGLE_CLIENT_ID` is configured client-side; omit the button entirely rather than rendering a button that 503s on click when it isn't
+  - [ ] Google Sign-In via `@react-oauth/google` (wraps Google Identity Services; confirmed React-version-agnostic peer dep, so React 19-safe) — renders only if `VITE_GOOGLE_CLIENT_ID` is configured client-side; omit the button entirely rather than rendering a button that 503s on click when it isn't. Add `VITE_GOOGLE_CLIENT_ID` to `packages/config/src/web.ts`'s `webEnvSchema` as `z.string().optional()` (no default, matching `GOOGLE_CLIENT_ID`'s server-side treatment in Task 4) alongside the existing `VITE_API_URL` field — don't read `import.meta.env` directly in the component, same rule `VITE_API_URL` already follows
   - [ ] A small `useAuth` hook/context: holds the access token in memory (not `localStorage` — an XSS-exfiltrable long-lived token in `localStorage` is a real, avoidable risk; losing it on hard refresh is an acceptable MVP trade-off, silently re-fetch via `/auth/refresh` using a refresh token kept in an httpOnly-equivalent... **no** — this codebase has no cookie infrastructure yet, so for this story the refresh token also lives in memory alongside the access token; document this as a known MVP gap, not a silent decision, since a page refresh currently logs the learner out. This is honest scope, not a security hole given nothing sensitive is reachable yet yet (Board doesn't exist))
 
 - [ ] **Task 8: Tests mirroring `src/` 1:1** (AD-8; extends Story 1.0's established pattern rather than inventing a new one)
@@ -155,6 +155,12 @@ apps/web/
       (Radix-based primitive wrappers land here — Button, TextField, Form — per DESIGN.md tokens)
   tests/modules/auth/*.test.tsx              # new
 ```
+
+### Validation rules (avoid an arbitrary or inconsistent rule per layer)
+
+- **Email:** validated server-side with zod's `z.email()` (same library/pattern already used for `DATABASE_URL`'s `z.url()`) — never a hand-rolled regex.
+- **Password:** minimum 8 characters, no forced composition rules (no mandatory uppercase/digit/symbol) — this matches current NIST 800-63B guidance favoring length over composition, and there's no NFR mandating anything stricter. Enforce the same 8-character minimum in both the client-side form (Task 7) and the server-side `signup` handler (Task 4) — one rule, not two independently-guessed ones.
+- **Rate limiting on `/auth/*`:** explicitly out of scope for this story — NFR-18 scopes rate-limiting to generation endpoints specifically, and no other NFR names auth brute-force protection yet. Don't add it speculatively; flag it as a follow-up if a later security pass calls for it.
 
 ### API response shapes (avoid inventing ad hoc ones per handler)
 
