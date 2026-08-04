@@ -191,7 +191,7 @@ StoragePort, NotificationPort, PubSubPort, JobQueuePort"]
 | Vitest / React Testing Library / Playwright | latest stable |
 | S3-compatible object storage (dev) | SeaweedFS (actively maintained; MinIO's OSS edition was discontinued in the lead-up to this spine and is not a safe pin — swap is config-only via `StoragePort`, AD-6) |
 | pg-boss | latest stable (Postgres-native job queue, AD-15) |
-| Redis | latest stable (7.x) — `PubSubPort` adapter, active from day one (AD-5); free/self-hosted via `docker-compose` |
+| Redis | latest stable (8.x) — `PubSubPort` adapter, active from day one (AD-5); free/self-hosted via `docker-compose` |
 
 ## Structural Seed
 

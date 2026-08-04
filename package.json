@@ -6,6 +6,8 @@
     "node": ">=24"
   },
   "scripts": {
+    "infra:up": "docker compose -f infra/docker-compose.yml up -d",
+    "infra:down": "docker compose -f infra/docker-compose.yml down",
     "dev": "concurrently -n gateway,core,web -c blue,magenta,green \"pnpm --filter @usavvy/gateway dev\" \"pnpm --filter @usavvy/core dev\" \"pnpm --filter @usavvy/web dev\"",
     "build": "pnpm -r build",
     "test": "pnpm -r test",
