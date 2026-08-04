@@ -169,6 +169,9 @@ Epic 5 (cohorts, scheduling, live group sessions, peer explain-back), group lead
 | FR-A-6 | Privacy controls: "Share my scores on public leaderboards" (default **OFF**), "Allow my display name in cohorts" (default ON), "Use my uploads to improve Usavvy" (default **OFF**). | MUST |
 | FR-A-7 | Account deletion — self-service, removes uploads and personal data within 30 days, with confirmation email. | MUST |
 | FR-A-8 | Data export — learner can download their progress, notes and submissions as JSON + PDF. | SHOULD |
+| FR-A-9 | **Color theme picker** — learner selects from a small set of predefined app-wide color themes in Preferences. Distinct from the Board's own dark/paper theme toggle (DC-3), which remains a separate, Board-specific control. | SHOULD |
+| FR-A-10 | **Notification Center** — learner can view, mark-as-read, and clear in-app notifications (reminders, grading-ready, cohort updates, etc.). A notification tied to a still-in-progress process (e.g. ingestion, grading) cannot be cleared until that process resolves — it can still be marked read. | MUST |
+| FR-A-11 | **Activity History** — every board session, assignment attempt, and cohort session the learner has participated in is logged and browsable chronologically, reviewable at any time. | SHOULD |
 
 ### 8.2 Onboarding acceptance criteria (sample)
 
@@ -370,10 +373,15 @@ Concept states:  not_started → in_progress → understood → mastered
                                               needs_review  (decay after N days
                                                              without retrieval)
 
-Course progress % = Σ(concept_weight × mastery_score) / Σ(concept_weight)
+Course progress % = Σ(concept_weight × mastery_score) / Σ(concept_weight),
+                     summed over concepts where state ≠ skipped
 
-mastery_score:  in_progress 0.3 | understood 0.7 | mastered 1.0 | skipped 0.0
+mastery_score:  in_progress 0.3 | understood 0.7 | mastered 1.0
 ```
+
+**Skipped concepts are excluded from both the numerator and the denominator** — consistent with FR-B-11 ("excluded from mastery... flagged in the plan for later"). A skip therefore does not lower achievable progress, but it also does not count as free progress; the course's mastery scope simply narrows to the concepts still in play.
+
+**Course completion threshold:** a course is "complete" when progress % reaches 100% of the concepts remaining in scope (i.e. all non-skipped concepts reach `mastered`) **and** the learner has explicitly acknowledged any skipped topics via the Skip-concept confirmation (FR-B-11). This is the single trigger for course-complete state (FR-P-4) and completion-certificate issuance (FR-R-5) — no other implicit completion condition exists.
 
 Where mastery is evidenced by checkpoint performance and assignment scores, not by having sat through the audio.
 
@@ -425,7 +433,7 @@ AC-P-2.1  GIVEN a learner sets a target date requiring > 25 hrs/week
 | FR-G-3 | Waiting-list UI shows seats filled, expected start window, and an honest "we'll notify you" state. | MUST |
 | FR-G-4 | **Matching engine** forms a cohort when min seats are reached AND a common weekly slot pattern exists across ≥ 80% of members. It maximises overlap; members who can't fit the majority pattern are offered the next cohort or a self-paced fallback. | MUST |
 | FR-G-5 | Cohort start requires member confirmation of the proposed schedule within 48 hrs; non-confirmers are returned to the waiting list. | MUST |
-| FR-G-6 | **Anti-stall guarantee:** if a waiting list hasn't formed a cohort within X days, offer (a) a smaller cohort, (b) a different cadence, or (c) start self-paced now and join a cohort later with progress carried over. | MUST |
+| FR-G-6 | **Anti-stall guarantee:** if a waiting list hasn't formed a cohort within **14 days** `[ASSUMPTION: bounds cold-start risk before a waitlisted learner feels abandoned; tune once real waitlist-to-formation data exists]`, offer (a) a smaller cohort, (b) a different cadence, or (c) start self-paced now and join a cohort later with progress carried over. | MUST |
 | FR-G-7 | Cohort size cap for interaction quality: recommend 6–15 learners. | MUST |
 | FR-G-8 | Late-join window: learners may join within the first 2 sessions if seats remain. | SHOULD |
 
@@ -567,6 +575,8 @@ AC-P-2.1  GIVEN a learner sets a target date requiring > 25 hrs/week
 | NFR-22 | **Cost per learner-hour must be measured and dashboarded from day one** (LLM tokens + TTS characters + ASR minutes + storage + egress). |
 | NFR-23 | Target blended cost per learner-hour to support ≥ 60% gross margin at the intended price point. Caching (R3) and tiered model routing are the primary levers. |
 | NFR-24 | Fair-use ceilings on generation-heavy actions, expressed generously and only enforced against abuse patterns — never in a way a genuine learner encounters (Principle 6). |
+| NFR-25 | **No silent failures.** Every error path either surfaces an actionable state to the user (per the existing "retry, never a dead end" pattern) or is logged with enough context to trace — never both-absent. A swallowed exception with no user feedback and no log entry is treated as a defect, not an acceptable edge case. |
+| NFR-26 | **Every long-running or background action is checkable later, not just in the moment.** Ingestion, grading, cohort matching, and any other async process surfaces a durable status the learner can return to (via Notification Center, FR-A-10, and/or Activity History, FR-A-11) — nothing runs invisibly to completion with no trace if the learner isn't watching when it finishes. |
 
 **BA note (business-critical):** This product's cost scales with engagement, which is the opposite of most SaaS. A learner who uses "explain more" forty times in an hour is your best learner and your most expensive one. The unit cost model must be built *before* pricing is set, not after. Pre-generated catalog Beats (R3) plus routing simple branches to smaller models are the two levers that make the economics work.
 

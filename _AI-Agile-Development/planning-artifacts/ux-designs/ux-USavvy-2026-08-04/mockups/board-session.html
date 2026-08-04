@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Usavvy — Board Session (key screen)</title>
+<style>
+/*
+  KEY SCREEN: The Board — active learning session (board-dark theme, default per DESIGN.md).
+  Governed by:
+    DESIGN.md → Colors (board-dark-bg/surface, accent/secondary/primary state colors),
+                Components → Board Control Bar, Avatar Presence Indicator, Elevation & Depth (floating bar),
+                Shapes (rounded.lg for control bar), Typography (board-narration, code)
+    EXPERIENCE.md → IA ("Board is not nested in this chrome" / full-bleed, exit-to-My-Learning),
+                     Component Patterns → Board Control Bar, Source, Board Navigation (gutter),
+                     Interaction Primitives → keyboard-first, live-region announcements
+  This is the canonical hero screen: "the board is the product, not the chat."
+*/
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: #DCDBE4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 32px 16px;
+}
+
+/* ---- realistic browser device frame ---- */
+.browser-frame {
+  width: 1360px;
+  max-width: 100%;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 30px 70px -20px rgba(20,18,59,0.45), 0 2px 8px rgba(20,18,59,0.15);
+  background: #E7E4F1;
+}
+.titlebar {
+  height: 42px;
+  background: #E7E4F1;
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  gap: 14px;
+  border-bottom: 1px solid #CAC8D6;
+}
+.tl-dots { display: flex; gap: 7px; }
+.tl-dot { width: 11px; height: 11px; border-radius: 50%; }
+.tl-dot.r { background: #EC6A5E; }
+.tl-dot.y { background: #F4BF4F; }
+.tl-dot.g { background: #61C554; }
+.url-bar {
+  flex: 1;
+  height: 26px;
+  background: #FFFFFF;
+  border: 1px solid #CAC8D6;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  font-size: 12px;
+  color: #4B4A57;
+  gap: 6px;
+}
+.url-bar .lock { color: #79778A; font-size: 11px; }
+
+/* ---- product viewport: full-bleed Board focus view ---- */
+.viewport {
+  position: relative;
+  width: 100%;
+  height: 800px;
+  background: radial-gradient(ellipse 1200px 700px at 50% -10%, #1E1B4B 0%, #14123B 60%);
+  overflow: hidden;
+}
+
+/* exit affordance — single, quiet, per EXPERIENCE.md IA */
+.exit-link {
+  position: absolute;
+  top: 20px;
+  left: 24px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: rgba(232,231,255,0.72);
+  z-index: 5;
+}
+.exit-link .chev { font-size: 14px; }
+
+/* breadcrumb / course context, quiet, center-top */
+.board-crumb {
+  position: absolute;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 12px;
+  color: rgba(232,231,255,0.55);
+  letter-spacing: 0.02em;
+  z-index: 5;
+}
+.board-crumb b { color: rgba(232,231,255,0.85); font-weight: 600; }
+
+/* Avatar Presence Indicator — never a face; waveform mark. speaking = accent coral */
+.avatar-presence {
+  position: absolute;
+  top: 16px;
+  right: 24px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(30,27,75,0.7);
+  border: 1px solid rgba(232,231,255,0.12);
+  padding: 7px 12px 7px 10px;
+  border-radius: 999px;
+  z-index: 5;
+}
+.wave-mark { display: flex; align-items: flex-end; gap: 2px; height: 16px; }
+.wave-mark span {
+  width: 3px;
+  background: #EA580C; /* accent coral = speaking */
+  border-radius: 2px;
+}
+.wave-mark span:nth-child(1){ height: 6px; }
+.wave-mark span:nth-child(2){ height: 14px; }
+.wave-mark span:nth-child(3){ height: 9px; }
+.wave-mark span:nth-child(4){ height: 16px; }
+.wave-mark span:nth-child(5){ height: 8px; }
+.avatar-presence .state-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #FFD9C2;
+  letter-spacing: 0.02em;
+}
+
+/* Beat gutter — left edge, Board Navigation pattern */
+.beat-gutter {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 64px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  z-index: 4;
+}
+.gutter-track {
+  position: absolute;
+  left: 32px;
+  top: 108px;
+  bottom: 108px;
+  width: 2px;
+  background: rgba(232,231,255,0.10);
+}
+.beat-marker {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid rgba(232,231,255,0.28);
+  background: #14123B;
+  z-index: 1;
+  position: relative;
+}
+.beat-marker.done { background: #0D9488; border-color: #0D9488; }
+.beat-marker.current {
+  width: 20px;
+  height: 20px;
+  background: #14123B;
+  border: 3px solid #EA580C;
+  box-shadow: 0 0 0 5px rgba(234,88,12,0.18);
+}
+.beat-marker.upcoming { background: transparent; }
+.gutter-label {
+  position: absolute;
+  left: 46px;
+  font-size: 10px;
+  color: rgba(232,231,255,0.4);
+  white-space: nowrap;
+  top: -3px;
+}
+
+/* main canvas column */
+.board-canvas {
+  position: absolute;
+  left: 64px;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-bottom: 60px;
+}
+.beat-content {
+  width: 720px;
+  max-width: calc(100% - 64px);
+}
+.beat-eyebrow {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: #99F6E4;
+  text-transform: uppercase;
+  margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.beat-eyebrow .src-chip {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: rgba(232,231,255,0.55);
+  border: 1px solid rgba(232,231,255,0.18);
+  border-radius: 999px;
+  padding: 4px 10px;
+  text-transform: none;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.board-narration {
+  font-size: 19px;
+  line-height: 1.65;
+  color: #E8E7FF;
+  font-weight: 400;
+}
+.board-narration .fade {
+  color: rgba(232,231,255,0.28);
+}
+.caret {
+  display: inline-block;
+  width: 2px;
+  height: 20px;
+  background: #EA580C;
+  vertical-align: text-bottom;
+  margin-left: 2px;
+  border-radius: 1px;
+}
+
+.formula {
+  font-family: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+  font-size: 14px;
+  color: #C7D2FE;
+  background: rgba(67,56,202,0.28);
+  border: 1px solid rgba(129,140,248,0.35);
+  border-radius: 10px;
+  padding: 10px 14px;
+  display: inline-block;
+  margin: 18px 0 22px;
+}
+
+/* small incremental diagram — scatter + regression line, drawn ~70% */
+.diagram-wrap {
+  background: rgba(30,27,75,0.55);
+  border: 1px solid rgba(232,231,255,0.10);
+  border-radius: 16px;
+  padding: 18px 20px 12px;
+  margin-top: 4px;
+}
+.diagram-caption {
+  font-size: 12px;
+  color: rgba(232,231,255,0.45);
+  margin-top: 6px;
+  text-align: center;
+}
+
+/* ---- Board Control Bar — persistent, floating ---- */
+.control-bar {
+  position: absolute;
+  left: 50%;
+  bottom: 22px;
+  transform: translateX(-50%);
+  background: #1E1B4B;
+  border: 1px solid rgba(232,231,255,0.10);
+  border-radius: 16px;
+  box-shadow: 0 14px 40px -10px rgba(20,18,59,0.6), 0 0 0 1px rgba(67,56,202,0.15);
+  display: flex;
+  align-items: center;
+  padding: 8px 10px;
+  gap: 4px;
+  z-index: 10;
+}
+.cb-group { display: flex; align-items: center; gap: 2px; padding: 0 6px; }
+.cb-divider { width: 1px; align-self: stretch; background: rgba(232,231,255,0.12); margin: 6px 2px; }
+.cb-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  color: #C9C8DE;
+  font-size: 15px;
+  gap: 6px;
+  padding: 0 8px;
+}
+.cb-btn.active-bg { background: rgba(255,255,255,0.08); }
+.cb-btn .lbl { font-size: 11px; font-weight: 600; letter-spacing: 0.02em; color: #A8A6C4; }
+.cb-btn.chip {
+  border: 1px solid rgba(232,231,255,0.16);
+  font-size: 12px;
+  font-weight: 600;
+  color: #C9C8DE;
+}
+.cb-btn.confused {
+  border: 1px solid rgba(232,231,255,0.22);
+  color: #E8E7FF;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 0 12px;
+}
+.cb-btn.explain {
+  background: #EA580C;
+  color: #FFFFFF;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 0 14px;
+  border-radius: 10px;
+}
+.cb-btn.source {
+  color: #99F6E4;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 0 10px;
+}
+
+/* explain-more expanded cluster popover */
+.explain-popover {
+  position: absolute;
+  bottom: 66px;
+  left: 50%;
+  transform: translateX(calc(-50% + 190px));
+  background: #1E1B4B;
+  border: 1px solid rgba(232,231,255,0.14);
+  border-radius: 14px;
+  box-shadow: 0 20px 50px -12px rgba(20,18,59,0.65);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 210px;
+  z-index: 11;
+}
+.explain-popover .ep-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #FDBA8C;
+  padding: 6px 10px 4px;
+}
+.ep-item {
+  font-size: 13px;
+  color: #E8E7FF;
+  padding: 8px 10px;
+  border-radius: 8px;
+  display: flex;
+  justify-content: space-between;
+}
+.ep-item:hover, .ep-item.hint { background: rgba(255,255,255,0.06); }
+.ep-item span.tag { font-size: 10px; color: rgba(232,231,255,0.4); }
+</style>
+</head>
+<body>
+
+<div class="browser-frame">
+  <div class="titlebar">
+    <div class="tl-dots"><span class="tl-dot r"></span><span class="tl-dot y"></span><span class="tl-dot g"></span></div>
+    <div class="url-bar"><span class="lock">🔒</span> usavvy.app/board/session/applied-statistics/linear-regression</div>
+  </div>
+
+  <div class="viewport">
+
+    <div class="exit-link"><span class="chev">←</span> Exit to My Learning</div>
+    <div class="board-crumb">Applied Statistics: From Data to Decisions &nbsp;/&nbsp; <b>Linear Regression</b></div>
+
+    <div class="avatar-presence">
+      <div class="wave-mark"><span></span><span></span><span></span><span></span><span></span></div>
+      <span class="state-label">Speaking</span>
+    </div>
+
+    <div class="beat-gutter">
+      <div class="gutter-track"></div>
+      <div style="position:relative;"><div class="beat-marker done"></div><div class="gutter-label">1 · What is regression?</div></div>
+      <div style="position:relative;"><div class="beat-marker done"></div><div class="gutter-label">2 · Plotting the data</div></div>
+      <div style="position:relative;"><div class="beat-marker current"></div><div class="gutter-label" style="color:#FDBA8C;">3 · The cost function</div></div>
+      <div style="position:relative;"><div class="beat-marker upcoming"></div><div class="gutter-label">4 · Gradient descent</div></div>
+      <div style="position:relative;"><div class="beat-marker upcoming"></div><div class="gutter-label">5 · Checkpoint</div></div>
+      <div style="position:relative;"><div class="beat-marker upcoming"></div><div class="gutter-label">6 · Multiple features</div></div>
+    </div>
+
+    <div class="board-canvas">
+      <div class="beat-content">
+        <div class="beat-eyebrow">Beat 3 of 8
+          <span class="src-chip">📄 Source: Ch. 4, p. 112</span>
+        </div>
+
+        <div class="board-narration">
+          We've plotted house price against square footage. Notice how the points roughly follow a rising trend — as size goes up, price tends to go up too. If we wanted a single line that captures this trend as closely as possible, how would we choose it?
+          <br><br>
+          The cost function <i>J(θ)</i> measures how far off our line is, on average, across every point. Right now we're minimizing<span class="fade"> the squared distance between each point and the line</span><span class="caret"></span>
+        </div>
+
+        <div class="formula">J(θ) = (1 / 2m) · Σ (hθ(xᵢ) − yᵢ)²</div>
+
+        <div class="diagram-wrap">
+          <svg width="100%" height="220" viewBox="0 0 680 220">
+            <!-- axes -->
+            <line x1="50" y1="20" x2="50" y2="190" stroke="rgba(232,231,255,0.25)" stroke-width="1.5"/>
+            <line x1="50" y1="190" x2="650" y2="190" stroke="rgba(232,231,255,0.25)" stroke-width="1.5"/>
+            <text x="50" y="208" font-size="11" fill="rgba(232,231,255,0.4)" font-family="Inter">sq. footage →</text>
+            <text x="14" y="30" font-size="11" fill="rgba(232,231,255,0.4)" font-family="Inter">price</text>
+            <!-- scatter points -->
+            <circle cx="95" cy="165" r="5" fill="#99F6E4"/>
+            <circle cx="140" cy="150" r="5" fill="#99F6E4"/>
+            <circle cx="175" cy="160" r="5" fill="#99F6E4"/>
+            <circle cx="220" cy="128" r="5" fill="#99F6E4"/>
+            <circle cx="260" cy="140" r="5" fill="#99F6E4"/>
+            <circle cx="300" cy="110" r="5" fill="#99F6E4"/>
+            <circle cx="345" cy="118" r="5" fill="#99F6E4"/>
+            <circle cx="390" cy="92" r="5" fill="#99F6E4"/>
+            <circle cx="430" cy="100" r="5" fill="#99F6E4"/>
+            <circle cx="470" cy="72" r="5" fill="#99F6E4"/>
+            <circle cx="515" cy="80" r="5" fill="#99F6E4"/>
+            <circle cx="555" cy="55" r="5" fill="#99F6E4"/>
+            <!-- fitted line, drawn ~75% to suggest progressive drawing -->
+            <line x1="80" y1="175" x2="560" y2="60" stroke="#EA580C" stroke-width="2.5" stroke-linecap="round"/>
+            <line x1="560" y1="60" x2="630" y2="34" stroke="#EA580C" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="1 7" opacity="0.5"/>
+          </svg>
+          <div class="diagram-caption">Fig. 3 — fitted line minimizing squared error (still drawing…)</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Explain-more expanded cluster -->
+    <div class="explain-popover">
+      <div class="ep-title">Explain more</div>
+      <div class="ep-item hint">Deeper <span class="tag">more detail</span></div>
+      <div class="ep-item">Simpler <span class="tag">plain terms</span></div>
+      <div class="ep-item">Different example <span class="tag">swap</span></div>
+      <div class="ep-item">More examples <span class="tag">add</span></div>
+      <div class="ep-item">Analogy <span class="tag"></span></div>
+      <div class="ep-item">Ask anything <span class="tag">↵</span></div>
+    </div>
+
+    <!-- Board Control Bar -->
+    <div class="control-bar">
+      <div class="cb-group">
+        <div class="cb-btn active-bg" title="Pause">⏸</div>
+        <div class="cb-btn" title="Replay">⟲</div>
+        <div class="cb-btn" title="Back">⏮</div>
+        <div class="cb-btn" title="Forward">⏭</div>
+      </div>
+      <div class="cb-divider"></div>
+      <div class="cb-group">
+        <div class="cb-btn chip">1.0×</div>
+        <div class="cb-btn" title="Volume">🔊</div>
+        <div class="cb-btn chip">Voice: Neutral A</div>
+      </div>
+      <div class="cb-divider"></div>
+      <div class="cb-group">
+        <div class="cb-btn" title="Transcript"><span>📝</span><span class="lbl">Transcript</span></div>
+      </div>
+      <div class="cb-divider"></div>
+      <div class="cb-group">
+        <div class="cb-btn confused">I'm confused</div>
+        <div class="cb-btn explain">Explain more ▾</div>
+      </div>
+      <div class="cb-divider"></div>
+      <div class="cb-group">
+        <div class="cb-btn source">🔗 Source</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+</body>
+</html>

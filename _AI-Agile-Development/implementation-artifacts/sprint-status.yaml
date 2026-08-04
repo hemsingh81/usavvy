@@ -1,0 +1,215 @@
+# generated: 2026-08-04
+# last_updated: 2026-08-04
+# project: USavvy
+# project_key: NOKEY
+# tracking_system: file-system
+# story_location: _AI-Agile-Development/implementation-artifacts
+
+# STATUS DEFINITIONS:
+# ==================
+# Epic Status:
+#   - backlog: Epic not yet started
+#   - in-progress: Epic actively being worked on
+#   - done: All stories in epic completed
+#
+# Epic Status Transitions:
+#   - backlog → in-progress: Automatically when first story is created (via create-story)
+#   - in-progress → done: Manually when all stories reach 'done' status
+#
+# Story Status:
+#   - backlog: Story only exists in epic file
+#   - ready-for-dev: Story file created in stories folder
+#   - in-progress: Developer actively working on implementation
+#   - review: Ready for code review (via Dev's code-review workflow)
+#   - done: Story completed
+#
+# Retrospective Status:
+#   - optional: Can be completed but not required
+#   - done: Retrospective has been completed
+#
+# Action Item Status:
+#   - open: Committed during a retrospective, not yet addressed
+#   - in-progress: Actively being worked on
+#   - done: Completed
+#
+# WORKFLOW NOTES:
+# ===============
+# - Epic transitions to 'in-progress' automatically when first story is created
+# - Stories can be worked in parallel if team capacity allows
+# - Developer typically creates next story after previous one is 'done' to incorporate learnings
+# - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
+# - Retrospective appends its action items to action_items; sprint-status surfaces open ones
+
+generated: 2026-08-04
+last_updated: 2026-08-04
+project: USavvy
+project_key: NOKEY
+tracking_system: file-system
+story_location: _AI-Agile-Development/implementation-artifacts
+
+development_status:
+  epic-1: in-progress
+  1-0-environment-walking-skeleton-health-check: in-progress
+  1-1-sign-up-log-in-with-email-verification: backlog
+  1-2-age-declaration-minor-consent: backlog
+  1-3-onboarding-wizard: backlog
+  1-4-learner-preferences: backlog
+  1-5-profile-page: backlog
+  1-6-privacy-controls: backlog
+  1-7-account-deletion: backlog
+  1-8-data-export: backlog
+  1-9-predefined-color-theme-picker: backlog
+  1-10-notification-center: backlog
+  1-11-activity-history: backlog
+  epic-1-retrospective: optional
+
+  epic-2: backlog
+  2-1-model-the-course-module-topic-concept-hierarchy: backlog
+  2-2-catalog-browse-and-search-with-filters: backlog
+  2-3-course-detail-page: backlog
+  2-4-course-customisation-before-start: backlog
+  2-5-optional-placement-check: backlog
+  2-6-version-catalog-courses: backlog
+  2-7-upload-learner-content-with-copyright-attestation: backlog
+  2-8-paste-text-and-public-url-import: backlog
+  2-9-ingestion-pipeline-parse-ocr-fallback-structure-detection-and-chunking: backlog
+  2-10-content-safety-scan-during-ingestion: backlog
+  2-11-ingestion-status-with-progress-and-failure-reasons: backlog
+  2-12-embedding-and-ai-proposed-topic-concept-outline: backlog
+  2-13-review-and-edit-the-proposed-outline: backlog
+  2-14-mixed-courses-attach-personal-notes-to-a-catalog-course: backlog
+  epic-2-retrospective: optional
+
+  epic-3: backlog
+  3-1-pause-and-resume-the-board: backlog
+  3-2-replay-current-beat: backlog
+  3-3-step-back-and-forward-between-beats: backlog
+  3-4-board-zoom-pan-and-infinite-scroll-with-beat-gutter-markers: backlog
+  3-5-progressive-text-writing-synced-to-narration: backlog
+  3-6-progressive-math-notation-rendering: backlog
+  3-7-syntax-highlighted-line-synced-code-blocks: backlog
+  3-8-incrementally-drawn-diagrams: backlog
+  3-9-tables-and-comparison-grids: backlog
+  3-10-charts-and-plots-for-quantitative-concepts: backlog
+  3-11-highlight-spotlight-dimming: backlog
+  3-12-speed-volume-and-voice-controls: backlog
+  3-13-concept-boundary-checkpoint-questions: backlog
+  3-14-minimum-explanation-route-set: backlog
+  3-15-explain-deeper: backlog
+  3-16-explain-simpler: backlog
+  3-17-different-example: backlog
+  3-18-more-examples: backlog
+  3-19-explain-with-an-analogy: backlog
+  3-20-ask-anything: backlog
+  3-21-voice-input-for-ask-anything: backlog
+  3-22-im-confused-diagnostic-and-re-route: backlog
+  3-23-confusion-mapped-to-prerequisite-refresher: backlog
+  3-24-per-concept-explanation-history: backlog
+  3-25-repeat-explanation-selects-an-unused-route: backlog
+  3-26-auto-drop-difficulty-after-repeated-checkpoint-failures: backlog
+  3-27-restart-concept-via-a-different-route: backlog
+  3-28-bookmark-a-beat-with-a-note: backlog
+  3-29-view-source-for-the-current-beat: backlog
+  3-30-searchable-transcript-panel: backlog
+  3-31-export-board-as-png-pdf-and-study-summary: backlog
+  3-32-learner-annotation-on-the-board: backlog
+  epic-3-retrospective: optional
+
+  epic-4: backlog
+  4-1-predefined-course-plans-relaxed-standard-intensive: backlog
+  4-2-custom-plan-builder: backlog
+  4-3-generate-dated-session-schedule-respecting-prerequisites: backlog
+  4-4-conceptprogress-skip-un-skip-state-machine-and-mastery-scope: backlog
+  4-5-skip-disclosure-shared-component-and-data-shape: backlog
+  4-6-progress-dashboard: backlog
+  4-7-plan-vs-actual-position: backlog
+  4-8-pace-based-forecast-with-confidence-band: backlog
+  4-9-one-click-replan-options: backlog
+  4-10-calendar-view-with-ics-export: backlog
+  4-11-session-and-streak-at-risk-reminders: backlog
+  4-12-compressed-catch-up-recovery-plan: backlog
+  4-13-skip-concept-board-control: backlog
+  4-14-publish-mastery-and-completion-events: backlog
+  epic-4-retrospective: optional
+
+  epic-5: backlog
+  5-1-publish-stable-versioned-star-value-table: backlog
+  5-2-track-daily-learning-streaks-with-monthly-freeze-days: backlog
+  5-3-award-stars-generically-via-domain-event-subscription: backlog
+  5-4-award-milestone-badges: backlog
+  5-5-generate-shareable-verifiable-non-accredited-completion-certificate: backlog
+  epic-5-retrospective: optional
+
+  epic-6: backlog
+  6-1-auto-generate-calibrated-assignments: backlog
+  6-2-support-the-full-range-of-item-types: backlog
+  6-3-visible-rubric-before-starting-an-assignment: backlog
+  6-4-submit-via-in-browser-editor-with-drafts-uploads-and-one-resubmission: backlog
+  6-5-practice-mode-vs-graded-mode: backlog
+  6-6-ocr-handwritten-submissions-with-learner-confirmation: backlog
+  6-7-deterministically-auto-grade-objective-items: backlog
+  6-8-grade-open-ended-items-criterion-by-criterion: backlog
+  6-9-structured-feedback-with-concept-link-back: backlog
+  6-10-flag-low-confidence-gradings-for-human-spot-check: backlog
+  6-11-grade-appeal-with-second-pass-evaluation-and-human-escalation: backlog
+  6-12-publish-assignment-results-to-the-mastery-progress-model: backlog
+  6-13-meet-turnaround-slas-across-item-types-with-status-for-long-form: backlog
+  6-14-academic-integrity-notice-for-v1: backlog
+  epic-6-retrospective: optional
+
+  epic-7: backlog
+  7-1-configure-cohort-enabled-course-offering: backlog
+  7-2-join-timezone-aware-cohort-waiting-list: backlog
+  7-3-waiting-list-status-display: backlog
+  7-4-matching-engine-forms-cohort-from-waiting-list: backlog
+  7-5-fallback-handling-for-non-fitting-waiting-list-members: backlog
+  7-6-enforce-cohort-size-cap-during-formation: backlog
+  7-7-member-confirms-proposed-cohort-schedule-within-48-hours: backlog
+  7-8-anti-stall-guarantee-for-long-waiting-learners: backlog
+  7-9-scheduled-live-cohort-session-room-with-synchronized-avatar-board: backlog
+  7-10-late-join-a-cohort-in-its-first-two-sessions: backlog
+  7-11-individual-explain-more-to-private-side-panel: backlog
+  7-12-shared-re-explanation-when-repeat-requests-cross-threshold: backlog
+  7-13-threaded-text-chat-in-live-session: backlog
+  7-14-raise-hand-queue: backlog
+  7-15-live-polls-and-group-checkpoints-with-anonymized-results: backlog
+  7-16-peer-explain-back-with-rotating-nomination: backlog
+  7-17-breakout-pairs-for-practice-problems: backlog
+  7-18-session-recordings-available-for-30-days: backlog
+  7-19-attendance-tracking-with-missed-session-catch-up-replay: backlog
+  7-20-cohort-progress-board: backlog
+  7-21-chat-profanity-filter-and-safety-escalation: backlog
+  7-22-report-mute-remove-and-admin-moderation-queue-with-sla: backlog
+  7-23-attendance-floor-breach-offers-merge-or-self-paced-conversion: backlog
+  epic-7-retrospective: optional
+
+  epic-8: backlog
+  8-1-anti-gaming-validation-of-leaderboard-scoring-signals: backlog
+  8-2-mastery-consistency-ranking-engine-via-engagement-module-api: backlog
+  8-3-opt-in-enrollment-and-pseudonymous-display-name-for-leaderboards: backlog
+  8-4-local-neighborhood-course-and-global-leaderboard-views: backlog
+  8-5-self-hide-from-all-leaderboards-without-losing-stars-or-badges: backlog
+  8-6-within-cohort-leaderboard-with-collective-goal: backlog
+  epic-8-retrospective: optional
+
+  epic-9: backlog
+  9-1-course-hierarchy-builder: backlog
+  9-2-attach-source-materials-to-hierarchy-nodes: backlog
+  9-3-define-objectives-prerequisites-and-checkpoints: backlog
+  9-4-pre-generate-and-review-ai-beats: backlog
+  9-5-content-qa-review-workflow: backlog
+  9-6-content-version-history-and-rollback: backlog
+  9-7-cohort-admin-console: backlog
+  9-8-flagged-uploads-and-copyright-moderation: backlog
+  9-9-grading-appeal-and-low-confidence-grading-moderation: backlog
+  9-10-abuse-report-moderation: backlog
+  9-11-user-search-and-profile-view: backlog
+  9-12-user-account-actions-reset-suspend-delete: backlog
+  9-13-signup-to-completion-funnel-and-retention-cohorts: backlog
+  9-14-session-telemetry-and-control-usage-dashboard: backlog
+  9-15-drop-off-points-by-concept: backlog
+  9-16-concept-difficulty-heatmap: backlog
+  9-17-ai-quality-dashboard: backlog
+  9-18-in-session-thumbs-up-down-feedback: backlog
+  9-19-issue-refunds: backlog
+  epic-9-retrospective: optional

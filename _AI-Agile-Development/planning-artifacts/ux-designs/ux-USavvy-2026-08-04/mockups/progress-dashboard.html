@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Usavvy — Progress Dashboard (key screen)</title>
+<style>
+/*
+  KEY SCREEN: Progress Dashboard (Epic 4) — light chrome, board stays quiet outside the Board itself.
+  Governed by:
+    DESIGN.md → Colors (primary indigo nav, secondary teal fills, warning token for "behind" state,
+                accent reserved for CTA/streak only — never for the behind-schedule status),
+                Components → progress-disclosure, streak-flame, button-secondary; Typography (label/caption/body)
+    EXPERIENCE.md → Surface map (Plan builder, Progress dashboard, Calendar — Epic 4, reached Nav → My Learning),
+                     Component Patterns → Progress Disclosure ("never a bare percentage"),
+                     Key Flow J2 (Ravi builds a plan and falls behind) → "Behind — 4 concepts; ... 12 days late"
+                     and climax beat "Replan: extend to 6 weeks"
+*/
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: #DCDBE4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 32px 16px;
+}
+.browser-frame {
+  width: 1360px;
+  max-width: 100%;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 30px 70px -20px rgba(20,18,59,0.45), 0 2px 8px rgba(20,18,59,0.15);
+  background: #E7E4F1;
+}
+.titlebar {
+  height: 42px;
+  background: #E7E4F1;
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  gap: 14px;
+  border-bottom: 1px solid #CAC8D6;
+}
+.tl-dots { display: flex; gap: 7px; }
+.tl-dot { width: 11px; height: 11px; border-radius: 50%; }
+.tl-dot.r { background: #EC6A5E; }
+.tl-dot.y { background: #F4BF4F; }
+.tl-dot.g { background: #61C554; }
+.url-bar {
+  flex: 1; height: 26px; background: #FFFFFF; border: 1px solid #CAC8D6; border-radius: 999px;
+  display: flex; align-items: center; padding: 0 12px; font-size: 12px; color: #4B4A57; gap: 6px;
+}
+.url-bar .lock { color: #79778A; font-size: 11px; }
+
+.viewport { width: 100%; height: 900px; background: #FAFAFC; overflow-y: auto; }
+
+/* primary nav — quiet, indigo-on-white, never competes with the Board */
+.app-nav {
+  height: 60px;
+  background: #FFFFFF;
+  border-bottom: 1px solid #E7E4F1;
+  display: flex;
+  align-items: center;
+  padding: 0 32px;
+  gap: 36px;
+}
+.brand { font-size: 18px; font-weight: 700; color: #4338CA; letter-spacing: -0.01em; margin-right: 10px;}
+.nav-item { font-size: 14px; font-weight: 600; color: #4B4A57; }
+.nav-item.current { color: #4338CA; }
+.nav-spacer { flex: 1; }
+.profile-chip {
+  width: 34px; height: 34px; border-radius: 50%; background: #E0E7FF; color: #312E81;
+  display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700;
+}
+
+.page { padding: 40px 48px 64px; max-width: 1240px; margin: 0 auto; }
+.page-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 28px; }
+.page-title { font-size: 28px; font-weight: 600; line-height: 1.25; color: #1B1B23; }
+.page-sub { font-size: 15px; color: #4B4A57; margin-top: 4px; }
+
+.grid { display: grid; grid-template-columns: 1.55fr 1fr; gap: 24px; }
+
+.card {
+  background: #FFFFFF;
+  border: 1px solid #E7E4F1;
+  border-radius: 16px;
+  padding: 24px 26px;
+}
+.card + .card { margin-top: 24px; }
+.card-title {
+  font-size: 13px; font-weight: 600; letter-spacing: 0.02em; text-transform: uppercase;
+  color: #79778A; margin-bottom: 16px;
+}
+
+/* Progress Disclosure — fill (secondary) + track (surface-dim) + explicit N of M / skipped text. Never a bare %. */
+.pd-track { width: 100%; height: 14px; border-radius: 999px; background: #E7E5EF; overflow: hidden; }
+.pd-fill { height: 100%; width: 69%; background: #0D9488; border-radius: 999px; }
+.pd-text { margin-top: 12px; font-size: 15px; color: #1B1B23; }
+.pd-text b { font-weight: 700; }
+.pd-caption { margin-top: 4px; font-size: 12px; color: #79778A; }
+
+/* Plan vs Actual — "behind" uses the warning token, never accent/error */
+.status-card {
+  border-radius: 14px;
+  background: #F7F6FB;
+  border-left: 4px solid #D97706;
+  padding: 16px 18px;
+  margin-top: 18px;
+}
+.status-top { display: flex; align-items: center; gap: 8px; }
+.status-badge {
+  font-size: 12px; font-weight: 700; letter-spacing: 0.02em; color: #92400E;
+  background: #FDECD1; border-radius: 999px; padding: 3px 10px;
+}
+.status-text { margin-top: 8px; font-size: 15px; color: #1B1B23; line-height: 1.5; }
+.status-actions { margin-top: 14px; display: flex; gap: 10px; }
+.btn-secondary {
+  border: 1px solid #79778A; color: #4338CA; background: transparent; border-radius: 10px;
+  font-size: 13px; font-weight: 600; padding: 9px 16px;
+}
+.btn-quiet { color: #4B4A57; font-size: 13px; font-weight: 600; padding: 9px 12px; }
+
+/* pace forecast chart with confidence band */
+.chart-legend { display: flex; gap: 18px; margin-bottom: 10px; font-size: 12px; color: #4B4A57; }
+.leg-swatch { display: inline-block; width: 14px; height: 3px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
+
+/* mastery by topic */
+.topic-row { display: flex; align-items: center; gap: 14px; padding: 12px 0; border-bottom: 1px solid #F0EEF7; }
+.topic-row:last-child { border-bottom: none; }
+.topic-name { width: 210px; font-size: 14px; color: #1B1B23; font-weight: 500; }
+.topic-bar-track { flex: 1; height: 10px; background: #E7E5EF; border-radius: 999px; overflow: hidden; }
+.topic-bar-fill { height: 100%; background: #0D9488; border-radius: 999px; }
+.topic-tier { width: 118px; text-align: right; font-size: 12px; font-weight: 600; }
+.tier-strong { color: #0D9488; }
+.tier-dev { color: #4338CA; }
+.tier-needs { color: #92400E; }
+
+/* streak */
+.streak-card { display: flex; align-items: center; gap: 16px; }
+.flame {
+  width: 52px; height: 52px; border-radius: 14px; background: #FFEDD5;
+  display: flex; align-items: center; justify-content: center; font-size: 26px; color: #EA580C;
+}
+.streak-num { font-size: 24px; font-weight: 700; color: #1B1B23; }
+.streak-lbl { font-size: 13px; color: #79778A; }
+
+/* stars summary chip */
+.star-row { display: flex; align-items: center; gap: 10px; margin-top: 16px; }
+.star-badge {
+  width: 30px; height: 30px; border-radius: 50%; background: #EA580C; color: #FFFFFF;
+  display: flex; align-items: center; justify-content: center; font-size: 14px;
+}
+</style>
+</head>
+<body>
+
+<div class="browser-frame">
+  <div class="titlebar">
+    <div class="tl-dots"><span class="tl-dot r"></span><span class="tl-dot y"></span><span class="tl-dot g"></span></div>
+    <div class="url-bar"><span class="lock">🔒</span> usavvy.app/my-learning/progress</div>
+  </div>
+
+  <div class="viewport">
+    <div class="app-nav">
+      <span class="brand">Usavvy</span>
+      <span class="nav-item">Home</span>
+      <span class="nav-item">Catalog</span>
+      <span class="nav-item current">My Learning</span>
+      <span class="nav-item">Cohorts</span>
+      <span class="nav-item">Assignments</span>
+      <span class="nav-item">Notes</span>
+      <div class="nav-spacer"></div>
+      <div class="profile-chip">RM</div>
+    </div>
+
+    <div class="page">
+      <div class="page-head">
+        <div>
+          <div class="page-title">Progress Dashboard</div>
+          <div class="page-sub">Applied Statistics: From Data to Decisions — Standard plan, 5 weeks</div>
+        </div>
+      </div>
+
+      <div class="grid">
+        <div class="col-main">
+
+          <div class="card">
+            <div class="card-title">Course Progress</div>
+            <div class="pd-track"><div class="pd-fill"></div></div>
+            <div class="pd-text">Completed <b>18 of 26</b> concepts studied, <b>3</b> skipped</div>
+            <div class="pd-caption">5 concepts remaining in the current plan</div>
+
+            <div class="status-card">
+              <div class="status-top">
+                <span class="status-badge">BEHIND SCHEDULE</span>
+              </div>
+              <div class="status-text">Behind — 4 concepts. At your current pace you'll finish <b>12 days late</b> (around Sep 21 instead of Sep 9).</div>
+              <div class="status-actions">
+                <button class="btn-secondary">Replan: extend to 6 weeks</button>
+                <button class="btn-quiet">Keep current plan</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-title">Pace Forecast</div>
+            <div class="chart-legend">
+              <span><span class="leg-swatch" style="background:#4338CA;"></span>Planned pace</span>
+              <span><span class="leg-swatch" style="background:#0D9488;"></span>Actual pace</span>
+              <span><span class="leg-swatch" style="background:#CAC8D6;"></span>Forecast confidence band</span>
+            </div>
+            <svg width="100%" height="220" viewBox="0 0 720 220">
+              <line x1="40" y1="10" x2="40" y2="180" stroke="#E7E5EF" stroke-width="1.5"/>
+              <line x1="40" y1="180" x2="700" y2="180" stroke="#E7E5EF" stroke-width="1.5"/>
+              <text x="4" y="185" font-size="10" fill="#79778A" font-family="Inter">0</text>
+              <text x="4" y="18" font-size="10" fill="#79778A" font-family="Inter">26</text>
+              <text x="36" y="200" font-size="10" fill="#79778A" font-family="Inter">Wk1</text>
+              <text x="185" y="200" font-size="10" fill="#79778A" font-family="Inter">Wk2</text>
+              <text x="330" y="200" font-size="10" fill="#79778A" font-family="Inter">Wk3</text>
+              <text x="475" y="200" font-size="10" fill="#79778A" font-family="Inter">Wk4</text>
+              <text x="615" y="200" font-size="10" fill="#79778A" font-family="Inter">Wk5 (today)</text>
+
+              <!-- confidence band around forward forecast -->
+              <polygon points="440,130 700,55 700,110 440,150" fill="#E7E5EF" opacity="0.9"/>
+
+              <!-- planned pace: straight dashed line to completion -->
+              <polyline points="40,180 700,20" fill="none" stroke="#4338CA" stroke-width="2" stroke-dasharray="6 5"/>
+
+              <!-- actual pace: realized (solid teal) then forecast continuation -->
+              <polyline points="40,180 150,160 260,146 370,132 440,130" fill="none" stroke="#0D9488" stroke-width="2.5"/>
+              <polyline points="440,130 700,82" fill="none" stroke="#0D9488" stroke-width="2.5" stroke-dasharray="2 6" opacity="0.75"/>
+
+              <circle cx="440" cy="130" r="4.5" fill="#0D9488"/>
+            </svg>
+          </div>
+
+          <div class="card">
+            <div class="card-title">Mastery by Topic</div>
+            <div class="topic-row">
+              <div class="topic-name">Descriptive Statistics</div>
+              <div class="topic-bar-track"><div class="topic-bar-fill" style="width:88%;"></div></div>
+              <div class="topic-tier tier-strong">Strong · 88%</div>
+            </div>
+            <div class="topic-row">
+              <div class="topic-name">Probability Distributions</div>
+              <div class="topic-bar-track"><div class="topic-bar-fill" style="width:74%;"></div></div>
+              <div class="topic-tier tier-dev">Developing · 74%</div>
+            </div>
+            <div class="topic-row">
+              <div class="topic-name">Hypothesis Testing</div>
+              <div class="topic-bar-track"><div class="topic-bar-fill" style="width:61%;"></div></div>
+              <div class="topic-tier tier-dev">Developing · 61%</div>
+            </div>
+            <div class="topic-row">
+              <div class="topic-name">Regression &amp; Correlation</div>
+              <div class="topic-bar-track"><div class="topic-bar-fill" style="width:34%;"></div></div>
+              <div class="topic-tier tier-needs">Needs practice · 34%</div>
+            </div>
+          </div>
+
+        </div>
+
+        <div class="col-side">
+          <div class="card streak-card">
+            <div class="flame">🔥</div>
+            <div>
+              <div class="streak-num">14-day streak</div>
+              <div class="streak-lbl">Longest: 21 days</div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-title">This Week</div>
+            <div class="pd-text" style="font-size:14px;">3 of 5 planned sessions completed</div>
+            <div class="pd-track" style="margin-top:10px;"><div class="pd-fill" style="width:60%;"></div></div>
+            <div class="star-row">
+              <div class="star-badge">★</div>
+              <span style="font-size:14px; color:#1B1B23;"><b>240 stars</b> earned overall</span>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-title">Up Next</div>
+            <div class="pd-text" style="font-size:14px;">Regression &amp; Correlation — Session 6</div>
+            <div class="pd-caption">Scheduled Thu, Aug 6 · 45 min</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

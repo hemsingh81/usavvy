@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PRD Validation: Usavvy</title>
+<style>
+  :root {
+    --bg: #fafaf9;
+    --surface: #ffffff;
+    --border: #e7e5e4;
+    --text: #1c1917;
+    --muted: #78716c;
+
+    --verdict-strong: #16a34a;
+    --verdict-adequate: #65a30d;
+    --verdict-thin: #d97706;
+    --verdict-broken: #dc2626;
+
+    --sev-low: #64748b;
+    --sev-medium: #ca8a04;
+    --sev-high: #ea580c;
+    --sev-critical: #dc2626;
+
+    --grade-exc: #16a34a;
+    --grade-good: #65a30d;
+    --grade-fair: #d97706;
+    --grade-poor: #dc2626;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    font-size: 15px;
+  }
+  .container { max-width: 960px; margin: 0 auto; padding: 32px 24px 64px; }
+
+  header.report-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 24px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 24px;
+  }
+  .title h1 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
+  .title .subtitle { color: var(--muted); font-size: 13px; margin-top: 4px; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  .grade {
+    padding: 10px 18px;
+    border-radius: 8px;
+    font-weight: 600;
+    color: white;
+    font-size: 15px;
+    white-space: nowrap;
+  }
+  .grade-excellent { background: var(--grade-exc); }
+  .grade-good { background: var(--grade-good); }
+  .grade-fair { background: var(--grade-fair); }
+  .grade-poor { background: var(--grade-poor); }
+
+  .synthesis {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--muted);
+    border-radius: 8px;
+    padding: 18px 22px;
+    margin-bottom: 24px;
+    font-size: 15.5px;
+  }
+  .synthesis p { margin: 0 0 10px; }
+  .synthesis p:last-child { margin-bottom: 0; }
+
+  .dimension-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 10px;
+    margin-bottom: 24px;
+  }
+  .dim-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+  }
+  .dim-card .dim-name { font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+  .dim-card .dim-verdict { font-size: 14px; font-weight: 600; }
+
+  section.dimension, section.reviewer-section { margin-bottom: 14px; }
+  section.dimension details, section.reviewer-section details {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  section summary {
+    padding: 14px 20px;
+    cursor: pointer;
+    user-select: none;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  section summary::-webkit-details-marker { display: none; }
+  section summary::before {
+    content: "▸";
+    display: inline-block;
+    color: var(--muted);
+    transition: transform 0.15s ease;
+  }
+  section details[open] summary::before { transform: rotate(90deg); }
+  section summary h2 {
+    display: inline;
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: -0.005em;
+    flex: 1;
+  }
+  .verdict-pill {
+    font-size: 11px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: white;
+  }
+  .verdict-strong { background: var(--verdict-strong); }
+  .verdict-adequate { background: var(--verdict-adequate); }
+  .verdict-thin { background: var(--verdict-thin); }
+  .verdict-broken { background: var(--verdict-broken); }
+
+  .dim-body { padding: 4px 20px 18px; }
+  .dim-judgment { color: var(--text); font-size: 14.5px; }
+  .dim-judgment p { margin: 0 0 10px; }
+
+  .findings-list { padding: 0 20px 4px; }
+  article.finding {
+    padding: 14px 0;
+    border-top: 1px solid var(--border);
+  }
+  article.finding:first-child { border-top: none; }
+  article.finding header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 6px;
+  }
+  .badge {
+    font-size: 10.5px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    line-height: 1.4;
+  }
+  .badge-sev-low { background: rgba(100, 116, 139, 0.12); color: var(--sev-low); }
+  .badge-sev-medium { background: rgba(202, 138, 4, 0.14); color: var(--sev-medium); }
+  .badge-sev-high { background: rgba(234, 88, 12, 0.14); color: var(--sev-high); }
+  .badge-sev-critical { background: rgba(220, 38, 38, 0.14); color: var(--sev-critical); }
+  .finding-title { margin: 0; font-size: 15px; font-weight: 500; flex: 1; min-width: 200px; }
+  .finding-location { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12.5px; color: var(--muted); }
+  .finding-note, .finding-fix { margin-top: 6px; font-size: 14px; }
+  .finding-fix strong { color: var(--muted); font-weight: 500; }
+
+  .reviewer-source {
+    font-size: 12px;
+    color: var(--muted);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+
+  .mechanical {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin-top: 24px;
+    font-size: 14px;
+  }
+  .mechanical h3 { margin: 0 0 10px; font-size: 14px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  .mechanical ul { margin: 0; padding-left: 20px; }
+  .mechanical li { margin-bottom: 4px; color: var(--text); }
+
+  footer.report-footer {
+    margin-top: 40px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--muted);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  footer .meta { display: flex; gap: 24px; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+  <div class="container">
+
+    <header class="report-header">
+      <div class="title">
+        <h1>Usavvy PRD — Validation Report</h1>
+        <div class="subtitle">Doc/00-Requirement.md</div>
+      </div>
+      <div class="grade grade-poor">Poor</div>
+    </header>
+
+    <div class="synthesis">
+      <p>This is an unusually disciplined, thesis-driven PRD: it names a real bet ("the board, not the chat"), sequences scope around that bet, quantifies almost every NFR, and is upfront about what it hasn't decided (§22, 8 open questions, an explicit "before engineering commits to estimates" gate). On structure and rhetoric it reads as chain-top-ready — every rubric dimension came back strong or adequate, with zero thin or broken dimensions.</p>
+      <p>The grade is dragged down by what the adversarial pass found underneath that structure: two concrete, product-critical defects. The mastery/progress formula in §11.2 is internally broken — skipped concepts keep their weight in the denominator while scoring zero in the numerator, permanently capping achievable progress below 100% and contradicting FR-B-11's "excluded from mastery" language, with no defined completion threshold to fall back on. And FR-G-6's anti-stall guarantee — the BA's own words, "not optional... the mitigation that makes this feature safe to ship" against the highest-rated risk in the register (R-4, High/High) — ships with a literal undefined placeholder ("within X days"). Layered on top: a factual contradiction in the launch course count (25 in §3.2 vs. 10 in §7/OQ-4), a forecast algorithm with a unit mismatch, four of the eight "open" stakeholder decisions in §22 that are already answered elsewhere in the same document, and an inconsistently-applied MUST/MVP-blocking convention across Epic 5 and Epic 6 that will mislead whoever authors epics and stories next. None of this is a weak PRD — it's a strong PRD carrying two broken mechanisms and a batch of internal-consistency bugs that a decision-maker should not sign off on as-is.</p>
+    </div>
+
+    <div class="dimension-summary">
+      <div class="dim-card">
+        <div class="dim-name">Decision-readiness</div>
+        <div class="dim-verdict" style="color: var(--verdict-strong)">Strong</div>
+      </div>
+      <div class="dim-card">
+        <div class="dim-name">Substance over theater</div>
+        <div class="dim-verdict" style="color: var(--verdict-strong)">Strong</div>
+      </div>
+      <div class="dim-card">
+        <div class="dim-name">Strategic coherence</div>
+        <div class="dim-verdict" style="color: var(--verdict-strong)">Strong</div>
+      </div>
+      <div class="dim-card">
+        <div class="dim-name">Done-ness clarity</div>
+        <div class="dim-verdict" style="color: var(--verdict-adequate)">Adequate</div>
+      </div>
+      <div class="dim-card">
+        <div class="dim-name">Scope honesty</div>
+        <div class="dim-verdict" style="color: var(--verdict-strong)">Strong</div>
+      </div>
+      <div class="dim-card">
+        <div class="dim-name">Downstream usability</div>
+        <div class="dim-verdict" style="color: var(--verdict-adequate)">Adequate</div>
+      </div>
+      <div class="dim-card">
+        <div class="dim-name">Shape fit</div>
+        <div class="dim-verdict" style="color: var(--verdict-strong)">Strong</div>
+      </div>
+    </div>
+
+    <section class="dimension">
+      <details>
+        <summary>
+          <h2>Decision-readiness</h2>
+          <span class="verdict-pill verdict-strong">Strong</span>
+        </summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>Trade-offs are named with what was given up, not just what was chosen. §19.1 commits to a voice-only Avatar and states the cost explicitly ("video avatars add cost, latency, and uncanny-valley risk... Every second spent on face rendering is a second not spent on NFR-B-2"), then still flags it as Assumption A2 and OQ-3 for stakeholder override. §7's BA recommendation R1 explicitly declines to compress cohorts into the MVP and states why. §21's risk table doesn't smooth ratings to neutral — R-4 and R-6 are both rated High/High. §22's Open Questions read as genuinely open rather than rhetorical.</p>
+          </div>
+        </div>
+        <div class="findings-list">
+          <article class="finding">
+            <header>
+              <span class="finding-title" style="color: var(--muted); font-weight: 400;">No findings — dimension is strong.</span>
+            </header>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details>
+        <summary>
+          <h2>Substance over theater</h2>
+          <span class="verdict-pill verdict-strong">Strong</span>
+        </summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>NFRs are quantified, not boilerplate (NFR-1, NFR-3, NFR-5, NFR-B-1..6). The differentiation claim is grounded in cited learning-science mechanisms rather than asserted novelty. Personas brush against the "more than four" smell but each drives a specific FR, UJ, or NFR rather than sitting decoratively.</p>
+          </div>
+        </div>
+        <div class="findings-list">
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-low">Low</span>
+              <h3 class="finding-title">Persona count exceeds the theater threshold but is functionally anchored</h3>
+              <span class="finding-location">§4</span>
+            </header>
+            <div class="finding-note">Six personas (P1–P6) is above the rubric's "more than four" smell line. Each ties to something concrete (P1→J1, P2→J2, P3→J3, P4→NFR-16, P5→FR-O-1, P6→FR-O-4), so this reads as justified rather than padding, but P5/P6 are internal operational roles, not UX personas.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Relabel P5/P6 as "internal roles" distinct from the learner-persona set, or note explicitly in §4 that only P1–P4 are UX personas.</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details>
+        <summary>
+          <h2>Strategic coherence</h2>
+          <span class="verdict-pill verdict-strong">Strong</span>
+        </summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>The thesis is stated and re-stated at the point of maximum leverage (§2, §10, §7's MVP sequencing). The North Star metric measures the thesis directly rather than defaulting to DAU/MAU-style activity, and several metrics carry built-in tension against gaming.</p>
+          </div>
+        </div>
+        <div class="findings-list">
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">Medium</span>
+              <h3 class="finding-title">No explicit counter-metrics named for the North Star or Business Objectives</h3>
+              <span class="finding-location">§20, §3.2</span>
+            </header>
+            <div class="finding-note">Usavvy has organically embedded tension (checkpoint accuracy bounds, cost-per-learner-hour vs. "explain more" usage) but nothing is labeled as a counter-metric to the North Star or BO-1/BO-2. Without one, a team under growth pressure could inflate mastery counts by softening checkpoints.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Add an explicit counter-metric row to §20, e.g. "Checkpoint difficulty drift (should not decrease as mastery-concepts/week rises)," or reference §11.2's mastery-weighting as the enforced counter-mechanism.</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details open>
+        <summary>
+          <h2>Done-ness clarity</h2>
+          <span class="verdict-pill verdict-adequate">Adequate</span>
+        </summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>The majority of this PRD is unusually strong on done-ness: most FRs pair with Gherkin acceptance criteria (§8.2, §9.3, §10.5, §11.4), and soft-sounding phrases are consistently operationalized. That said, a handful of MUST-priority items don't carry a testable bound, and one legally sensitive flow is thin.</p>
+          </div>
+        </div>
+        <div class="findings-list">
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">Medium</span>
+              <h3 class="finding-title">FR-G-7 cohort size cap is advisory language under a MUST priority</h3>
+              <span class="finding-location">§12.1</span>
+            </header>
+            <div class="finding-note">"Cohort size cap for interaction quality: recommend 6–15 learners" is tagged MUST, but "recommend" gives no enforceable bound — an engineer cannot write a test for this as written.</div>
+            <div class="finding-fix"><strong>Fix:</strong> State a hard bound ("cohort MUST NOT exceed 15; target range 6–15") or re-tag as SHOULD if it's genuinely a guideline.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">Medium</span>
+              <h3 class="finding-title">NFR-24 fair-use ceiling has no quantified bound</h3>
+              <span class="finding-location">§16.4</span>
+            </header>
+            <div class="finding-note">"Fair-use ceilings on generation-heavy actions, expressed generously and only enforced against abuse patterns" names a principle but no number and no definition of "abuse pattern," unlike NFR-22/23 in the same section which are precisely measured.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Specify a placeholder ceiling with an <code>[ASSUMPTION]</code> tag pending the unit-cost model, or explicitly defer the number to that model and say so.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">Medium</span>
+              <h3 class="finding-title">FR-A-2 minor/parental-consent flow is underspecified for its legal weight</h3>
+              <span class="finding-location">§8.1</span>
+            </header>
+            <div class="finding-note">The entire flow is one line, with no acceptance criteria (unlike adult onboarding's AC-A-3.1/3.2) and open questions unaddressed: what happens if the parent never responds, how is the parental email verified, what does the minor see while waiting.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Add acceptance criteria for FR-A-2, or explicitly <code>[NOTE FOR PM]</code> it as deferred to the Data Protection Impact Assessment listed in §1.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">Medium</span>
+              <h3 class="finding-title">Relationship between onboarding "explanation style default" and "Explanation route" is unstated</h3>
+              <span class="finding-location">FR-A-4 vs. FR-B-21, §10.3</span>
+            </header>
+            <div class="finding-note">FR-A-4's style vocabulary overlaps with FR-B-21's 8-item route taxonomy (example-first vs. worked example; analogy-first vs. analogy) but nothing states whether onboarding style seeds the first route choice, constrains rotation, or is independent of it.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Add one sentence to §10.3 or §8.1 clarifying the relationship between the two.</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details>
+        <summary>
+          <h2>Scope honesty</h2>
+          <span class="verdict-pill verdict-strong">Strong</span>
+        </summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>§3.3's Non-Goals section does real work with seven explicit exclusions, each reasoned. De-scoping is proposed openly (§7's R1), and the document is honest about its own readiness rather than presenting itself as green-lit. The 8 open questions are gated to specific downstream milestones.</p>
+          </div>
+        </div>
+        <div class="findings-list">
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-low">Low</span>
+              <h3 class="finding-title">No consolidated Assumptions Index</h3>
+              <span class="finding-location">§4, §19.1</span>
+            </header>
+            <div class="finding-note">Only two inline assumptions exist (A1, A2), both roundtripped through §22, so nothing is orphaned — but there's no dedicated index section a downstream reader can scan in one place.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Add a two-row index table (or fold into §22) listing A1 and A2 with their §22 cross-reference.</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details open>
+        <summary>
+          <h2>Downstream usability</h2>
+          <span class="verdict-pill verdict-adequate">Adequate</span>
+        </summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>Cross-references generally resolve correctly, and FR/AC ID numbering is contiguous within every epic. The two real gaps — Glossary coverage and one floating UJ — matter more here because this document is explicitly chain-top.</p>
+          </div>
+        </div>
+        <div class="findings-list">
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-high">High</span>
+              <h3 class="finding-title">Glossary omits the structural nouns the rest of the PRD depends on</h3>
+              <span class="finding-location">§23</span>
+            </header>
+            <div class="finding-note">Course, Module, Topic, and Session are all central, repeatedly-used terms (FR-C-1's content hierarchy, §18's data model, §10.1's "A Session teaches one or more Concepts") but none appear in the Glossary. Downstream UX/architecture work that source-extracts definitions from §23 alone will not find these.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Add Course, Module, Topic, and Session to §23 with the same one-line-definition treatment as existing entries.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">Medium</span>
+              <h3 class="finding-title">UJ J4 has no named protagonist</h3>
+              <span class="finding-location">§17</span>
+            </header>
+            <div class="finding-note">J1, J2, and J3 each open with a named persona; J4 ("Assignment loop") never names a protagonist — a floating UJ covering a non-trivial new mechanic (auto-grading, appeal path).</div>
+            <div class="finding-fix"><strong>Fix:</strong> Reopen J4 with one of the existing personas (Ananya or Ravi both have plan/mastery context already established).</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-low">Low</span>
+              <h3 class="finding-title">NFR-B-* ID namespace isn't declared in the traceability legend</h3>
+              <span class="finding-location">§1</span>
+            </header>
+            <div class="finding-note">§1's legend states <code>NFR-&lt;n&gt;</code>, but §10.6 uses a distinct <code>NFR-B-&lt;n&gt;</code> namespace. Both are internally consistent, but the legend doesn't mention the epic-scoped variant exists.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Extend the §1 legend to note <code>NFR-&lt;Epic&gt;-&lt;n&gt;</code> is used for epic-scoped non-functionals.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-low">Low</span>
+              <h3 class="finding-title">Sections lean on section-number cross-references rather than glossary-term-only references</h3>
+              <span class="finding-location">throughout</span>
+            </header>
+            <div class="finding-note">References like "(§10.2, FR-B-14)" require jumping to another section rather than resolving through shared vocabulary. Minor given the PRD's length and internal consistency.</div>
+            <div class="finding-fix"><strong>Fix:</strong> No action required unless sections are sharded for downstream consumption, in which case convert to stable anchors or glossary-term links.</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details>
+        <summary>
+          <h2>Shape fit</h2>
+          <span class="verdict-pill verdict-strong">Strong</span>
+        </summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>Correctly shaped for a consumer product with meaningful UX feeding downstream design and architecture. The one under-formalized spot is the minor/consent flow — see the FR-A-2 finding under Done-ness clarity, which applies here too.</p>
+          </div>
+        </div>
+        <div class="findings-list">
+          <article class="finding">
+            <header>
+              <span class="finding-title" style="color: var(--muted); font-weight: 400;">No findings beyond the FR-A-2 finding already logged under Done-ness clarity.</span>
+            </header>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="reviewer-section">
+      <details open>
+        <summary>
+          <h2>Adversarial review</h2>
+          <span class="reviewer-source">review-adversarial-general.md</span>
+        </summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>Cynical pass targeting internal consistency, unfulfillable requirements, and self-contradiction rather than structure. 19 findings, none softened.</p>
+          </div>
+        </div>
+        <div class="findings-list">
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-critical">Critical</span>
+              <h3 class="finding-title">Mastery/progress formula is internally broken</h3>
+              <span class="finding-location">§11.2, FR-B-11</span>
+            </header>
+            <div class="finding-note">Skipped concepts get mastery_score 0.0, but nothing removes their concept_weight from the denominator Σ(concept_weight) — so a skipped concept counts as weight in the denominator and zero in the numerator, permanently capping achievable progress % below 100%. Contradicts FR-B-11's "excluded from mastery." No completion threshold is defined anywhere to resolve what % triggers completion/certificate issuance — this touches BO-2, FR-P-4, and FR-R-5 directly.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Either exclude skipped concept_weight from the denominator, or define an explicit completion threshold that accounts for it.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-critical">Critical</span>
+              <h3 class="finding-title">FR-G-6's anti-stall threshold is a literal undefined placeholder</h3>
+              <span class="finding-location">§12.1, R-4</span>
+            </header>
+            <div class="finding-note">"If a waiting list hasn't formed a cohort within X days" leaves X undefined, even though the accompanying BA note calls this "not optional — it is the mitigation that makes this feature safe to ship" against R-4, itself rated High impact / High likelihood. The one number that operationalizes the product's highest-rated cold-start risk mitigation is missing.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Set X (even as an <code>[ASSUMPTION]</code>-tagged placeholder pending data) before this reaches architecture.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-high">High</span>
+              <h3 class="finding-title">MUST = "MVP-blocking" is violated across Epic 5 and Epic 6</h3>
+              <span class="finding-location">§1, §7, Epic 5, Epic 6</span>
+            </header>
+            <div class="finding-note">§1's legend defines MUST as MVP-blocking. Epic 5 (Release 3) and Epic 6 (Release 2) tag nearly every requirement plain MUST with no release qualifier (FR-G-1/2/4-7/9-12/16/18, FR-E-1-5/7-14), despite §7 saying those epics ship after MVP. Epic 7/8 do use "(R2)"/"(R3)" suffixes on some items, so the convention exists but is applied inconsistently.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Apply the release-qualifier convention consistently across every FR table, or state release scope once per epic header instead of per-row.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-high">High</span>
+              <h3 class="finding-title">Launch course count contradicts itself</h3>
+              <span class="finding-location">§3.2 BO-5 vs. §7 / OQ-4</span>
+            </header>
+            <div class="finding-note">BO-5 states "25 catalog courses live at launch," while §7's MVP release plan and OQ-4 both say "10 seed catalog courses." Two different numbers for the same milestone, no reconciling note.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Reconcile to one number, or clarify that 10 is launch and 25 is a near-term post-launch target distinct from BO-5's "at launch" wording.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-high">High</span>
+              <h3 class="finding-title">OQ-6's dependent MUST requirements have no fallback if capacity is unavailable</h3>
+              <span class="finding-location">OQ-6, FR-E-10, FR-E-11</span>
+            </header>
+            <div class="finding-note">OQ-6 (is human-grading capacity available?) is correctly flagged as blocking, but FR-E-10/FR-E-11 are tagged plain MUST with no conditional fallback. If OQ-6 resolves to "no," these MUST requirements — and the ≥85% agreement-rate success metric that depends on them — are unfulfillable as written, and §7 gives no indication Release 2 scope would shrink.</div>
+            <div class="finding-fix"><strong>Fix:</strong> State the fallback scope reduction for FR-E-10/11 if OQ-6 resolves negatively.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-high">High</span>
+              <h3 class="finding-title">needs_review concept state has no assigned mastery_score</h3>
+              <span class="finding-location">§11.2</span>
+            </header>
+            <div class="finding-note">The formula's enumerated scores cover in_progress/understood/mastered/skipped only. It's undefined how a decayed (needs_review) concept affects published progress % — meaning a learner's dashboard number can move with no stated rule, in direct tension with Principle 4 ("Honest progress") which this exact section claims to protect.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Assign needs_review a mastery_score (or an explicit decay function) in the §11.2 formula.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-high">High</span>
+              <h3 class="finding-title">Forecast algorithm has a unit mismatch</h3>
+              <span class="finding-location">§11.3</span>
+            </header>
+            <div class="finding-note">forecast_days = remaining ÷ velocity divides remaining (concept_weight units, per §11.2) by velocity (raw concepts-mastered-per-day). Dimensionally inconsistent for any course with non-uniform concept weights, which §11.2's weighting scheme implies exists.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Express velocity in weight-per-day, or remaining in raw concept counts — pick one unit system.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-high">High</span>
+              <h3 class="finding-title">Beat-caching mitigation doesn't cover the flagship MVP traffic it's meant to make latency targets credible for</h3>
+              <span class="finding-location">R3, NFR-B-1/B-2, J1, FR-C-4</span>
+            </header>
+            <div class="finding-note">R3 relies on pre-generating and caching Beats for "catalog courses at the standard depth." P1's flagship journey (J1, uploaded content) and FR-C-4 (custom depth/style) both fall outside that cacheable path by construction, and uploaded content is never shared/cached across learners (NFR-14). NFR-B-1/B-2 are nonetheless stated as blanket p90 targets with no segmentation by content type or depth.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Segment NFR-B-1/B-2 targets by cacheable vs. live-generation paths, or state a separate (looser) target for uploaded/custom-depth sessions.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-high">High</span>
+              <h3 class="finding-title">FR-A-8 is tagged SHOULD while NFR-15 asserts GDPR readiness depends on it</h3>
+              <span class="finding-location">FR-A-8, NFR-15</span>
+            </header>
+            <div class="finding-note">NFR-15 states the product must be "GDPR-ready (data export, erasure, consent records...)" as a compliance scope item, but FR-A-8 (the actual export mechanism) is tagged SHOULD/deferrable. GDPR readiness cannot be claimed without the export function it depends on.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Promote FR-A-8 to MUST, or scope NFR-15's GDPR-readiness claim to exclude export until it ships.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-high">High</span>
+              <h3 class="finding-title">Age-gate verification method and consent sequencing are undefined</h3>
+              <span class="finding-location">FR-A-1, FR-A-2, NFR-16</span>
+            </header>
+            <div class="finding-note">FR-A-2's age gate is self-declared with no verification method specified, and the sequencing between email verification (FR-A-1, "before first session") and parental-consent gating (NFR-16, "before any account activity") is never defined — leaving it ambiguous whether a self-declared minor can complete verification steps before consent gating triggers. This is exactly the compliance risk area (R-8) the document flags as needing careful handling.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Define the verification method and the explicit step order between FR-A-1 and the NFR-16 consent gate.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">Medium</span>
+              <h3 class="finding-title">OQ-2 (market/language) is listed open but already load-bearing elsewhere</h3>
+              <span class="finding-location">OQ-2, §10.6, NFR-15</span>
+            </header>
+            <div class="finding-note">§10.6's latency targets and §16.3's compliance scope (NFR-15) are already written as settled, explicitly premised on Assumption A1 (India, DPDP Act). The "open" decision has effectively already been answered and built on top of elsewhere in the same draft.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Either close OQ-2 (promote A1 to a confirmed decision) or explicitly caveat §10.6/§16.3 as provisional on it.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">Medium</span>
+              <h3 class="finding-title">OQ-3 (Avatar form) is listed open but the architecture is already written around the answer</h3>
+              <span class="finding-location">OQ-3, §19.1, §23</span>
+            </header>
+            <div class="finding-note">§19.1 makes "a deliberate recommendation" and writes the Voice/Generation architecture around voice-only, and the Glossary flatly defines Avatar as "voice plus presence indicator, not a video character (v1)" as settled fact, not pending.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Close OQ-3 or caveat §19.1/§23 as provisional pending stakeholder sign-off.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">Medium</span>
+              <h3 class="finding-title">NFR-23's cost/margin target has a circular dependency on the unresolved price point</h3>
+              <span class="finding-location">NFR-23, OQ-1, §16.4</span>
+            </header>
+            <div class="finding-note">NFR-23 requires cost-per-learner-hour to "support ≥60% gross margin at the intended price point," but the price point is exactly OQ-1, an unresolved open decision. §16.4's BA note says the unit cost model must be built before pricing is set — creating a circular dependency the document doesn't sequence.</div>
+            <div class="finding-fix"><strong>Fix:</strong> State the sequencing explicitly (e.g., cost model first with a placeholder margin target, price set second, NFR-23 finalized third).</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">Medium</span>
+              <h3 class="finding-title">No fallback defined once a learner exhausts all explanation routes/examples</h3>
+              <span class="finding-location">FR-B-6, FR-B-21</span>
+            </header>
+            <div class="finding-note">The route set is finite (eight in FR-B-21) and no fallback behavior is defined for what happens once a learner exhausts all routes and examples for a concept — precisely the struggling-learner scenario Principle 2 is meant to serve.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Define fallback behavior (e.g., recombine routes, escalate to prerequisite backtrack via FR-B-23, or hand off to human-adjacent support) once the route set is exhausted.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">Medium</span>
+              <h3 class="finding-title">FR-B-22 is tagged SHOULD but narrated as reliable flagship behavior in J1</h3>
+              <span class="finding-location">FR-B-22, §17 J1</span>
+            </header>
+            <div class="finding-note">Auto-drop-difficulty-and-reroute is explicitly deferrable per its SHOULD tag, yet the sample journey J1 depicts it as expected, reliable behavior used to narrate the core value proposition to stakeholders reading the journeys.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Either promote FR-B-22 to MUST for MVP, or rewrite J1 to not depend on deferrable behavior.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">Medium</span>
+              <h3 class="finding-title">BO-4's 12-month measurement window isn't reconciled with cohorts shipping in Release 3</h3>
+              <span class="finding-location">BO-4, §7, R1</span>
+            </header>
+            <div class="finding-note">BO-4 ("≥25% of active learners join at least one cohort") is measured over the first 12 months post-launch, but cohorts (Epic 5) are explicitly Release 3, sequenced by the document's own R1 to ship after R1 and R2 are proven out. The effective window to hit 25% could be a small fraction of the stated 12 months.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Rebase BO-4's window to "first 12 months after Release 3 ships" or state the assumed R1/R2 duration it's measured against.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-low">Low</span>
+              <h3 class="finding-title">OQ-5 (peer explain-back) is listed open but already specified</h3>
+              <span class="finding-location">OQ-5, FR-G-13, §12.1, FR-R-1</span>
+            </header>
+            <div class="finding-note">FR-G-13 already specifies "rotating, opt-in," the §12.1 BA note already recommends "opt-in-per-session with a clear pass," and FR-R-1 already bakes peer-explain-back into the MUST star-award list.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Close OQ-5 or narrow it to whatever sliver is genuinely still undecided.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-low">Low</span>
+              <h3 class="finding-title">OQ-7 (certificate accreditation) is listed open but already answered</h3>
+              <span class="finding-location">OQ-7, FR-R-5</span>
+            </header>
+            <div class="finding-note">FR-R-5 already mandates the certificate be "explicitly labelled non-accredited" as MUST.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Close OQ-7 or narrow it to the marketing/legal-review sliver it's actually gating.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-low">Low</span>
+              <h3 class="finding-title">Epic 7 leaderboard sub-requirements are scoped inconsistently with their own parent feature</h3>
+              <span class="finding-location">FR-R-7, FR-R-9, FR-R-10, FR-R-6</span>
+            </header>
+            <div class="finding-note">FR-R-6 (Leaderboards) is correctly tagged "MUST (R2)," but FR-R-7/9/10 — all meaningless without leaderboards existing — are tagged plain MUST with no release qualifier, implying MVP/R1 scope for logic that only matters once the R2 feature ships. Same root cause as the broader MUST/MVP-blocking finding above.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Tag FR-R-7/9/10 "(R2)" to match FR-R-6.</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <div class="mechanical">
+      <h3>Mechanical notes</h3>
+      <ul>
+        <li>Glossary drift: otherwise consistent — "Board," "Beat," "Concept," "Mastery," "Cohort" used identically across FRs, the data model, and UJs. "Learner" vs. "User" is a deliberate distinction (§18), not drift.</li>
+        <li>ID continuity: no gaps or duplicates found in FR-A, FR-B, FR-C, FR-E, FR-G, FR-O, FR-P, FR-R, or NFR-1..24. AC IDs correctly key off their parent FR number. The one legend gap is the undeclared NFR-B-&lt;n&gt; namespace (see Downstream usability).</li>
+        <li>Assumptions Index roundtrip: only A1 (§4) and A2 (§19.1) exist inline, both referenced back in §22 — nothing orphaned, but no dedicated index section.</li>
+        <li>UJ protagonist naming: J1/J2/J3 correctly anchored to named personas; J4 is a floating UJ with no protagonist.</li>
+        <li>Required sections for stakes: for a launch-stakes, chain-top consumer PRD, all expected sections are present — nothing structurally required by the stakes is missing.</li>
+      </ul>
+    </div>
+
+    <footer class="report-footer">
+      <div class="meta">
+        <span>Rubric: .claude/skills/bmad-prd/assets/prd-validation-checklist.md</span>
+        <span>Generated: 2026-08-04T10:58:40Z</span>
+      </div>
+    </footer>
+  </div>
+</body>
+</html>
