@@ -11,6 +11,13 @@ export const explanationStyleSchema = z.enum(["concise", "detailed", "example-fi
 
 export type ExplanationStyle = z.infer<typeof explanationStyleSchema>;
 
+// Story 1.9 (FR-A-9). DESIGN.md's own "Theme Presets" table — deliberately distinct
+// from boardTheme's separate DC-3 Board dark/paper toggle above; both live on this same
+// preferences object but control different, independent things.
+export const colorThemeSchema = z.enum(["indigo-focus", "midnight", "high-contrast", "warm-paper"]);
+
+export type ColorTheme = z.infer<typeof colorThemeSchema>;
+
 // Shared by both the response shape and the update input — review finding: these two
 // previously disagreed (the response side had no bound at all), so an out-of-range
 // value written outside the normal PUT path (a direct DB edit, a future migration bug)
@@ -27,6 +34,7 @@ export const learnerPreferencesSchema = z.object({
   explanationStyle: explanationStyleSchema,
   captionsEnabled: z.boolean(),
   reducedMotion: z.boolean(),
+  colorTheme: colorThemeSchema,
 });
 
 export type LearnerPreferences = z.infer<typeof learnerPreferencesSchema>;
@@ -39,6 +47,9 @@ export const DEFAULT_LEARNER_PREFERENCES: LearnerPreferences = {
   explanationStyle: "concise",
   captionsEnabled: false,
   reducedMotion: false,
+  // DESIGN.md names this preset "the default" explicitly, not a product judgment call
+  // the way the other defaults above are.
+  colorTheme: "indigo-focus",
 };
 
 // A PUT updates whatever subset of controls the learner just touched (instant-apply per
@@ -51,6 +62,7 @@ export const preferencesUpdateInputSchema = z
     explanationStyle: explanationStyleSchema.optional(),
     captionsEnabled: z.boolean().optional(),
     reducedMotion: z.boolean().optional(),
+    colorTheme: colorThemeSchema.optional(),
   })
   .refine((value) => Object.keys(value).length > 0, { message: "at least one preference must be provided" });
 

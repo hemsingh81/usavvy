@@ -127,6 +127,7 @@ describe("createUsersApi", () => {
           explanationStyle: "concise",
           captionsEnabled: false,
           reducedMotion: false,
+          colorTheme: "indigo-focus",
         }),
     } as unknown as Response);
     vi.stubGlobal("fetch", fetchMock);
@@ -151,6 +152,7 @@ describe("createUsersApi", () => {
           explanationStyle: "concise",
           captionsEnabled: false,
           reducedMotion: false,
+          colorTheme: "indigo-focus",
         }),
     } as unknown as Response);
     vi.stubGlobal("fetch", fetchMock);

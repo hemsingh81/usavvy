@@ -32,6 +32,8 @@ export {
   type BoardTheme,
   explanationStyleSchema,
   type ExplanationStyle,
+  colorThemeSchema,
+  type ColorTheme,
   learnerPreferencesSchema,
   type LearnerPreferences,
   DEFAULT_LEARNER_PREFERENCES,

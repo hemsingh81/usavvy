@@ -694,6 +694,7 @@ describe("generateDataExport", () => {
       explanationStyle: "concise",
       captionsEnabled: false,
       reducedMotion: false,
+      colorTheme: "indigo-focus",
     });
     expect(result.privacySettings).toEqual({ publicLeaderboardSharing: false, cohortDisplayName: true, uploadsForTraining: false });
   });

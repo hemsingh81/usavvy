@@ -27,6 +27,7 @@ const VALID_EXPORT = {
     explanationStyle: "concise",
     captionsEnabled: false,
     reducedMotion: false,
+    colorTheme: "indigo-focus",
   },
   privacySettings: {
     publicLeaderboardSharing: false,

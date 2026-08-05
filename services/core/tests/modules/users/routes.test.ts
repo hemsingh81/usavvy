@@ -383,6 +383,7 @@ describe("GET /users/preferences", () => {
       explanationStyle: "concise",
       captionsEnabled: false,
       reducedMotion: false,
+      colorTheme: "indigo-focus",
     });
     await app.close();
   });

@@ -28,6 +28,7 @@ const SAMPLE_EXPORT: DataExport = {
     explanationStyle: "concise",
     captionsEnabled: false,
     reducedMotion: false,
+    colorTheme: "indigo-focus",
   },
   privacySettings: {
     publicLeaderboardSharing: false,

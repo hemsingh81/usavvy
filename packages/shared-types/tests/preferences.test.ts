@@ -17,6 +17,7 @@ describe("learnerPreferencesSchema", () => {
         explanationStyle: "detailed",
         captionsEnabled: false,
         reducedMotion: true,
+        colorTheme: "midnight",
       }),
     ).not.toThrow();
   });
@@ -29,7 +30,8 @@ describe("learnerPreferencesSchema", () => {
         boardTheme: "dark",
         explanationStyle: "concise",
         captionsEnabled: false,
-        // reducedMotion omitted
+        reducedMotion: false,
+        // colorTheme omitted
       }),
     ).toThrow();
   });
@@ -43,6 +45,7 @@ describe("learnerPreferencesSchema", () => {
         explanationStyle: "concise",
         captionsEnabled: false,
         reducedMotion: false,
+        colorTheme: "indigo-focus",
       }),
     ).toThrow();
   });
@@ -56,8 +59,37 @@ describe("learnerPreferencesSchema", () => {
         explanationStyle: "sarcastic",
         captionsEnabled: false,
         reducedMotion: false,
+        colorTheme: "indigo-focus",
       }),
     ).toThrow();
+  });
+
+  it("rejects an invalid colorTheme value", () => {
+    expect(() =>
+      learnerPreferencesSchema.parse({
+        voiceEnabled: true,
+        speechRate: 1,
+        boardTheme: "dark",
+        explanationStyle: "concise",
+        captionsEnabled: false,
+        reducedMotion: false,
+        colorTheme: "neon",
+      }),
+    ).toThrow();
+  });
+
+  it.each(["indigo-focus", "midnight", "high-contrast", "warm-paper"] as const)("accepts colorTheme %s", (colorTheme) => {
+    expect(() =>
+      learnerPreferencesSchema.parse({
+        voiceEnabled: true,
+        speechRate: 1,
+        boardTheme: "dark",
+        explanationStyle: "concise",
+        captionsEnabled: false,
+        reducedMotion: false,
+        colorTheme,
+      }),
+    ).not.toThrow();
   });
 });
 
@@ -93,5 +125,13 @@ describe("preferencesUpdateInputSchema", () => {
 
   it("rejects an unrecognized explanationStyle", () => {
     expect(() => preferencesUpdateInputSchema.parse({ explanationStyle: "sarcastic" })).toThrow();
+  });
+
+  it("accepts a colorTheme-only partial update", () => {
+    expect(() => preferencesUpdateInputSchema.parse({ colorTheme: "midnight" })).not.toThrow();
+  });
+
+  it("rejects an unrecognized colorTheme", () => {
+    expect(() => preferencesUpdateInputSchema.parse({ colorTheme: "neon" })).toThrow();
   });
 });

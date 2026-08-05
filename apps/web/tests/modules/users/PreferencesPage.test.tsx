@@ -17,6 +17,7 @@ const DEFAULT_PREFERENCES = {
   explanationStyle: "concise",
   captionsEnabled: false,
   reducedMotion: false,
+  colorTheme: "indigo-focus",
 };
 
 function renderWithSession(session: { accessToken: string } | null) {

@@ -1,0 +1,1 @@
+ALTER TABLE "learner_profiles" ADD COLUMN "color_theme" text;

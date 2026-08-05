@@ -323,6 +323,7 @@ function toLearnerPreferences(row: LearnerProfileRow): LearnerPreferences {
     explanationStyle: row.explanationStyle ?? DEFAULT_LEARNER_PREFERENCES.explanationStyle,
     captionsEnabled: row.captionsEnabled ?? DEFAULT_LEARNER_PREFERENCES.captionsEnabled,
     reducedMotion: row.reducedMotion ?? DEFAULT_LEARNER_PREFERENCES.reducedMotion,
+    colorTheme: row.colorTheme ?? DEFAULT_LEARNER_PREFERENCES.colorTheme,
   };
 }
 
