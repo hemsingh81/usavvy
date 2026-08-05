@@ -1,9 +1,16 @@
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { AppError } from "@usavvy/service-kernel";
 import { can, type Role } from "@usavvy/config";
-import type { AgeDeclarationResponse, MeResponse, ParentalConsentStatus } from "@usavvy/shared-types";
+import {
+  ONBOARDING_STEPS,
+  type AgeDeclarationResponse,
+  type LearnerProfileResponse,
+  type MeResponse,
+  type OnboardingStepInput,
+  type ParentalConsentStatus,
+} from "@usavvy/shared-types";
 import type { Db } from "../../db/client.js";
-import { parentalConsentTokens, users } from "../../db/schema.js";
+import { learnerProfiles, parentalConsentTokens, users } from "../../db/schema.js";
 import type { NotificationPort } from "../notification/index.js";
 import { normalizeEmail } from "../auth/index.js";
 import { generateRawToken, hashToken } from "../auth/tokens.js";
@@ -52,6 +59,10 @@ export async function getMe(db: Db, userId: string, role: Role): Promise<MeRespo
   if (!user) {
     throw new AppError("NOT_FOUND", "user not found", 404);
   }
+  // A plain read, not ensureLearnerProfile's upsert — checking /me must not have the
+  // side effect of creating a row; "no row yet" and "onboardingComplete: false" mean
+  // the same thing here; there's no need to persist that fact just to report it.
+  const [profile] = await db.select({ completedAt: learnerProfiles.completedAt }).from(learnerProfiles).where(eq(learnerProfiles.userId, userId));
   return {
     id: user.id,
     email: user.email,
@@ -59,6 +70,7 @@ export async function getMe(db: Db, userId: string, role: Role): Promise<MeRespo
     role: user.role,
     birthdate: user.birthdate,
     ...deriveAgeFields(user),
+    onboardingComplete: (profile?.completedAt ?? null) !== null,
   };
 }
 
@@ -161,4 +173,87 @@ export async function recordParentalConsent(db: Db, input: { token: string }): P
 
     return { success: true as const };
   });
+}
+
+type LearnerProfileRow = typeof learnerProfiles.$inferSelect;
+
+function toLearnerProfileResponse(row: LearnerProfileRow): LearnerProfileResponse {
+  return {
+    goal: row.goal,
+    interests: row.interests,
+    availability: row.availability,
+    sessionLengthMinutes: row.sessionLengthMinutes,
+    targetCompletionDate: row.targetCompletionDate,
+    level: row.level,
+    currentStep: row.currentStep,
+    completedAt: row.completedAt !== null ? row.completedAt.toISOString() : null,
+  };
+}
+
+/**
+ * Upsert-on-first-write (Task 3): the first GET or PUT for a user with no
+ * learnerProfiles row creates one — there's no meaningful state before the first
+ * answer, so no separate "start onboarding" endpoint exists.
+ */
+async function ensureLearnerProfile(db: Db, userId: string): Promise<LearnerProfileRow> {
+  const inserted = await db.insert(learnerProfiles).values({ userId }).onConflictDoNothing().returning();
+  if (inserted[0]) {
+    return inserted[0];
+  }
+  const [existing] = await db.select().from(learnerProfiles).where(eq(learnerProfiles.userId, userId));
+  if (!existing) {
+    throw new AppError("INTERNAL_ERROR", "failed to load learner profile", 500);
+  }
+  return existing;
+}
+
+export async function getOnboarding(db: Db, userId: string): Promise<LearnerProfileResponse> {
+  return toLearnerProfileResponse(await ensureLearnerProfile(db, userId));
+}
+
+function stepColumnUpdate(input: OnboardingStepInput): Partial<typeof learnerProfiles.$inferInsert> {
+  switch (input.step) {
+    case "goal":
+      return { goal: input.value };
+    case "interests":
+      return { interests: input.value };
+    case "availability":
+      return { availability: input.value };
+    case "sessionLength":
+      return { sessionLengthMinutes: input.value };
+    case "targetDate":
+      return { targetCompletionDate: input.value };
+    case "level":
+      return { level: input.value };
+  }
+}
+
+/**
+ * currentStep is forward-only (Task 2's design) and completedAt is set once, on the
+ * final ("level") step — both computed inside the same UPDATE via greatest()/coalesce()
+ * so the advancement is safe under two genuinely concurrent step-saves for the same
+ * profile, not just an application-level read-then-max() that a lost update could
+ * silently regress (Story 1.2's own review found exactly this class of bug elsewhere).
+ */
+export async function saveOnboardingStep(db: Db, userId: string, input: OnboardingStepInput): Promise<LearnerProfileResponse> {
+  await ensureLearnerProfile(db, userId);
+  const stepIndex = ONBOARDING_STEPS.indexOf(input.step);
+  const isLastStep = stepIndex === ONBOARDING_STEPS.length - 1;
+
+  const [updated] = await db
+    .update(learnerProfiles)
+    .set({
+      ...stepColumnUpdate(input),
+      currentStep: sql`greatest(${learnerProfiles.currentStep}, ${stepIndex + 1})`,
+      ...(isLastStep ? { completedAt: sql`coalesce(${learnerProfiles.completedAt}, now())` } : {}),
+      updatedAt: new Date(),
+      version: sql`${learnerProfiles.version} + 1`,
+    })
+    .where(eq(learnerProfiles.userId, userId))
+    .returning();
+
+  if (!updated) {
+    throw new AppError("INTERNAL_ERROR", "failed to save onboarding step", 500);
+  }
+  return toLearnerProfileResponse(updated);
 }

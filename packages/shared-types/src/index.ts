@@ -15,3 +15,15 @@ export {
   parentalConsentResponseSchema,
   type ParentalConsentResponse,
 } from "./auth.js";
+export {
+  ONBOARDING_STEPS,
+  type OnboardingStep,
+  learnerLevelSchema,
+  type LearnerLevel,
+  availabilitySchema,
+  type Availability,
+  learnerProfileResponseSchema,
+  type LearnerProfileResponse,
+  onboardingStepInputSchema,
+  type OnboardingStepInput,
+} from "./users.js";

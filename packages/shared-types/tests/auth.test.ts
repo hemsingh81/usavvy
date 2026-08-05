@@ -18,6 +18,7 @@ describe("meResponseSchema", () => {
         birthdate: null,
         isMinor: null,
         parentalConsentStatus: null,
+        onboardingComplete: false,
       }),
     ).not.toThrow();
   });
@@ -32,6 +33,22 @@ describe("meResponseSchema", () => {
         birthdate: "2008-01-01",
         isMinor: true,
         parentalConsentStatus: "pending",
+        onboardingComplete: false,
+      }),
+    ).not.toThrow();
+  });
+
+  it("accepts onboardingComplete: true once the wizard is finished", () => {
+    expect(() =>
+      meResponseSchema.parse({
+        id: "u1",
+        email: "a@example.com",
+        emailVerified: true,
+        role: "student",
+        birthdate: "1990-01-01",
+        isMinor: false,
+        parentalConsentStatus: "not_required",
+        onboardingComplete: true,
       }),
     ).not.toThrow();
   });
@@ -50,6 +67,7 @@ describe("meResponseSchema", () => {
         birthdate: null,
         isMinor: null,
         parentalConsentStatus: "not-a-real-status",
+        onboardingComplete: false,
       }),
     ).toThrow();
   });

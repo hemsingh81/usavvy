@@ -98,3 +98,63 @@ describe("POST /users/parental-consent", () => {
     await app.close();
   });
 });
+
+describe("GET /users/onboarding", () => {
+  it("returns 401 with no token and never calls core", async () => {
+    const forwardToCore = vi.fn();
+    const app = buildApp(createTestAppDeps({ forwardToCore }));
+
+    const response = await app.inject({ method: "GET", url: "/users/onboarding" });
+
+    expect(response.statusCode).toBe(401);
+    expect(forwardToCore).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("forwards trusted x-user-id/x-user-role headers derived from a valid token", async () => {
+    const forwardToCore = vi.fn().mockResolvedValue({ status: 200, body: { goal: null, currentStep: 0, completedAt: null } });
+    const app = buildApp(createTestAppDeps({ forwardToCore }));
+    await app.ready();
+    const token = app.jwt.sign({ sub: "u1", role: "student", typ: "access" });
+
+    const response = await app.inject({ method: "GET", url: "/users/onboarding", headers: { authorization: `Bearer ${token}` } });
+
+    expect(response.statusCode).toBe(200);
+    expect(forwardToCore).toHaveBeenCalledWith("GET", "/users/onboarding", { headers: { "x-user-id": "u1", "x-user-role": "student" } });
+    await app.close();
+  });
+});
+
+describe("PUT /users/onboarding/step", () => {
+  it("returns 401 with no token and never calls core", async () => {
+    const forwardToCore = vi.fn();
+    const app = buildApp(createTestAppDeps({ forwardToCore }));
+
+    const response = await app.inject({ method: "PUT", url: "/users/onboarding/step", payload: { step: "goal", value: "x" } });
+
+    expect(response.statusCode).toBe(401);
+    expect(forwardToCore).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("forwards the body plus trusted headers derived from a valid token", async () => {
+    const forwardToCore = vi.fn().mockResolvedValue({ status: 200, body: { goal: "learn calculus", currentStep: 1, completedAt: null } });
+    const app = buildApp(createTestAppDeps({ forwardToCore }));
+    await app.ready();
+    const token = app.jwt.sign({ sub: "u1", role: "student", typ: "access" });
+
+    const response = await app.inject({
+      method: "PUT",
+      url: "/users/onboarding/step",
+      headers: { authorization: `Bearer ${token}` },
+      payload: { step: "goal", value: "learn calculus" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(forwardToCore).toHaveBeenCalledWith("PUT", "/users/onboarding/step", {
+      body: { step: "goal", value: "learn calculus" },
+      headers: { "x-user-id": "u1", "x-user-role": "student" },
+    });
+    await app.close();
+  });
+});

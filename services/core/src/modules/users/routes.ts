@@ -1,13 +1,14 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { AppError } from "@usavvy/service-kernel";
 import { ROLES, type Role } from "@usavvy/config";
+import { onboardingStepInputSchema } from "@usavvy/shared-types";
 import { emailField } from "../auth/index.js";
 import { parseOrThrow } from "../auth/validation.js";
 import type { Db } from "../../db/client.js";
 import type { NotificationPort } from "../notification/index.js";
 import { calculateAge } from "./age.js";
-import { declareAge, getMe, recordParentalConsent } from "./service.js";
+import { declareAge, getMe, getOnboarding, recordParentalConsent, saveOnboardingStep } from "./service.js";
 
 export interface UsersRouteDeps {
   db: Db;
@@ -34,26 +35,29 @@ const birthdateField = z.iso
 const ageDeclarationSchema = z.object({ birthdate: birthdateField, parentEmail: emailField.optional() });
 const parentalConsentSchema = z.object({ token: z.string().min(1) });
 
+// Trusted headers set only by gateway's JWT-verify preHandler (AD-7) — core never
+// re-verifies the JWT itself. A request missing them didn't come through gateway
+// (shouldn't happen given core isn't publicly bound, but AD-17 forbids assuming a
+// guarantee the interface doesn't state). Factored out once this story added a third
+// and fourth authenticated route needing the identical check (Story 1.2's own review
+// flagged the prior two-copy duplication as a "soon more" — this is that "more").
+function requireTrustedUser(request: FastifyRequest): { userId: string; role: Role } {
+  const userId = request.headers["x-user-id"];
+  const role = request.headers["x-user-role"];
+  if (typeof userId !== "string" || typeof role !== "string" || !isRole(role)) {
+    throw new AppError("UNAUTHENTICATED", "authentication required", 401);
+  }
+  return { userId, role };
+}
+
 export function registerUsersRoutes(app: FastifyInstance, deps: UsersRouteDeps): void {
   app.get("/me", async (request, reply) => {
-    // Trusted headers set only by gateway's JWT-verify preHandler (AD-7) — core never
-    // re-verifies the JWT itself. A request missing them didn't come through gateway
-    // (shouldn't happen given core isn't publicly bound, but AD-17 forbids assuming a
-    // guarantee the interface doesn't state).
-    const userId = request.headers["x-user-id"];
-    const role = request.headers["x-user-role"];
-    if (typeof userId !== "string" || typeof role !== "string" || !isRole(role)) {
-      throw new AppError("UNAUTHENTICATED", "authentication required", 401);
-    }
+    const { userId, role } = requireTrustedUser(request);
     reply.send(await getMe(deps.db, userId, role));
   });
 
   app.post("/users/age-declaration", async (request, reply) => {
-    const userId = request.headers["x-user-id"];
-    const role = request.headers["x-user-role"];
-    if (typeof userId !== "string" || typeof role !== "string" || !isRole(role)) {
-      throw new AppError("UNAUTHENTICATED", "authentication required", 401);
-    }
+    const { userId } = requireTrustedUser(request);
     const body = parseOrThrow(ageDeclarationSchema, request.body);
     reply.send(await declareAge(deps.db, deps.notificationPort, userId, body));
   });
@@ -62,5 +66,16 @@ export function registerUsersRoutes(app: FastifyInstance, deps: UsersRouteDeps):
   app.post("/users/parental-consent", async (request, reply) => {
     const body = parseOrThrow(parentalConsentSchema, request.body);
     reply.send(await recordParentalConsent(deps.db, body));
+  });
+
+  app.get("/users/onboarding", async (request, reply) => {
+    const { userId } = requireTrustedUser(request);
+    reply.send(await getOnboarding(deps.db, userId));
+  });
+
+  app.put("/users/onboarding/step", async (request, reply) => {
+    const { userId } = requireTrustedUser(request);
+    const body = parseOrThrow(onboardingStepInputSchema, request.body);
+    reply.send(await saveOnboardingStep(deps.db, userId, body));
   });
 }

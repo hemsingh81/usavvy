@@ -2,10 +2,10 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import postgres from "postgres";
 import { eq } from "drizzle-orm";
 import { createDb, type Db } from "../../../src/db/client.js";
-import { parentalConsentTokens, users } from "../../../src/db/schema.js";
+import { learnerProfiles, parentalConsentTokens, users } from "../../../src/db/schema.js";
 import { loadCoreConfig } from "../../../src/config.js";
 import { createMockNotificationPort } from "../../testHelpers.js";
-import { declareAge, getMe, recordParentalConsent } from "../../../src/modules/users/service.js";
+import { declareAge, getMe, getOnboarding, recordParentalConsent, saveOnboardingStep } from "../../../src/modules/users/service.js";
 import { hashToken } from "../../../src/modules/auth/tokens.js";
 
 const config = loadCoreConfig(process.env);
@@ -24,6 +24,7 @@ afterEach(async () => {
     const [user] = await db.select().from(users).where(eq(users.email, email));
     if (user) {
       await db.delete(parentalConsentTokens).where(eq(parentalConsentTokens.userId, user.id));
+      await db.delete(learnerProfiles).where(eq(learnerProfiles.userId, user.id));
       await db.delete(users).where(eq(users.id, user.id));
     }
   }
@@ -59,6 +60,7 @@ describe("getMe", () => {
       birthdate: null,
       isMinor: null,
       parentalConsentStatus: null,
+      onboardingComplete: false,
     });
   });
 
@@ -220,5 +222,178 @@ describe("recordParentalConsent", () => {
       code: "INVALID_CONSENT_TOKEN",
       statusCode: 404,
     });
+  });
+});
+
+const VALID_AVAILABILITY = { monday: 1, tuesday: 0, wednesday: 1, thursday: 0, friday: 1, saturday: 2, sunday: 0 };
+
+describe("getOnboarding", () => {
+  it("upsert-on-first-write: creates an all-null row on the first call rather than 404ing", async () => {
+    const email = uniqueEmail("onboarding-get-first");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+
+    const result = await getOnboarding(db, user!.id);
+
+    expect(result).toEqual({
+      goal: null,
+      interests: null,
+      availability: null,
+      sessionLengthMinutes: null,
+      targetCompletionDate: null,
+      level: null,
+      currentStep: 0,
+      completedAt: null,
+    });
+  });
+
+  it("is idempotent — a second call doesn't create a second row or reset progress", async () => {
+    const email = uniqueEmail("onboarding-get-idempotent");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+    await saveOnboardingStep(db, user!.id, { step: "goal", value: "learn calculus" });
+
+    const result = await getOnboarding(db, user!.id);
+
+    expect(result.goal).toBe("learn calculus");
+    expect(result.currentStep).toBe(1);
+    const rows = await db.select().from(learnerProfiles).where(eq(learnerProfiles.userId, user!.id));
+    expect(rows).toHaveLength(1);
+  });
+});
+
+describe("saveOnboardingStep", () => {
+  it("saves the goal step and advances currentStep to 1", async () => {
+    const email = uniqueEmail("onboarding-goal");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+
+    const result = await saveOnboardingStep(db, user!.id, { step: "goal", value: "learn calculus" });
+
+    expect(result.goal).toBe("learn calculus");
+    expect(result.currentStep).toBe(1);
+    expect(result.completedAt).toBeNull();
+  });
+
+  it("saves the interests step", async () => {
+    const email = uniqueEmail("onboarding-interests");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+
+    const result = await saveOnboardingStep(db, user!.id, { step: "interests", value: ["math", "physics"] });
+
+    expect(result.interests).toEqual(["math", "physics"]);
+  });
+
+  it("saves the availability step", async () => {
+    const email = uniqueEmail("onboarding-availability");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+
+    const result = await saveOnboardingStep(db, user!.id, { step: "availability", value: VALID_AVAILABILITY });
+
+    expect(result.availability).toEqual(VALID_AVAILABILITY);
+  });
+
+  it("saves the sessionLength step", async () => {
+    const email = uniqueEmail("onboarding-session-length");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+
+    const result = await saveOnboardingStep(db, user!.id, { step: "sessionLength", value: 45 });
+
+    expect(result.sessionLengthMinutes).toBe(45);
+  });
+
+  it("saves a provided targetDate", async () => {
+    const email = uniqueEmail("onboarding-target-date");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+
+    const result = await saveOnboardingStep(db, user!.id, { step: "targetDate", value: "2999-01-01" });
+
+    expect(result.targetCompletionDate).toBe("2999-01-01");
+  });
+
+  it("saves an explicit null targetDate (skip) and still advances currentStep", async () => {
+    const email = uniqueEmail("onboarding-target-date-skip");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+    for (const step of ["goal", "interests", "availability", "sessionLength"] as const) {
+      await saveOnboardingStep(
+        db,
+        user!.id,
+        step === "goal"
+          ? { step, value: "x" }
+          : step === "interests"
+            ? { step, value: ["math"] }
+            : step === "availability"
+              ? { step, value: VALID_AVAILABILITY }
+              : { step, value: 30 },
+      );
+    }
+
+    const result = await saveOnboardingStep(db, user!.id, { step: "targetDate", value: null });
+
+    expect(result.targetCompletionDate).toBeNull();
+    expect(result.currentStep).toBe(5);
+  });
+
+  it("sets completedAt only once the final (level) step is saved", async () => {
+    const email = uniqueEmail("onboarding-complete");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+    await saveOnboardingStep(db, user!.id, { step: "goal", value: "x" });
+    await saveOnboardingStep(db, user!.id, { step: "interests", value: ["math"] });
+    await saveOnboardingStep(db, user!.id, { step: "availability", value: VALID_AVAILABILITY });
+    await saveOnboardingStep(db, user!.id, { step: "sessionLength", value: 30 });
+    const beforeLevel = await getOnboarding(db, user!.id);
+    expect(beforeLevel.completedAt).toBeNull();
+    await saveOnboardingStep(db, user!.id, { step: "targetDate", value: null });
+
+    const result = await saveOnboardingStep(db, user!.id, { step: "level", value: "beginner" });
+
+    expect(result.level).toBe("beginner");
+    expect(result.currentStep).toBe(6);
+    expect(result.completedAt).not.toBeNull();
+
+    const me = await getMe(db, user!.id, "student");
+    expect(me.onboardingComplete).toBe(true);
+  });
+
+  it("currentStep is forward-only — re-saving an earlier step after a later one must not regress it", async () => {
+    const email = uniqueEmail("onboarding-forward-only");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+    await saveOnboardingStep(db, user!.id, { step: "goal", value: "x" });
+    await saveOnboardingStep(db, user!.id, { step: "interests", value: ["math"] });
+    await saveOnboardingStep(db, user!.id, { step: "availability", value: VALID_AVAILABILITY });
+
+    // Re-save the first step after progressing to step 3.
+    const result = await saveOnboardingStep(db, user!.id, { step: "goal", value: "revised goal" });
+
+    expect(result.goal).toBe("revised goal");
+    expect(result.currentStep).toBe(3);
+  });
+
+  it("does not reset an already-set completedAt when the level step is re-saved", async () => {
+    const email = uniqueEmail("onboarding-recomplete");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+    await saveOnboardingStep(db, user!.id, { step: "goal", value: "x" });
+    await saveOnboardingStep(db, user!.id, { step: "interests", value: ["math"] });
+    await saveOnboardingStep(db, user!.id, { step: "availability", value: VALID_AVAILABILITY });
+    await saveOnboardingStep(db, user!.id, { step: "sessionLength", value: 30 });
+    await saveOnboardingStep(db, user!.id, { step: "targetDate", value: null });
+    const first = await saveOnboardingStep(db, user!.id, { step: "level", value: "beginner" });
+
+    const second = await saveOnboardingStep(db, user!.id, { step: "level", value: "advanced" });
+
+    expect(second.level).toBe("advanced");
+    expect(second.completedAt).toBe(first.completedAt);
+  });
+
+  it("under two concurrent step-saves for the same profile, currentStep reflects the max of both — no lost update", async () => {
+    const email = uniqueEmail("onboarding-concurrent");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+
+    await Promise.all([
+      saveOnboardingStep(db, user!.id, { step: "interests", value: ["math"] }), // index 1 -> currentStep >= 2
+      saveOnboardingStep(db, user!.id, { step: "targetDate", value: null }), // index 4 -> currentStep >= 5
+    ]);
+
+    const result = await getOnboarding(db, user!.id);
+    expect(result.currentStep).toBe(5);
+    expect(result.interests).toEqual(["math"]);
+    expect(result.targetCompletionDate).toBeNull();
   });
 });

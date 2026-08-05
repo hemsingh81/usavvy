@@ -13,6 +13,9 @@ export const meResponseSchema = z.object({
   birthdate: z.string().nullable(),
   isMinor: z.boolean().nullable(),
   parentalConsentStatus: parentalConsentStatusSchema.nullable(),
+  // Story 1.3 (FR-A-3) — false (never null) even before any learnerProfiles row
+  // exists: every learner must onboard, unlike age-declaration's three-state fields.
+  onboardingComplete: z.boolean(),
 });
 
 export type MeResponse = z.infer<typeof meResponseSchema>;

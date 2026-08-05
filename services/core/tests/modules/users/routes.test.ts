@@ -3,7 +3,7 @@ import postgres from "postgres";
 import { eq } from "drizzle-orm";
 import { buildApp } from "../../../src/app.js";
 import { createDb } from "../../../src/db/client.js";
-import { users } from "../../../src/db/schema.js";
+import { learnerProfiles, users } from "../../../src/db/schema.js";
 import { loadCoreConfig } from "../../../src/config.js";
 import { createTestAppDeps, TEST_INTERNAL_SECRET } from "../../testHelpers.js";
 
@@ -16,7 +16,10 @@ const internalHeaders = { "x-internal-secret": TEST_INTERNAL_SECRET };
 afterEach(async () => {
   while (createdEmails.length > 0) {
     const email = createdEmails.pop();
-    if (email) await db.delete(users).where(eq(users.email, email));
+    if (!email) continue;
+    const [user] = await db.select().from(users).where(eq(users.email, email));
+    if (user) await db.delete(learnerProfiles).where(eq(learnerProfiles.userId, user.id));
+    await db.delete(users).where(eq(users.email, email));
   }
 });
 
@@ -46,6 +49,7 @@ describe("GET /me", () => {
       birthdate: null,
       isMinor: null,
       parentalConsentStatus: null,
+      onboardingComplete: false,
     });
     await app.close();
   });
@@ -214,6 +218,117 @@ describe("POST /users/parental-consent", () => {
     const response = await app.inject({ method: "POST", url: "/users/parental-consent", payload: { token: "not-a-real-token" } });
 
     expect(response.statusCode).toBe(401);
+    await app.close();
+  });
+});
+
+describe("GET /users/onboarding", () => {
+  it("requires authentication (401 with no trusted headers)", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+
+    const response = await app.inject({ method: "GET", url: "/users/onboarding", headers: internalHeaders });
+
+    expect(response.statusCode).toBe(401);
+    await app.close();
+  });
+
+  it("returns an all-null row on first call", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+    const email = uniqueEmail("onboarding-get");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/users/onboarding",
+      headers: { ...internalHeaders, "x-user-id": user!.id, "x-user-role": "student" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ goal: null, currentStep: 0, completedAt: null });
+    await app.close();
+  });
+});
+
+describe("PUT /users/onboarding/step", () => {
+  it("requires authentication (401 with no trusted headers)", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+
+    const response = await app.inject({
+      method: "PUT",
+      url: "/users/onboarding/step",
+      headers: internalHeaders,
+      payload: { step: "goal", value: "learn calculus" },
+    });
+
+    expect(response.statusCode).toBe(401);
+    await app.close();
+  });
+
+  it("saves a step and returns the updated profile", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+    const email = uniqueEmail("onboarding-put");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+
+    const response = await app.inject({
+      method: "PUT",
+      url: "/users/onboarding/step",
+      headers: { ...internalHeaders, "x-user-id": user!.id, "x-user-role": "student" },
+      payload: { step: "goal", value: "learn calculus" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ goal: "learn calculus", currentStep: 1 });
+    await app.close();
+  });
+
+  it("rejects an unrecognized step key with a VALIDATION_ERROR envelope", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+    const email = uniqueEmail("onboarding-bad-step");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+
+    const response = await app.inject({
+      method: "PUT",
+      url: "/users/onboarding/step",
+      headers: { ...internalHeaders, "x-user-id": user!.id, "x-user-role": "student" },
+      payload: { step: "not-a-real-step", value: "x" },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ error: { code: "VALIDATION_ERROR" } });
+    await app.close();
+  });
+
+  it("rejects a targetDate in the past", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+    const email = uniqueEmail("onboarding-past-target-date");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+
+    const response = await app.inject({
+      method: "PUT",
+      url: "/users/onboarding/step",
+      headers: { ...internalHeaders, "x-user-id": user!.id, "x-user-role": "student" },
+      payload: { step: "targetDate", value: "2000-01-01" },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ error: { code: "VALIDATION_ERROR" } });
+    await app.close();
+  });
+
+  it("rejects a missing targetDate value (must be an explicit choice)", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+    const email = uniqueEmail("onboarding-missing-target-date");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+
+    const response = await app.inject({
+      method: "PUT",
+      url: "/users/onboarding/step",
+      headers: { ...internalHeaders, "x-user-id": user!.id, "x-user-role": "student" },
+      payload: { step: "targetDate" },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ error: { code: "VALIDATION_ERROR" } });
     await app.close();
   });
 });

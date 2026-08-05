@@ -15,6 +15,13 @@
       "when": 1785912751142,
       "tag": "0001_messy_legion",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1785921210321,
+      "tag": "0002_yielding_puff_adder",
+      "breakpoints": true
     }
   ]
 }

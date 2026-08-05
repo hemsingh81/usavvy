@@ -28,4 +28,14 @@ export function registerAuthProxyRoutes(app: FastifyInstance, deps: AuthProxyDep
     const result = await deps.forwardToCore("POST", "/users/age-declaration", { body: request.body, headers: trustedHeaders(request) });
     reply.code(result.status).send(result.body);
   });
+
+  app.get("/users/onboarding", { preHandler: requireAuth }, async (request, reply) => {
+    const result = await deps.forwardToCore("GET", "/users/onboarding", { headers: trustedHeaders(request) });
+    reply.code(result.status).send(result.body);
+  });
+
+  app.put("/users/onboarding/step", { preHandler: requireAuth }, async (request, reply) => {
+    const result = await deps.forwardToCore("PUT", "/users/onboarding/step", { body: request.body, headers: trustedHeaders(request) });
+    reply.code(result.status).send(result.body);
+  });
 }
