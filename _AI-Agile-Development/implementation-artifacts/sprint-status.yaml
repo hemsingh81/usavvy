@@ -65,7 +65,7 @@ development_status:
 
   epic-2: in-progress
   2-1-model-the-course-module-topic-concept-hierarchy: done
-  2-2-catalog-browse-and-search-with-filters: backlog
+  2-2-catalog-browse-and-search-with-filters: ready-for-dev
   2-3-course-detail-page: backlog
   2-4-course-customisation-before-start: backlog
   2-5-optional-placement-check: backlog
