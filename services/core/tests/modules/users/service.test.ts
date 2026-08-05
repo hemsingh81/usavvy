@@ -1,6 +1,7 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import postgres from "postgres";
 import { eq } from "drizzle-orm";
+import { createLogger } from "@usavvy/service-kernel";
 import { createDb, type Db } from "../../../src/db/client.js";
 import { learnerProfiles, parentalConsentTokens, users } from "../../../src/db/schema.js";
 import { loadCoreConfig } from "../../../src/config.js";
@@ -21,6 +22,7 @@ import { hashToken } from "../../../src/modules/auth/tokens.js";
 const config = loadCoreConfig(process.env);
 const sql = postgres(config.databaseUrl);
 let db: Db;
+const testLogger = createLogger("test");
 const createdEmails: string[] = [];
 
 beforeAll(() => {
@@ -566,7 +568,7 @@ describe("requestAccountDeletion", () => {
     const notificationPort = createMockNotificationPort();
     const pubSubPort = createMockPubSubPort();
 
-    const result = await requestAccountDeletion(db, notificationPort, pubSubPort, user!.id);
+    const result = await requestAccountDeletion(db, notificationPort, pubSubPort, testLogger, user!.id);
 
     const [updated] = await db.select().from(users).where(eq(users.id, user!.id));
     expect(updated?.deletionRequestedAt).not.toBeNull();
@@ -580,7 +582,7 @@ describe("requestAccountDeletion", () => {
     const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
     const notificationPort = createMockNotificationPort();
 
-    await requestAccountDeletion(db, notificationPort, createMockPubSubPort(), user!.id);
+    await requestAccountDeletion(db, notificationPort, createMockPubSubPort(), testLogger, user!.id);
 
     expect(notificationPort.sendEmail).toHaveBeenCalledTimes(1);
     expect(notificationPort.sendEmail).toHaveBeenCalledWith(expect.objectContaining({ to: email }));
@@ -591,7 +593,7 @@ describe("requestAccountDeletion", () => {
     const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
     const pubSubPort = createMockPubSubPort();
 
-    const result = await requestAccountDeletion(db, createMockNotificationPort(), pubSubPort, user!.id);
+    const result = await requestAccountDeletion(db, createMockNotificationPort(), pubSubPort, testLogger, user!.id);
 
     expect(pubSubPort.publish).toHaveBeenCalledTimes(1);
     expect(pubSubPort.publish).toHaveBeenCalledWith({
@@ -605,9 +607,9 @@ describe("requestAccountDeletion", () => {
     const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
     const notificationPort = createMockNotificationPort();
     const pubSubPort = createMockPubSubPort();
-    await requestAccountDeletion(db, notificationPort, pubSubPort, user!.id);
+    await requestAccountDeletion(db, notificationPort, pubSubPort, testLogger, user!.id);
 
-    await expect(requestAccountDeletion(db, notificationPort, pubSubPort, user!.id)).rejects.toMatchObject({
+    await expect(requestAccountDeletion(db, notificationPort, pubSubPort, testLogger, user!.id)).rejects.toMatchObject({
       code: "ACCOUNT_DELETION_ALREADY_REQUESTED",
       statusCode: 409,
     });
@@ -622,8 +624,8 @@ describe("requestAccountDeletion", () => {
     const pubSubPort = createMockPubSubPort();
 
     const results = await Promise.allSettled([
-      requestAccountDeletion(db, notificationPort, pubSubPort, user!.id),
-      requestAccountDeletion(db, notificationPort, pubSubPort, user!.id),
+      requestAccountDeletion(db, notificationPort, pubSubPort, testLogger, user!.id),
+      requestAccountDeletion(db, notificationPort, pubSubPort, testLogger, user!.id),
     ]);
 
     const fulfilled = results.filter((r) => r.status === "fulfilled");
@@ -635,7 +637,33 @@ describe("requestAccountDeletion", () => {
 
   it("throws NOT_FOUND for a user id that doesn't exist", async () => {
     await expect(
-      requestAccountDeletion(db, createMockNotificationPort(), createMockPubSubPort(), "00000000-0000-0000-0000-000000000000"),
+      requestAccountDeletion(db, createMockNotificationPort(), createMockPubSubPort(), testLogger, "00000000-0000-0000-0000-000000000000"),
     ).rejects.toMatchObject({ code: "NOT_FOUND", statusCode: 404 });
+  });
+
+  it("still schedules the deletion and resolves successfully even if the confirmation email fails to send (review finding: a failed side effect must not leave the account permanently stuck)", async () => {
+    const email = uniqueEmail("deletion-email-fails");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+    const notificationPort = createMockNotificationPort();
+    (notificationPort.sendEmail as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("smtp down"));
+
+    const result = await requestAccountDeletion(db, notificationPort, createMockPubSubPort(), testLogger, user!.id);
+
+    expect(result.scheduledDeletionAt).toBeDefined();
+    const [updated] = await db.select().from(users).where(eq(users.id, user!.id));
+    expect(updated?.deletionRequestedAt).not.toBeNull();
+  });
+
+  it("still schedules the deletion and resolves successfully even if the domain event publish fails", async () => {
+    const email = uniqueEmail("deletion-publish-fails");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+    const pubSubPort = createMockPubSubPort();
+    (pubSubPort.publish as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("redis down"));
+
+    const result = await requestAccountDeletion(db, createMockNotificationPort(), pubSubPort, testLogger, user!.id);
+
+    expect(result.scheduledDeletionAt).toBeDefined();
+    const [updated] = await db.select().from(users).where(eq(users.id, user!.id));
+    expect(updated?.deletionRequestedAt).not.toBeNull();
   });
 });

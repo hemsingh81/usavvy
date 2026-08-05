@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
-import { AppError } from "@usavvy/service-kernel";
+import { AppError, type Logger } from "@usavvy/service-kernel";
 import { ROLES, type Role } from "@usavvy/config";
 import {
   onboardingStepInputSchema,
@@ -32,6 +32,7 @@ export interface UsersRouteDeps {
   db: Db;
   notificationPort: NotificationPort;
   pubSubPort: PubSubPort;
+  logger: Logger;
 }
 
 const MAX_AGE_YEARS = 120;
@@ -128,6 +129,6 @@ export function registerUsersRoutes(app: FastifyInstance, deps: UsersRouteDeps):
 
   app.post("/users/account-deletion", async (request, reply) => {
     const { userId } = requireTrustedUser(request);
-    reply.send(await requestAccountDeletion(deps.db, deps.notificationPort, deps.pubSubPort, userId));
+    reply.send(await requestAccountDeletion(deps.db, deps.notificationPort, deps.pubSubPort, deps.logger, userId));
   });
 }

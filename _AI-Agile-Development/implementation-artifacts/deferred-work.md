@@ -71,3 +71,16 @@
 - No CAS/step-order check on `savePrivacySettings` — two genuinely concurrent same-field writes resolve by last-write-wins with no reconciliation signal. Explicit, deliberate scope decision matching Story 1.4's identical precedent.
 - `createUsersApi(apiUrl)`/`getWebConfig()` re-invoked on every save rather than memoized once — pre-existing style across every save handler in this app.
 - Generated migration/snapshot files lack a trailing newline — matches Story 1.3/1.4's identical dismissed finding.
+
+## Deferred from: code review of story-1-7 (2026-08-05)
+
+- The account-deletion email/page copy promises data removal within 30 days that no code can currently execute — no `JobQueuePort`-based scheduler and no downstream service exists yet to consume `user.deletion_requested`. This is the story's own explicit, documented scope decision; revisit once a purge subscriber and job scheduler exist.
+- No cancel/undo-deletion flow — explicitly out of scope per the story's own notes.
+- No step-up re-authentication before the irreversible deletion confirmation — no page in this app requires re-auth for anything today, a systemic gap.
+- `AccountDeletionPage` doesn't check for an already-pending deletion on mount — needs a new status endpoint or a `/me` extension, explicitly out of scope for this story.
+- `DomainEvent` carries no event id/timestamp/schema version for future dedup — premature, no real subscriber exists yet.
+- No DB index on `scheduled_deletion_at` — premature, no query pattern exists yet.
+- The pre-check `SELECT` and CAS `UPDATE` in `requestAccountDeletion` are two separate statements — matches `declareAge`'s identical, already-accepted TOCTOU tradeoff; unreachable today (no account-deletion-execution feature exists to remove a row in between).
+- No session-expiry-specific handling in `AccountDeletionPage`'s submit handler — matches Story 1.4's identical already-deferred "no auto-refresh-on-expiry" gap.
+- Timezone display mismatch between the confirmation email (raw UTC) and the page (`toLocaleDateString()`) — matches the identical, already-deferred pattern from Stories 1.2/1.3/1.5.
+- Generated migration/snapshot files lack a trailing newline — matches the established dismissed pattern.

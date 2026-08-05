@@ -64,11 +64,7 @@ export function AccountDeletionPage() {
               {view.message}
             </div>
           ) : null}
-          <Button
-            style={{ background: "var(--color-error)", color: "var(--color-on-error)" }}
-            disabled={view.kind === "submitting"}
-            onClick={handleConfirm}
-          >
+          <Button variant="destructive" disabled={view.kind === "submitting"} onClick={handleConfirm}>
             Delete my account
           </Button>
         </>

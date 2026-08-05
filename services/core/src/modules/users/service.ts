@@ -1,5 +1,5 @@
 import { and, eq, isNull, sql } from "drizzle-orm";
-import { AppError } from "@usavvy/service-kernel";
+import { AppError, type Logger } from "@usavvy/service-kernel";
 import { can, type Role } from "@usavvy/config";
 import {
   DEFAULT_LEARNER_PREFERENCES,
@@ -406,6 +406,7 @@ export async function requestAccountDeletion(
   db: Db,
   notificationPort: NotificationPort,
   pubSubPort: PubSubPort,
+  logger: Logger,
   userId: string,
 ): Promise<AccountDeletionResponse> {
   const [user] = await db.select().from(users).where(eq(users.id, userId));
@@ -425,16 +426,29 @@ export async function requestAccountDeletion(
     throw new AppError("ACCOUNT_DELETION_ALREADY_REQUESTED", "account deletion has already been requested", 409);
   }
 
-  await notificationPort.sendEmail({
-    to: user.email,
-    subject: "Your Usavvy account deletion request",
-    body: `We've received your request to delete your Usavvy account. Your account and personal data will be removed within 30 days, on ${scheduledDeletionAt.toISOString()}. If this wasn't you, contact support immediately.`,
-  });
-
-  await pubSubPort.publish({
-    type: "user.deletion_requested",
-    payload: { userId, scheduledDeletionAt: scheduledDeletionAt.toISOString() },
-  });
+  // Review finding: the CAS write above is the source of truth for "has this account's
+  // deletion been scheduled" — once it succeeds, a transient failure sending the
+  // confirmation email or publishing the domain event must not throw and leave the
+  // account permanently stuck (the CAS guard above would reject every future retry with
+  // ACCOUNT_DELETION_ALREADY_REQUESTED, with no way to recover). Logged, not silently
+  // swallowed (AD-17), but best-effort rather than blocking the already-correct response.
+  const [emailResult, publishResult] = await Promise.allSettled([
+    notificationPort.sendEmail({
+      to: user.email,
+      subject: "Your Usavvy account deletion request",
+      body: `We've received your request to delete your Usavvy account. Your account and personal data will be removed within 30 days, on ${scheduledDeletionAt.toISOString()}. If this wasn't you, contact support immediately.`,
+    }),
+    pubSubPort.publish({
+      type: "user.deletion_requested",
+      payload: { userId, scheduledDeletionAt: scheduledDeletionAt.toISOString() },
+    }),
+  ]);
+  if (emailResult.status === "rejected") {
+    logger.error("account-deletion confirmation email failed", { userId, reason: String(emailResult.reason) });
+  }
+  if (publishResult.status === "rejected") {
+    logger.error("account-deletion domain event publish failed", { userId, reason: String(publishResult.reason) });
+  }
 
   return { scheduledDeletionAt: scheduledDeletionAt.toISOString() };
 }

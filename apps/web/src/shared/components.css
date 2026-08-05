@@ -29,6 +29,26 @@
   cursor: pointer;
 }
 
+/* No DESIGN.md component token for a destructive action — reuses the existing
+   error-color tokens already defined in tokens.css rather than inventing a new color
+   (Story 1.7's own Dev Notes instruction). */
+.usavvy-button-destructive {
+  font-family: var(--font-family);
+  background: var(--color-error);
+  color: var(--color-on-error);
+  border-radius: var(--radius-default);
+  padding: var(--spacing-3) var(--spacing-6);
+  border: none;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.usavvy-button-destructive:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .usavvy-field {
   display: flex;
   flex-direction: column;

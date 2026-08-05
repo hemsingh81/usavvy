@@ -63,7 +63,7 @@ export function buildApp(deps: BuildAppDeps) {
   });
 
   registerAuthRoutes(app, { db: deps.db, notificationPort: deps.notificationPort, googleClientId: deps.googleClientId });
-  registerUsersRoutes(app, { db: deps.db, notificationPort: deps.notificationPort, pubSubPort: deps.pubSubPort });
+  registerUsersRoutes(app, { db: deps.db, notificationPort: deps.notificationPort, pubSubPort: deps.pubSubPort, logger: deps.logger });
 
   return app;
 }
