@@ -16,6 +16,12 @@ export const meResponseSchema = z.object({
   // Story 1.3 (FR-A-3) — false (never null) even before any learnerProfiles row
   // exists: every learner must onboard, unlike age-declaration's three-state fields.
   onboardingComplete: z.boolean(),
+  // Story 1.5 (FR-A-5) — always a real, non-empty string: falls back server-side to the
+  // email's local-part until the learner sets one, so the frontend never has to
+  // duplicate that derivation. memberSince is createdAt as ISO 8601 (Consistency
+  // Conventions).
+  displayName: z.string(),
+  memberSince: z.string(),
 });
 
 export type MeResponse = z.infer<typeof meResponseSchema>;

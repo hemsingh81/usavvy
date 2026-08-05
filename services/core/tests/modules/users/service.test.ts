@@ -5,7 +5,7 @@ import { createDb, type Db } from "../../../src/db/client.js";
 import { learnerProfiles, parentalConsentTokens, users } from "../../../src/db/schema.js";
 import { loadCoreConfig } from "../../../src/config.js";
 import { createMockNotificationPort } from "../../testHelpers.js";
-import { declareAge, getMe, getOnboarding, recordParentalConsent, saveOnboardingStep } from "../../../src/modules/users/service.js";
+import { declareAge, getMe, getOnboarding, recordParentalConsent, saveOnboardingStep, updateDisplayName } from "../../../src/modules/users/service.js";
 import { hashToken } from "../../../src/modules/auth/tokens.js";
 
 const config = loadCoreConfig(process.env);
@@ -61,7 +61,27 @@ describe("getMe", () => {
       isMinor: null,
       parentalConsentStatus: null,
       onboardingComplete: false,
+      displayName: email.split("@")[0],
+      memberSince: user!.createdAt.toISOString(),
     });
+  });
+
+  it("falls back to the email's local-part for displayName until one is set (Story 1.5)", async () => {
+    const email = uniqueEmail("me-no-display-name");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+
+    const me = await getMe(db, user!.id, "student");
+
+    expect(me.displayName).toBe(email.split("@")[0]);
+  });
+
+  it("returns the stored displayName once one has been set", async () => {
+    const email = uniqueEmail("me-with-display-name");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date(), displayName: "Ananya" }).returning();
+
+    const me = await getMe(db, user!.id, "student");
+
+    expect(me.displayName).toBe("Ananya");
   });
 
   it("reports emailVerified: false for an unverified user", async () => {
@@ -422,5 +442,46 @@ describe("saveOnboardingStep", () => {
     const result = await getOnboarding(db, user!.id);
     expect(result.currentStep).toBe(4);
     expect(result.sessionLengthMinutes).toBe(30);
+  });
+});
+
+describe("updateDisplayName", () => {
+  it("sets displayName and returns it in the getMe-shaped response", async () => {
+    const email = uniqueEmail("display-name-set");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+
+    const result = await updateDisplayName(db, user!.id, "student", { displayName: "Ananya" });
+
+    expect(result.displayName).toBe("Ananya");
+    const [updated] = await db.select().from(users).where(eq(users.id, user!.id));
+    expect(updated?.displayName).toBe("Ananya");
+  });
+
+  it("updates only displayName — every other users column is untouched", async () => {
+    const email = uniqueEmail("display-name-isolated");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date(), birthdate: ADULT_BIRTHDATE }).returning();
+
+    await updateDisplayName(db, user!.id, "student", { displayName: "Ravi" });
+
+    const [updated] = await db.select().from(users).where(eq(users.id, user!.id));
+    expect(updated?.email).toBe(email);
+    expect(updated?.birthdate).toBe(ADULT_BIRTHDATE);
+  });
+
+  it("a second call overwrites the previous value", async () => {
+    const email = uniqueEmail("display-name-overwrite");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+    await updateDisplayName(db, user!.id, "student", { displayName: "First" });
+
+    const result = await updateDisplayName(db, user!.id, "student", { displayName: "Second" });
+
+    expect(result.displayName).toBe("Second");
+  });
+
+  it("throws NOT_FOUND for a user id that doesn't exist", async () => {
+    await expect(updateDisplayName(db, "00000000-0000-0000-0000-000000000000", "student", { displayName: "Ghost" })).rejects.toMatchObject({
+      code: "NOT_FOUND",
+      statusCode: 404,
+    });
   });
 });

@@ -17,6 +17,11 @@ export const users = pgTable("users", {
   // Null until a learner links/creates via Google OAuth.
   googleId: text("google_id").unique(),
   role: text("role").notNull().default("student"),
+  // Story 1.5 (FR-A-5): null means "never set" — the response layer falls back to the
+  // email's local-part (getMe/updateDisplayName), the same "derive, don't snapshot"
+  // philosophy deriveAgeFields already uses, so a future fallback-rule change needs no
+  // backfill migration.
+  displayName: text("display_name"),
   // Null until the account is verified (signup) or immediately set (Google OAuth, AC #2).
   emailVerifiedAt: timestamp("email_verified_at", { withTimezone: true }),
   // Single active refresh token per user (MVP scope — no multi-device session list).

@@ -11,6 +11,7 @@ import {
   type OnboardingStepInput,
   type ParentalConsentStatus,
   type PreferencesUpdateInput,
+  type UpdateDisplayNameInput,
 } from "@usavvy/shared-types";
 import type { Db } from "../../db/client.js";
 import { learnerProfiles, parentalConsentTokens, users } from "../../db/schema.js";
@@ -74,7 +75,29 @@ export async function getMe(db: Db, userId: string, role: Role): Promise<MeRespo
     birthdate: user.birthdate,
     ...deriveAgeFields(user),
     onboardingComplete: (profile?.completedAt ?? null) !== null,
+    // Story 1.5 (FR-A-5): the fallback is computed here, once, rather than duplicated
+    // client-side — `email` is always non-empty (validated at signup), so `split("@")[0]`
+    // always yields at least one character.
+    displayName: user.displayName ?? user.email.split("@")[0]!,
+    memberSince: user.createdAt.toISOString(),
   };
+}
+
+/**
+ * Story 1.5 (FR-A-5). No CAS/step-order check needed — same reasoning Story 1.4's
+ * `savePreferences` already established for a freely re-editable field with no
+ * ordering invariant.
+ */
+export async function updateDisplayName(db: Db, userId: string, role: Role, input: UpdateDisplayNameInput): Promise<MeResponse> {
+  const [updated] = await db
+    .update(users)
+    .set({ displayName: input.displayName, updatedAt: new Date(), version: bumpVersion() })
+    .where(eq(users.id, userId))
+    .returning({ id: users.id });
+  if (!updated) {
+    throw new AppError("NOT_FOUND", "user not found", 404);
+  }
+  return getMe(db, userId, role);
 }
 
 /**

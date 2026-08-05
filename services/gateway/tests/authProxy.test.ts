@@ -218,3 +218,37 @@ describe("PUT /users/preferences", () => {
     await app.close();
   });
 });
+
+describe("PUT /users/display-name", () => {
+  it("returns 401 with no token and never calls core", async () => {
+    const forwardToCore = vi.fn();
+    const app = buildApp(createTestAppDeps({ forwardToCore }));
+
+    const response = await app.inject({ method: "PUT", url: "/users/display-name", payload: { displayName: "Ananya" } });
+
+    expect(response.statusCode).toBe(401);
+    expect(forwardToCore).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("forwards the body plus trusted headers derived from a valid token", async () => {
+    const forwardToCore = vi.fn().mockResolvedValue({ status: 200, body: { displayName: "Ananya" } });
+    const app = buildApp(createTestAppDeps({ forwardToCore }));
+    await app.ready();
+    const token = app.jwt.sign({ sub: "u1", role: "student", typ: "access" });
+
+    const response = await app.inject({
+      method: "PUT",
+      url: "/users/display-name",
+      headers: { authorization: `Bearer ${token}` },
+      payload: { displayName: "Ananya" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(forwardToCore).toHaveBeenCalledWith("PUT", "/users/display-name", {
+      body: { displayName: "Ananya" },
+      headers: { "x-user-id": "u1", "x-user-role": "student" },
+    });
+    await app.close();
+  });
+});

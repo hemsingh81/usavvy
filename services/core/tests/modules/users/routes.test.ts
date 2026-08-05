@@ -50,6 +50,8 @@ describe("GET /me", () => {
       isMinor: null,
       parentalConsentStatus: null,
       onboardingComplete: false,
+      displayName: email.split("@")[0],
+      memberSince: user!.createdAt.toISOString(),
     });
     await app.close();
   });
@@ -479,6 +481,73 @@ describe("PUT /users/preferences", () => {
       url: "/users/preferences",
       headers: { ...internalHeaders, "x-user-id": user!.id, "x-user-role": "student" },
       payload: { explanationStyle: "sarcastic" },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ error: { code: "VALIDATION_ERROR" } });
+    await app.close();
+  });
+});
+
+describe("PUT /users/display-name", () => {
+  it("requires authentication (401 with no trusted headers)", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+
+    const response = await app.inject({
+      method: "PUT",
+      url: "/users/display-name",
+      headers: internalHeaders,
+      payload: { displayName: "Ananya" },
+    });
+
+    expect(response.statusCode).toBe(401);
+    await app.close();
+  });
+
+  it("saves the display name and returns the updated /me-shaped response", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+    const email = uniqueEmail("display-name-put");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+
+    const response = await app.inject({
+      method: "PUT",
+      url: "/users/display-name",
+      headers: { ...internalHeaders, "x-user-id": user!.id, "x-user-role": "student" },
+      payload: { displayName: "Ananya" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ displayName: "Ananya", email });
+    await app.close();
+  });
+
+  it("rejects an empty display name with a VALIDATION_ERROR envelope", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+    const email = uniqueEmail("display-name-empty");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+
+    const response = await app.inject({
+      method: "PUT",
+      url: "/users/display-name",
+      headers: { ...internalHeaders, "x-user-id": user!.id, "x-user-role": "student" },
+      payload: { displayName: "" },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ error: { code: "VALIDATION_ERROR" } });
+    await app.close();
+  });
+
+  it("rejects a display name over 60 characters", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+    const email = uniqueEmail("display-name-toolong");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+
+    const response = await app.inject({
+      method: "PUT",
+      url: "/users/display-name",
+      headers: { ...internalHeaders, "x-user-id": user!.id, "x-user-role": "student" },
+      payload: { displayName: "a".repeat(61) },
     });
 
     expect(response.statusCode).toBe(400);

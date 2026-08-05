@@ -19,6 +19,8 @@ describe("meResponseSchema", () => {
         isMinor: null,
         parentalConsentStatus: null,
         onboardingComplete: false,
+        displayName: "a",
+        memberSince: "2026-01-01T00:00:00.000Z",
       }),
     ).not.toThrow();
   });
@@ -34,6 +36,8 @@ describe("meResponseSchema", () => {
         isMinor: true,
         parentalConsentStatus: "pending",
         onboardingComplete: false,
+        displayName: "a",
+        memberSince: "2026-01-01T00:00:00.000Z",
       }),
     ).not.toThrow();
   });
@@ -49,12 +53,30 @@ describe("meResponseSchema", () => {
         isMinor: false,
         parentalConsentStatus: "not_required",
         onboardingComplete: true,
+        displayName: "a",
+        memberSince: "2026-01-01T00:00:00.000Z",
       }),
     ).not.toThrow();
   });
 
   it("rejects a missing field", () => {
     expect(() => meResponseSchema.parse({ id: "u1", email: "a@example.com" })).toThrow();
+  });
+
+  it("rejects a missing displayName", () => {
+    expect(() =>
+      meResponseSchema.parse({
+        id: "u1",
+        email: "a@example.com",
+        emailVerified: true,
+        role: "student",
+        birthdate: null,
+        isMinor: null,
+        parentalConsentStatus: null,
+        onboardingComplete: false,
+        memberSince: "2026-01-01T00:00:00.000Z",
+      }),
+    ).toThrow();
   });
 
   it("rejects an invalid parentalConsentStatus value", () => {
@@ -68,6 +90,8 @@ describe("meResponseSchema", () => {
         isMinor: null,
         parentalConsentStatus: "not-a-real-status",
         onboardingComplete: false,
+        displayName: "a",
+        memberSince: "2026-01-01T00:00:00.000Z",
       }),
     ).toThrow();
   });

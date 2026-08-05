@@ -38,3 +38,4 @@ export {
   preferencesUpdateInputSchema,
   type PreferencesUpdateInput,
 } from "./preferences.js";
+export { displayNameSchema, updateDisplayNameInputSchema, type UpdateDisplayNameInput } from "./profile.js";
