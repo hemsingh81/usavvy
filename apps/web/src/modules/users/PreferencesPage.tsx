@@ -1,12 +1,26 @@
 import { useEffect, useRef, useState } from "react";
 import { Form } from "radix-ui";
 import { Navigate } from "react-router-dom";
-import { DEFAULT_LEARNER_PREFERENCES, type BoardTheme, type ExplanationStyle, type LearnerPreferences } from "@usavvy/shared-types";
+import {
+  DEFAULT_LEARNER_PREFERENCES,
+  type BoardTheme,
+  type ColorTheme,
+  type ExplanationStyle,
+  type LearnerPreferences,
+} from "@usavvy/shared-types";
 import { Switch, TextField } from "../../shared/index.js";
 import { ApiError } from "../../shared/apiClient.js";
 import { getWebConfig } from "../../app/config.js";
+import { useColorTheme } from "../../app/ColorThemeProvider.js";
 import { useAuth } from "../auth/index.js";
 import { createUsersApi } from "./api.js";
+
+const COLOR_THEME_OPTIONS: Array<{ value: ColorTheme; label: string }> = [
+  { value: "indigo-focus", label: "Indigo Focus" },
+  { value: "midnight", label: "Midnight" },
+  { value: "high-contrast", label: "High Contrast" },
+  { value: "warm-paper", label: "Warm Paper" },
+];
 
 type ViewState = { kind: "loading" } | { kind: "ready" } | { kind: "error"; message: string };
 type FieldErrors = Partial<Record<keyof LearnerPreferences, string>>;
@@ -19,6 +33,7 @@ type FieldErrors = Partial<Record<keyof LearnerPreferences, string>>;
  */
 export function PreferencesPage() {
   const { session } = useAuth();
+  const { setColorTheme } = useColorTheme();
   const [view, setView] = useState<ViewState>({ kind: "loading" });
   const [preferences, setPreferences] = useState<LearnerPreferences>(DEFAULT_LEARNER_PREFERENCES);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
@@ -55,6 +70,15 @@ export function PreferencesPage() {
       cancelled = true;
     };
   }, [session?.accessToken]);
+
+  // Story 1.9 (FR-A-9): saveField already optimistically sets preferences.colorTheme on
+  // success and reverts it on failure — mirroring that same state into the DOM here is
+  // the entire mechanism for both "instant, no-reload apply" and "revert on save failure",
+  // with no special-casing needed for this one field.
+  useEffect(() => {
+    if (view.kind !== "ready") return;
+    setColorTheme(preferences.colorTheme);
+  }, [preferences.colorTheme, view.kind, setColorTheme]);
 
   if (!session) {
     return <Navigate to="/login" replace />;
@@ -202,6 +226,35 @@ export function PreferencesPage() {
             {fieldErrors.reducedMotion}
           </span>
         ) : null}
+
+        <div className="usavvy-field">
+          <span className="usavvy-label">Color theme</span>
+          <div role="radiogroup" aria-label="Color theme" className="usavvy-theme-swatch-group">
+            {COLOR_THEME_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                role="radio"
+                aria-checked={preferences.colorTheme === option.value}
+                aria-label={option.label}
+                className={
+                  preferences.colorTheme === option.value
+                    ? "usavvy-theme-swatch usavvy-theme-swatch--selected"
+                    : "usavvy-theme-swatch"
+                }
+                data-theme-swatch={option.value}
+                onClick={() => void saveField("colorTheme", option.value)}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+          {fieldErrors.colorTheme ? (
+            <span className="usavvy-message-error" role="alert">
+              {fieldErrors.colorTheme}
+            </span>
+          ) : null}
+        </div>
       </Form.Root>
     </main>
   );

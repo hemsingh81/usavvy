@@ -488,6 +488,40 @@ describe("PUT /users/preferences", () => {
     expect(response.json()).toMatchObject({ error: { code: "VALIDATION_ERROR" } });
     await app.close();
   });
+
+  it("rejects an unrecognized colorTheme value through the real route (Story 1.9)", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+    const email = uniqueEmail("preferences-bad-color-theme");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+
+    const response = await app.inject({
+      method: "PUT",
+      url: "/users/preferences",
+      headers: { ...internalHeaders, "x-user-id": user!.id, "x-user-role": "student" },
+      payload: { colorTheme: "neon" },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ error: { code: "VALIDATION_ERROR" } });
+    await app.close();
+  });
+
+  it("saves a new colorTheme value through the real route", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+    const email = uniqueEmail("preferences-color-theme");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+
+    const response = await app.inject({
+      method: "PUT",
+      url: "/users/preferences",
+      headers: { ...internalHeaders, "x-user-id": user!.id, "x-user-role": "student" },
+      payload: { colorTheme: "warm-paper" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ colorTheme: "warm-paper" });
+    await app.close();
+  });
 });
 
 describe("PUT /users/display-name", () => {

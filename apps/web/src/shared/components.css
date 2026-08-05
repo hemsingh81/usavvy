@@ -185,3 +185,32 @@
   padding: var(--spacing-3);
   margin-bottom: var(--spacing-3);
 }
+
+/* Story 1.9 (FR-A-9): DESIGN.md's theme-picker component token
+   (selected-indicator: accent, swatch-radius: rounded-full). */
+.usavvy-theme-swatch-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-2);
+}
+
+.usavvy-theme-swatch {
+  font-family: var(--font-family);
+  font-size: 14px;
+  color: var(--color-on-surface);
+  background: var(--color-surface);
+  border: 1px solid var(--color-outline-variant);
+  border-radius: var(--radius-full, 999px);
+  padding: var(--spacing-2) var(--spacing-4);
+  cursor: pointer;
+}
+
+.usavvy-theme-swatch--selected {
+  border: 2px solid var(--color-accent);
+  color: var(--color-accent);
+}
+
+.usavvy-theme-swatch:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 1px;
+}

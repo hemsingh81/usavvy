@@ -99,6 +99,15 @@ describe("savePreferences", () => {
     expect(result.explanationStyle).toBe("analogy-first");
   });
 
+  it("persists a new colorTheme value, leaving the other 6 preference fields untouched", async () => {
+    const email = uniqueEmail("color-theme");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+
+    const result = await savePreferences(db, user!.id, { colorTheme: "midnight" });
+
+    expect(result).toEqual({ ...DEFAULT_LEARNER_PREFERENCES, colorTheme: "midnight" });
+  });
+
   it("bumps version and updatedAt on write", async () => {
     const email = uniqueEmail("version-bump");
     const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();

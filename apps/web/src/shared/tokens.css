@@ -4,6 +4,10 @@
   --color-on-primary: #ffffff;
   --color-primary-container: #e0e7ff;
   --color-on-primary-container: #312e81;
+  --color-secondary: #0f766e;
+  --color-on-secondary: #ffffff;
+  --color-secondary-container: #99f6e4;
+  --color-on-secondary-container: #134e4a;
   --color-accent: #c2410c;
   --color-on-accent: #ffffff;
   --color-error: #dc2626;
@@ -31,4 +35,39 @@
   --spacing-6: 24px;
 
   --font-family: Inter, system-ui, sans-serif;
+}
+
+/*
+ * Story 1.9 (FR-A-9). DESIGN.md's "Theme Presets" table: only primary, secondary,
+ * background, surface, and on-surface vary by preset. accent/error/warning/success
+ * (and their container pairs) carry semantic meaning and stay constant everywhere.
+ */
+:root[data-color-theme="midnight"] {
+  --color-primary: #a5b4fc;
+  --color-secondary: #5eead4;
+  --color-background: #14123b;
+  --color-surface: #1e1b4b;
+  --color-on-surface: #e8e7ff;
+}
+
+:root[data-color-theme="high-contrast"] {
+  --color-primary: #312e81;
+  --color-secondary: #134e4a;
+  --color-background: #ffffff;
+  --color-surface: #ffffff;
+  --color-on-surface: #000000;
+}
+
+:root[data-color-theme="warm-paper"] {
+  --color-primary: #4338ca;
+  --color-secondary: #0f766e;
+  --color-background: #faf6ed;
+  --color-surface: #ffffff;
+  --color-on-surface: #2b2418;
+}
+
+body {
+  background: var(--color-background);
+  color: var(--color-on-surface);
+  font-family: var(--font-family);
 }
