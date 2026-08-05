@@ -52,3 +52,30 @@ export async function apiRequest<T>(
   }
   return schema.parse(json);
 }
+
+/**
+ * Story 1.8: the first binary download the frontend needs (a PDF export) — apiRequest
+ * assumes a JSON response, so this is a sibling, not a generalization of it (a
+ * GET-only, no-body binary fetch is a different enough shape to keep separate).
+ */
+export async function apiRequestBlob(apiUrl: string, path: string, accessToken: string): Promise<Blob> {
+  let response: Response;
+  try {
+    response = await fetch(`${apiUrl}${path}`, {
+      headers: { authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+  } catch {
+    throw new ApiError("NETWORK_ERROR", "unable to reach the server");
+  }
+
+  if (!response.ok) {
+    const json: unknown = await response.json().catch(() => undefined);
+    const parsedError = errorEnvelopeSchema.safeParse(json);
+    if (parsedError.success) {
+      throw new ApiError(parsedError.data.error.code, parsedError.data.error.message);
+    }
+    throw new ApiError("UNKNOWN_ERROR", "an unexpected error occurred");
+  }
+  return response.blob();
+}

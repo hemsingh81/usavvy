@@ -5,6 +5,7 @@ import { AuthProvider, LoginPage, SignUpPage, VerifyEmailPage } from "../modules
 import {
   AccountDeletionPage,
   AgeDeclarationPage,
+  DataExportPage,
   OnboardingWizardPage,
   ParentalConsentPage,
   PreferencesPage,
@@ -53,6 +54,7 @@ export function App() {
           <Route path="/preferences" element={<PreferencesPage />} />
           <Route path="/profile" element={<ProfilePage />} />
           <Route path="/account-deletion" element={<AccountDeletionPage />} />
+          <Route path="/data-export" element={<DataExportPage />} />
           <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </BrowserRouter>

@@ -4,7 +4,7 @@ baseline_commit: 6dacd3f
 
 # Story 1.8: Data Export
 
-Status: ready-for-dev
+Status: review
 
 *(Epic 1, FR-A-8. Unlike Stories 1.5/1.7, this story's AC was already rescoped in `epics.md` itself during the Implementation Readiness review — the original AC promised progress/notes/submissions data from Epics 3/4/6 that don't exist yet; the current AC explicitly scopes this story to Epic 1's own data (identity, Learner Profile, preferences, privacy settings) and defines the export mechanism as something later epics extend incrementally, not something this story blocks on. Two genuinely new pieces of infrastructure are needed and are in scope here (unlike Story 1.7's deliberately-mock-only `PubSubPort`): a PDF-generation library (`pdfkit` — no PDF capability exists anywhere in this codebase, and the AC explicitly requires PDF output, so this is a spec-required dependency, not speculative infrastructure) and binary (non-JSON) response proxying through `gateway` (every existing proxied route forwards a JSON body; the PDF export is the first response that isn't JSON, so `gateway`'s `CoreClient`/`authProxy` need a second, binary-aware forwarding path alongside the existing JSON one — not a replacement for it).*
 
@@ -36,20 +36,20 @@ so that I have a personal copy of my account.
   - [x] `GET /users/data-export/pdf` needs new plumbing: `forwardToCore`'s current implementation (`services/gateway/src/coreClient.ts`) unconditionally calls `.json()` on core's response, which would corrupt binary PDF bytes. Add a second method to `CoreClient` (and a second `AuthProxyDeps` field): `forwardBinary(method, path, headers): Promise<{ status: number; body: Buffer | undefined; contentType: string | undefined }>` — fetches core exactly like `forward()` does (same headers, same `x-internal-secret`, same timeout), but on success reads `await response.arrayBuffer()` → `Buffer.from(...)` instead of `.json()`, and captures `response.headers.get("content-type")`. On a non-2xx status, still attempt `.json()` for the error envelope (core's error responses are always JSON, even for this route — only the *success* path is binary) and return that as `body` with `contentType: "application/json"`. The new `POST/GET` route handler in `authProxy.ts` checks `result.contentType`: if `"application/pdf"`, `reply.type("application/pdf").header("content-disposition", ...).send(result.body)`; otherwise (an error case) `reply.code(result.status).send(result.body)` matching every other route's error path
   - [x] Both new routes are authenticated via the existing `requireAuth` `preHandler` + `trustedHeaders(request)`, identical to every other `users/*` proxy route
 
-- [ ] **Task 4: `apps/web` — a dedicated export page** (AC: #1)
-  - [ ] `apps/web/src/shared/apiClient.ts`: new `apiRequestBlob(apiUrl, path, accessToken): Promise<Blob>` — the existing `apiRequest` assumes a JSON response (`response.json()` + zod `.parse()`); this is the first binary download the frontend needs. On a non-ok response, attempt to parse the JSON error envelope exactly like `apiRequest` does (reuse `errorEnvelopeSchema`) and throw the same `ApiError`; on success, return `response.blob()`
-  - [ ] New route `/data-export` (protected — no session → redirect to `/login`, matching every other authenticated page). `DataExportPage.tsx` in `apps/web/src/modules/users/`: two buttons, "Download as JSON" and "Download as PDF" (no auto-fetch on mount — this is an on-demand action, not page data to load, matching `AccountDeletionPage`'s confirm-on-click shape more than `ProfilePage`'s load-on-mount shape). Each button calls `apiRequestBlob` for its respective route, then triggers a browser download via the standard `URL.createObjectURL(blob)` + a synthetic `<a download>` click + `URL.revokeObjectURL(...)` afterward (the standard client-side blob-download pattern — needed because the `Authorization: Bearer` header can't be attached to a plain `<a href>` navigation, unlike a cookie-based session)
-  - [ ] A failed download (either button) shows an inline error (AD-17) without disturbing the other button's availability
+- [x] **Task 4: `apps/web` — a dedicated export page** (AC: #1)
+  - [x] `apps/web/src/shared/apiClient.ts`: new `apiRequestBlob(apiUrl, path, accessToken): Promise<Blob>` — the existing `apiRequest` assumes a JSON response (`response.json()` + zod `.parse()`); this is the first binary download the frontend needs. On a non-ok response, attempt to parse the JSON error envelope exactly like `apiRequest` does (reuse `errorEnvelopeSchema`) and throw the same `ApiError`; on success, return `response.blob()`
+  - [x] New route `/data-export` (protected — no session → redirect to `/login`, matching every other authenticated page). `DataExportPage.tsx` in `apps/web/src/modules/users/`: two buttons, "Download as JSON" and "Download as PDF" (no auto-fetch on mount — this is an on-demand action, not page data to load, matching `AccountDeletionPage`'s confirm-on-click shape more than `ProfilePage`'s load-on-mount shape). Each button calls `apiRequestBlob` for its respective route, then triggers a browser download via the standard `URL.createObjectURL(blob)` + a synthetic `<a download>` click + `URL.revokeObjectURL(...)` afterward (the standard client-side blob-download pattern — needed because the `Authorization: Bearer` header can't be attached to a plain `<a href>` navigation, unlike a cookie-based session)
+  - [x] A failed download (either button) shows an inline error (AD-17) without disturbing the other button's availability
 
-- [ ] **Task 5: Tests mirroring `src/` 1:1** (AD-8)
-  - [ ] `services/core/tests/modules/users/service.test.ts` — `generateDataExport` returns the correct `account`/`learnerProfile`/`preferences`/`privacySettings` sections reflecting actual stored values (not just defaults); reflects a fresh/never-onboarded account's all-null `learnerProfile` correctly too
-  - [ ] `services/core/tests/modules/users/dataExportPdf.test.ts` (new) — `generateDataExportPdf` returns a non-empty `Buffer` whose first bytes are a valid PDF header (`%PDF-`) — a minimal but real correctness check without asserting exact rendered content, which would make the test brittle against harmless formatting tweaks
-  - [ ] `services/core/tests/modules/users/routes.test.ts` — both routes require authentication (401 with no trusted headers); `GET /users/data-export/json` returns `200` with the expected top-level keys; `GET /users/data-export/pdf` returns `200` with `content-type: application/pdf` and a body starting with the PDF magic bytes
-  - [ ] `services/gateway/tests/coreClient.test.ts` (or wherever `coreClient`'s existing tests live — check first) — `forwardBinary` returns a `Buffer` + `contentType` on a successful binary response; falls back to parsing a JSON error envelope on a non-2xx response
-  - [ ] `services/gateway/tests/authProxy.test.ts` — both new proxy routes require auth (401 with no token); the PDF route sets `content-type: application/pdf` on the proxied response
-  - [ ] `packages/shared-types/tests/dataExport.test.ts` (new) — `dataExportSchema` accepts a fully-populated shape combining all four sections, rejects a shape missing any one section
-  - [ ] `apps/web/tests/shared/apiClient.test.ts` (existing — check first) — `apiRequestBlob` returns a `Blob` on success, throws `ApiError` with the parsed error envelope's message on failure
-  - [ ] `apps/web/tests/modules/users/DataExportPage.test.tsx` (new) — redirects to `/login` with no session; renders both download buttons; clicking "Download as JSON" fetches the JSON route and triggers a blob download (mock `URL.createObjectURL`/`revokeObjectURL` and assert they're called, matching how jsdom test environments typically stub these); clicking "Download as PDF" does the same for the PDF route; a failed request shows an inline error without removing the other button
+- [x] **Task 5: Tests mirroring `src/` 1:1** (AD-8)
+  - [x] `services/core/tests/modules/users/service.test.ts` — `generateDataExport` returns the correct `account`/`learnerProfile`/`preferences`/`privacySettings` sections reflecting actual stored values (not just defaults); reflects a fresh/never-onboarded account's all-null `learnerProfile` correctly too
+  - [x] `services/core/tests/modules/users/dataExportPdf.test.ts` (new) — `generateDataExportPdf` returns a non-empty `Buffer` whose first bytes are a valid PDF header (`%PDF-`) — a minimal but real correctness check without asserting exact rendered content, which would make the test brittle against harmless formatting tweaks
+  - [x] `services/core/tests/modules/users/routes.test.ts` — both routes require authentication (401 with no trusted headers); `GET /users/data-export/json` returns `200` with the expected top-level keys; `GET /users/data-export/pdf` returns `200` with `content-type: application/pdf` and a body starting with the PDF magic bytes
+  - [x] `services/gateway/tests/coreClient.test.ts` (or wherever `coreClient`'s existing tests live — check first) — `forwardBinary` returns a `Buffer` + `contentType` on a successful binary response; falls back to parsing a JSON error envelope on a non-2xx response
+  - [x] `services/gateway/tests/authProxy.test.ts` — both new proxy routes require auth (401 with no token); the PDF route sets `content-type: application/pdf` on the proxied response
+  - [x] `packages/shared-types/tests/dataExport.test.ts` (new) — `dataExportSchema` accepts a fully-populated shape combining all four sections, rejects a shape missing any one section
+  - [x] `apps/web/tests/shared/apiClient.test.ts` (existing — check first) — `apiRequestBlob` returns a `Blob` on success, throws `ApiError` with the parsed error envelope's message on failure
+  - [x] `apps/web/tests/modules/users/DataExportPage.test.tsx` (new) — redirects to `/login` with no session; renders both download buttons; clicking "Download as JSON" fetches the JSON route and triggers a blob download (mock `URL.createObjectURL`/`revokeObjectURL` and assert they're called, matching how jsdom test environments typically stub these); clicking "Download as PDF" does the same for the PDF route; a failed request shows an inline error without removing the other button
 
 ## Dev Notes
 
@@ -153,6 +153,8 @@ apps/web/
 ## Change Log
 
 - 2026-08-05: Checkpoint 1 (Tasks 1-3, backend + gateway) — `pdfkit` added, `dataExportSchema` combining the three existing response schemas, `generateDataExport`/`generateDataExportPdf`, `GET /users/data-export/{json,pdf}` in core, and a new binary-aware `forwardBinary`/`forwardBinaryToCore` proxy path in gateway alongside the existing JSON-only `forward`. 165 `services/core` tests (up from 157), 52 `services/gateway` tests (up from 44), 78 `shared-types` tests (up from 73).
+- 2026-08-05: Checkpoint 2 (Task 4, frontend) — new `apiRequestBlob` (a sibling to `apiRequest`, since this is the first binary download the frontend needs) and a new dedicated `DataExportPage` (`/data-export`) with two independent download buttons, each triggering the standard blob + object-URL + synthetic-anchor browser download pattern (needed since the `Authorization: Bearer` header can't attach to a plain `<a href>` navigation). 126 `apps/web` tests (up from 118).
+- 2026-08-05: Task 5 completion — full regression clean (447 tests across the monorepo: 14 config, 78 shared-types, 12 service-kernel, 126 apps/web, 52 gateway, 165 core), `tsc --noEmit`/`eslint .` clean in every workspace. The PDF route was verified live via `curl -o export.pdf` directly against `core` (per this story's own Testing requirement, not just automated magic-byte assertions) — `file export-core.pdf` confirmed a genuine "PDF document, version 1.3, 1 page(s)"; the JSON route returned the expected four-section shape with real stored values; the gateway correctly rejected unauthenticated requests to both routes with `401`. Test data cleaned up from Postgres. Status → `review`.
 
 ### Agent Model Used
 
@@ -182,3 +184,14 @@ Claude Sonnet 5
 - `services/gateway/src/app.ts` (updated — `BuildAppDeps` gains `forwardBinaryToCore`), `services/gateway/src/main.ts` (updated — wiring)
 - `services/gateway/src/authProxy.ts` (updated — two new routes, one binary-aware)
 - `services/gateway/tests/coreClient.test.ts` (updated), `services/gateway/tests/authProxy.test.ts` (updated), `services/gateway/tests/testHelpers.ts` (updated — `forwardBinaryToCore` default)
+
+**Task 4 (apps/web):**
+- `apps/web/src/shared/apiClient.ts` (updated — `apiRequestBlob`)
+- `apps/web/src/modules/users/DataExportPage.tsx` (new)
+- `apps/web/src/modules/users/index.ts` (updated — barrel)
+- `apps/web/src/app/App.tsx` (updated — `/data-export` route)
+- `apps/web/tests/shared/apiClient.test.ts` (new — the first test coverage for this file)
+- `apps/web/tests/modules/users/DataExportPage.test.tsx` (new)
+
+**Task 5 (sprint tracking):**
+- `_AI-Agile-Development/implementation-artifacts/sprint-status.yaml` (updated — Story 1.8 → `in-progress`, then `review`)
