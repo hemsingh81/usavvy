@@ -2,12 +2,15 @@ import { and, eq, isNull, sql } from "drizzle-orm";
 import { AppError } from "@usavvy/service-kernel";
 import { can, type Role } from "@usavvy/config";
 import {
+  DEFAULT_LEARNER_PREFERENCES,
   ONBOARDING_STEPS,
   type AgeDeclarationResponse,
+  type LearnerPreferences,
   type LearnerProfileResponse,
   type MeResponse,
   type OnboardingStepInput,
   type ParentalConsentStatus,
+  type PreferencesUpdateInput,
 } from "@usavvy/shared-types";
 import type { Db } from "../../db/client.js";
 import { learnerProfiles, parentalConsentTokens, users } from "../../db/schema.js";
@@ -265,4 +268,43 @@ export async function saveOnboardingStep(db: Db, userId: string, input: Onboardi
     throw new AppError("VALIDATION_ERROR", "onboarding steps must be completed in order", 400);
   }
   return toLearnerProfileResponse(updated);
+}
+
+function toLearnerPreferences(row: LearnerProfileRow): LearnerPreferences {
+  return {
+    voiceEnabled: row.voiceEnabled ?? DEFAULT_LEARNER_PREFERENCES.voiceEnabled,
+    speechRate: row.speechRate ?? DEFAULT_LEARNER_PREFERENCES.speechRate,
+    boardTheme: row.boardTheme ?? DEFAULT_LEARNER_PREFERENCES.boardTheme,
+    explanationStyle: row.explanationStyle ?? DEFAULT_LEARNER_PREFERENCES.explanationStyle,
+    captionsEnabled: row.captionsEnabled ?? DEFAULT_LEARNER_PREFERENCES.captionsEnabled,
+    reducedMotion: row.reducedMotion ?? DEFAULT_LEARNER_PREFERENCES.reducedMotion,
+  };
+}
+
+export async function getPreferences(db: Db, userId: string): Promise<LearnerPreferences> {
+  return toLearnerPreferences(await ensureLearnerProfile(db, userId));
+}
+
+/**
+ * Unlike saveOnboardingStep, no step-order/CAS check is needed here — every preference
+ * is freely, repeatedly re-editable with no invariant a concurrent write could violate
+ * (Story 1.3's own review reached exactly this conclusion for a similar-looking case).
+ */
+export async function savePreferences(db: Db, userId: string, input: PreferencesUpdateInput): Promise<LearnerPreferences> {
+  await ensureLearnerProfile(db, userId);
+
+  const [updated] = await db
+    .update(learnerProfiles)
+    .set({
+      ...input,
+      updatedAt: new Date(),
+      version: sql`${learnerProfiles.version} + 1`,
+    })
+    .where(eq(learnerProfiles.userId, userId))
+    .returning();
+
+  if (!updated) {
+    throw new AppError("INTERNAL_ERROR", "failed to save preferences", 500);
+  }
+  return toLearnerPreferences(updated);
 }

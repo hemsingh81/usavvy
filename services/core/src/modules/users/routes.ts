@@ -2,13 +2,13 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { AppError } from "@usavvy/service-kernel";
 import { ROLES, type Role } from "@usavvy/config";
-import { onboardingStepInputSchema } from "@usavvy/shared-types";
+import { onboardingStepInputSchema, preferencesUpdateInputSchema } from "@usavvy/shared-types";
 import { emailField } from "../auth/index.js";
 import { parseOrThrow } from "../auth/validation.js";
 import type { Db } from "../../db/client.js";
 import type { NotificationPort } from "../notification/index.js";
 import { calculateAge } from "./age.js";
-import { declareAge, getMe, getOnboarding, recordParentalConsent, saveOnboardingStep } from "./service.js";
+import { declareAge, getMe, getOnboarding, getPreferences, recordParentalConsent, saveOnboardingStep, savePreferences } from "./service.js";
 
 export interface UsersRouteDeps {
   db: Db;
@@ -77,5 +77,16 @@ export function registerUsersRoutes(app: FastifyInstance, deps: UsersRouteDeps):
     const { userId } = requireTrustedUser(request);
     const body = parseOrThrow(onboardingStepInputSchema, request.body);
     reply.send(await saveOnboardingStep(deps.db, userId, body));
+  });
+
+  app.get("/users/preferences", async (request, reply) => {
+    const { userId } = requireTrustedUser(request);
+    reply.send(await getPreferences(deps.db, userId));
+  });
+
+  app.put("/users/preferences", async (request, reply) => {
+    const { userId } = requireTrustedUser(request);
+    const body = parseOrThrow(preferencesUpdateInputSchema, request.body);
+    reply.send(await savePreferences(deps.db, userId, body));
   });
 }

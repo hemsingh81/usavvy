@@ -27,3 +27,14 @@ export {
   onboardingStepInputSchema,
   type OnboardingStepInput,
 } from "./users.js";
+export {
+  boardThemeSchema,
+  type BoardTheme,
+  explanationStyleSchema,
+  type ExplanationStyle,
+  learnerPreferencesSchema,
+  type LearnerPreferences,
+  DEFAULT_LEARNER_PREFERENCES,
+  preferencesUpdateInputSchema,
+  type PreferencesUpdateInput,
+} from "./preferences.js";

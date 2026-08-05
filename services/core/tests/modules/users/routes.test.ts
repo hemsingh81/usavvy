@@ -349,3 +349,97 @@ describe("PUT /users/onboarding/step", () => {
     await app.close();
   });
 });
+
+describe("GET /users/preferences", () => {
+  it("requires authentication (401 with no trusted headers)", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+
+    const response = await app.inject({ method: "GET", url: "/users/preferences", headers: internalHeaders });
+
+    expect(response.statusCode).toBe(401);
+    await app.close();
+  });
+
+  it("returns the default preferences on first call", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+    const email = uniqueEmail("preferences-get");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/users/preferences",
+      headers: { ...internalHeaders, "x-user-id": user!.id, "x-user-role": "student" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ voiceEnabled: true, boardTheme: "dark" });
+    await app.close();
+  });
+});
+
+describe("PUT /users/preferences", () => {
+  it("requires authentication (401 with no trusted headers)", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+
+    const response = await app.inject({
+      method: "PUT",
+      url: "/users/preferences",
+      headers: internalHeaders,
+      payload: { voiceEnabled: false },
+    });
+
+    expect(response.statusCode).toBe(401);
+    await app.close();
+  });
+
+  it("saves a partial update and returns the full preferences shape", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+    const email = uniqueEmail("preferences-put");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+
+    const response = await app.inject({
+      method: "PUT",
+      url: "/users/preferences",
+      headers: { ...internalHeaders, "x-user-id": user!.id, "x-user-role": "student" },
+      payload: { boardTheme: "paper" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ boardTheme: "paper", voiceEnabled: true });
+    await app.close();
+  });
+
+  it("rejects an empty update body with a VALIDATION_ERROR envelope", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+    const email = uniqueEmail("preferences-empty");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+
+    const response = await app.inject({
+      method: "PUT",
+      url: "/users/preferences",
+      headers: { ...internalHeaders, "x-user-id": user!.id, "x-user-role": "student" },
+      payload: {},
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ error: { code: "VALIDATION_ERROR" } });
+    await app.close();
+  });
+
+  it("rejects an out-of-bounds speechRate", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+    const email = uniqueEmail("preferences-bad-rate");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+
+    const response = await app.inject({
+      method: "PUT",
+      url: "/users/preferences",
+      headers: { ...internalHeaders, "x-user-id": user!.id, "x-user-role": "student" },
+      payload: { speechRate: 5 },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ error: { code: "VALIDATION_ERROR" } });
+    await app.close();
+  });
+});

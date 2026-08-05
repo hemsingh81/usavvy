@@ -38,4 +38,14 @@ export function registerAuthProxyRoutes(app: FastifyInstance, deps: AuthProxyDep
     const result = await deps.forwardToCore("PUT", "/users/onboarding/step", { body: request.body, headers: trustedHeaders(request) });
     reply.code(result.status).send(result.body);
   });
+
+  app.get("/users/preferences", { preHandler: requireAuth }, async (request, reply) => {
+    const result = await deps.forwardToCore("GET", "/users/preferences", { headers: trustedHeaders(request) });
+    reply.code(result.status).send(result.body);
+  });
+
+  app.put("/users/preferences", { preHandler: requireAuth }, async (request, reply) => {
+    const result = await deps.forwardToCore("PUT", "/users/preferences", { body: request.body, headers: trustedHeaders(request) });
+    reply.code(result.status).send(result.body);
+  });
 }
