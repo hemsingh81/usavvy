@@ -26,11 +26,16 @@ function jsonResponse(body: unknown) {
   return Promise.resolve({ ok: true, json: () => Promise.resolve(body) } as unknown as Response);
 }
 
-function mockFetch(course: unknown, overrides: { start?: unknown; updateToLatest?: unknown } = {}) {
+function mockFetch(course: unknown, overrides: { start?: unknown; updateToLatest?: unknown; courseAfterUpdate?: unknown } = {}) {
+  let getCourseCallCount = 0;
   return vi.fn().mockImplementation((url: string) => {
     if (url.endsWith("/start")) return jsonResponse(overrides.start ?? { pinnedCourseId: "c1", startedAt: "2026-01-15T00:00:00.000Z" });
     if (url.endsWith("/update-to-latest")) return jsonResponse(overrides.updateToLatest ?? { pinnedCourseId: "c2", flaggedTopicTitles: [] });
-    if (url.endsWith("/courses/c1")) return jsonResponse(course);
+    if (url.endsWith("/courses/c1")) {
+      getCourseCallCount += 1;
+      const isPostUpdateCall = getCourseCallCount > 1 && overrides.courseAfterUpdate !== undefined;
+      return jsonResponse(isPostUpdateCall ? overrides.courseAfterUpdate : course);
+    }
     throw new Error(`unexpected fetch: ${url}`);
   });
 }
@@ -181,6 +186,27 @@ describe("CourseDetailPage", () => {
 
     await waitFor(() => expect(screen.queryByText("A newer version of this course is available.")).not.toBeInTheDocument());
     expect(screen.queryByRole("link", { name: /review your customisation/i })).not.toBeInTheDocument();
+  });
+
+  it("re-fetches and displays the new version's content after a successful update, rather than leaving the old version's syllabus stale (review finding)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      mockFetch(
+        { ...FULL_COURSE, isPinnedToOlderVersion: true, latestVersionId: "c2" },
+        {
+          updateToLatest: { pinnedCourseId: "c2", flaggedTopicTitles: [] },
+          courseAfterUpdate: { ...FULL_COURSE, title: "Intro to Algebra v2", isPinnedToOlderVersion: false, latestVersionId: null },
+        },
+      ),
+    );
+    renderWithSession({ accessToken: "a-token" });
+    const user = userEvent.setup();
+    await waitFor(() => expect(screen.getByText("Intro to Algebra")).toBeInTheDocument());
+
+    await user.click(screen.getByRole("button", { name: "Update" }));
+
+    await waitFor(() => expect(screen.getByText("Intro to Algebra v2")).toBeInTheDocument());
+    expect(screen.queryByText("Intro to Algebra", { selector: "h1" })).not.toBeInTheDocument();
   });
 
   it("shows a distinguishable error rather than a blank page when the fetch fails", async () => {

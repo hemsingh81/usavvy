@@ -477,15 +477,17 @@ async function getCourseTopicGraph(db: Db, courseId: string): Promise<CourseTopi
   // Review finding: an archived Topic (or one under an archived Module — archiveModule's
   // cascade sets the same archivedAt on both) must not remain selectable/deselectable, and
   // must not dilute the equal per-Topic hours weighting below.
-  // Review finding: an archived Topic (or one under an archived Module — archiveModule's
-  // cascade sets the same archivedAt on both) must not remain selectable/deselectable, and
-  // must not dilute the equal per-Topic hours weighting below.
+  // Review finding (Story 2.6): no deterministic order previously meant that two Topics
+  // sharing a title (used by updateCourseVersionPin's title-based reconciliation) resolved
+  // to whichever row Postgres happened to return last — position/id matches this codebase's
+  // own established tiebreaker convention (getCourse, getPlacementCheckQuestions).
   const topicRows =
     moduleIds.length > 0
       ? await db
           .select({ id: topics.id, title: topics.title })
           .from(topics)
           .where(and(inArray(topics.moduleId, moduleIds), isNull(topics.archivedAt)))
+          .orderBy(topics.position, topics.id)
       : [];
   const topicIds = new Set(topicRows.map((t) => t.id));
   const topicTitleById = new Map(topicRows.map((t) => [t.id, t.title]));
@@ -832,6 +834,8 @@ async function getCourseRowOrThrow(db: Db, courseId: string) {
   return course;
 }
 
+/** Highest versionNumber in the group regardless of status — createCourseVersion's own
+ * numbering must stay monotonic across drafts too, not just published rows. */
 async function getLatestVersionInGroup(db: Db, groupKey: string) {
   const rows = await db
     .select()
@@ -844,6 +848,26 @@ async function getLatestVersionInGroup(db: Db, groupKey: string) {
     throw new AppError("INTERNAL_ERROR", "version group has no versions", 500);
   }
   return latest;
+}
+
+/**
+ * Review finding: `getLatestVersionInGroup` has no status filter, so a still-`draft` new
+ * version (created via createCourseVersion, mid-authoring) could be reported to a learner
+ * as "the latest version, available to update to" and even served to them — leaking
+ * unpublished content. `resolveCourseForLearner`/`updateCourseVersionPin` must only ever
+ * consider PUBLISHED rows for that learner-facing "is there something newer" signal.
+ * Returns `null` (not a throw) when the group has no published row yet — a legitimate
+ * state for a course still being authored, matching the same case searchCourses already
+ * excludes from the catalog.
+ */
+async function getLatestPublishedVersionInGroup(db: Db, groupKey: string) {
+  const rows = await db
+    .select()
+    .from(courses)
+    .where(sql`coalesce(${courses.versionGroupId}, ${courses.id}) = ${groupKey} AND ${courses.status} = 'published'`)
+    .orderBy(sql`${courses.versionNumber} DESC`, sql`${courses.id} DESC`)
+    .limit(1);
+  return rows[0] ?? null;
 }
 
 /**
@@ -934,14 +958,22 @@ export async function resolveCourseForLearner(db: Db, userId: string, requestedC
     .select()
     .from(learnerCoursePins)
     .where(and(eq(learnerCoursePins.userId, userId), eq(learnerCoursePins.versionGroupId, groupKey)));
-  const latest = await getLatestVersionInGroup(db, groupKey);
+  // Review finding: only a PUBLISHED version can ever be "the latest available update" —
+  // a still-draft version must never surface here (see getLatestPublishedVersionInGroup).
+  const latestPublished = await getLatestPublishedVersionInGroup(db, groupKey);
   const effectiveCourseId = pin?.pinnedCourseId ?? requestedCourseId;
+  const effectiveRow = effectiveCourseId === requested.id ? requested : await getCourseRowOrThrow(db, effectiveCourseId);
 
   const course = await getCourse(db, effectiveCourseId);
+  // Compared by versionNumber, not id-equality: a pin sitting on something whose OWN
+  // version number is already >= the latest published one (a rare case — e.g. pinned
+  // directly to a draft ahead of any published release) must never be reported as
+  // "older," which id-equality alone would have gotten backwards.
+  const isNewerAvailable = latestPublished !== null && latestPublished.versionNumber > effectiveRow.versionNumber;
   return {
     ...course,
-    isPinnedToOlderVersion: pin !== undefined && effectiveCourseId !== latest.id,
-    latestVersionId: effectiveCourseId !== latest.id ? latest.id : null,
+    isPinnedToOlderVersion: pin !== undefined && isNewerAvailable,
+    latestVersionId: isNewerAvailable ? latestPublished.id : null,
   };
 }
 
@@ -957,7 +989,12 @@ export async function resolveCourseForLearner(db: Db, userId: string, requestedC
 export async function updateCourseVersionPin(db: Db, userId: string, courseId: string): Promise<UpdateToLatestVersionResponse> {
   const requested = await getCourseRowOrThrow(db, courseId);
   const groupKey = groupKeyOf(requested);
-  const latest = await getLatestVersionInGroup(db, groupKey);
+  // Review finding: never move a learner's pin onto a still-draft version — same
+  // published-only resolution as resolveCourseForLearner's "is there something newer" check.
+  const latest = await getLatestPublishedVersionInGroup(db, groupKey);
+  if (!latest) {
+    throw new AppError("VALIDATION_ERROR", "no published version is available to update to", 400);
+  }
 
   const [existingPin] = await db
     .select()
@@ -988,11 +1025,22 @@ export async function updateCourseVersionPin(db: Db, userId: string, courseId: s
     newTopicIdByTitle.set(title, topicId);
   }
 
+  // Review finding: getCourseTopicGraph excludes archived Topics, so a Topic the learner
+  // deselected/prioritized that was LATER archived (in the old version) had no title to
+  // report — its reference was dropped with no flag at all, unlike a genuinely
+  // removed/renamed Topic. This unfiltered fallback lookup covers that case too, so
+  // "flagged for review, not silently dropped" (AC #4) applies uniformly.
+  const oldModuleRows = await db.select({ id: modules.id }).from(modules).where(eq(modules.courseId, oldPinnedCourseId));
+  const oldModuleIds = oldModuleRows.map((m) => m.id);
+  const allOldTopicRows =
+    oldModuleIds.length > 0 ? await db.select({ id: topics.id, title: topics.title }).from(topics).where(inArray(topics.moduleId, oldModuleIds)) : [];
+  const allOldTopicTitleById = new Map(allOldTopicRows.map((t) => [t.id, t.title]));
+
   const flaggedTopicTitles = new Set<string>();
   function remap(oldTopicIds: string[] | null): string[] {
     const remapped: string[] = [];
     for (const oldTopicId of oldTopicIds ?? []) {
-      const title = oldGraph.topicTitleById.get(oldTopicId);
+      const title = oldGraph.topicTitleById.get(oldTopicId) ?? allOldTopicTitleById.get(oldTopicId);
       const newTopicId = title ? newTopicIdByTitle.get(title) : undefined;
       if (newTopicId) {
         remapped.push(newTopicId);

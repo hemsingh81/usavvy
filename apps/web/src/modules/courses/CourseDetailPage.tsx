@@ -63,7 +63,14 @@ export function CourseDetailPage() {
     setBusy(true);
     try {
       const { apiUrl } = getWebConfig();
-      const result = await createCoursesApi(apiUrl).updateToLatestVersion(session.accessToken, id);
+      const coursesApi = createCoursesApi(apiUrl);
+      const result = await coursesApi.updateToLatestVersion(session.accessToken, id);
+      // Review finding: the pin has now moved server-side, but `view.course` still held the
+      // OLD version's content — re-fetching (the same URL id, which now transparently
+      // resolves to the new pin) is required for the visible syllabus/title to actually
+      // reflect what was just updated to.
+      const refreshedCourse = await coursesApi.getCourse(session.accessToken, id);
+      setView({ kind: "ready", course: refreshedCourse });
       setUpdateNoticeDismissed(true);
       setFlaggedTopicTitles(result.flaggedTopicTitles);
     } catch (error) {

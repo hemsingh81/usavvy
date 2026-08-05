@@ -318,7 +318,12 @@ describe("Story 2.6: versioning, pinning, and GET /courses/:id resolution", () =
 
     await app.inject({ method: "POST", url: `/courses/${v1.id}/start`, headers: adminHeaders });
 
-    const v2Response = await app.inject({ method: "POST", url: `/courses/${v1.id}/versions`, headers: adminHeaders, payload: { title: "v2" } });
+    const v2Response = await app.inject({
+      method: "POST",
+      url: `/courses/${v1.id}/versions`,
+      headers: adminHeaders,
+      payload: { title: "v2", status: "published" },
+    });
     const v2 = v2Response.json() as { id: string };
     createdCourseIds.push(v2.id);
 
@@ -356,7 +361,12 @@ describe("Story 2.6: versioning, pinning, and GET /courses/:id resolution", () =
       payload: { deselectedTopicIds: [topic.id] },
     });
 
-    const v2Response = await app.inject({ method: "POST", url: `/courses/${v1.id}/versions`, headers: adminHeaders, payload: { title: "v2" } });
+    const v2Response = await app.inject({
+      method: "POST",
+      url: `/courses/${v1.id}/versions`,
+      headers: adminHeaders,
+      payload: { title: "v2", status: "published" },
+    });
     const v2 = v2Response.json() as { id: string };
     createdCourseIds.push(v2.id);
     const v2ModuleResponse = await app.inject({

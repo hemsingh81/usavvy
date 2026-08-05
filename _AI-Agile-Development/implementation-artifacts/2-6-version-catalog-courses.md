@@ -4,7 +4,7 @@ baseline_commit: c5d0a02
 
 # Story 2.6: Version catalog courses
 
-Status: review
+Status: done
 
 *(Epic 2, FR-C-6. This story is the first in this codebase to need real Course content versioning and the first to need any notion of "a learner has started a Course" — neither exists yet. No Epic 9 (admin/back-office authoring, still `backlog`) publish-workflow UI exists either. This story builds the minimal, honest mechanism its own four ACs require: a version-group model where "publishing a new version" means creating a new `courses` row sharing a group key, a minimal idempotent "access pinning" record (NOT a real Epic 3/4 learning session), and a title-based reconciliation for Story 2.4 customisations across versions — nothing more.)*
 
@@ -112,6 +112,18 @@ Claude Sonnet 5
 - Live-verified end-to-end against the running `services/courses`: started a course as v1, published v2 with a renamed Topic, confirmed `GET /courses/:id` (requested via either version's id) transparently resolves to the pinned v1 with `isPinnedToOlderVersion: true`/`latestVersionId` correctly set, confirmed the catalog returns only v2, saved a v1 customisation deselecting the original Topic, then confirmed `update-to-latest` correctly flagged the renamed Topic's old title and moved the pin to v2. Test data cleaned up afterward.
 - Full monorepo regression: 817 tests passing (18+173+12+213+97+104+200 across all 8 workspaces), `tsc --noEmit` and `eslint .` clean.
 
+### Post-review patch round (2026-08-06)
+
+- Three-layer adversarial review (Blind Hunter, Edge Case Hunter, Acceptance Auditor) surfaced 4 confirmed bugs, all fixed and proven via a fail-then-pass regression test for each:
+  - **A — draft-leak (critical, found independently by 2 of 3 reviewers):** `resolveCourseForLearner`/`updateCourseVersionPin` used an unfiltered "latest version in group" lookup, so a still-drafting new version could be reported to learners as "the latest available" and even repoint their pin onto unpublished content. Split into `getLatestVersionInGroup` (unfiltered, kept for `createCourseVersion`'s own numbering) and a new `getLatestPublishedVersionInGroup` (published-only) used everywhere a learner-facing "what's latest" answer is computed. Also fixed a follow-on bug caught while implementing this: comparing by id-equality rather than `versionNumber` could tell a learner pinned to a newer unpublished draft that an older published version was "available" — fixed to compare `latestPublished.versionNumber > effectiveRow.versionNumber`.
+  - **B — stale content after "Update" (high):** `CourseDetailPage`'s `handleUpdateToLatest` updated the pin server-side and showed `flaggedTopicTitles`, but never re-fetched the course, leaving the visibly-rendered syllabus/title on the OLD version. Fixed by re-calling `getCourse` after a successful update and replacing `view` with the refreshed result.
+  - **C — nondeterministic title reconciliation:** `getCourseTopicGraph`'s Topic query had no `ORDER BY`, so title-based matching (the only viable cross-version reconciliation signal — see Dev Notes) could behave nondeterministically when duplicate Topic titles exist. Added `.orderBy(topics.position, topics.id)`.
+  - **D — archived Topic silently dropped instead of flagged (violates AC #4):** `updateCourseVersionPin`'s title lookup only checked non-archived Topics (`getCourseTopicGraph` excludes archived rows), so a customisation referencing a Topic that was later archived in the OLD version had its title unresolvable — the reference was dropped from the customisation but never added to `flaggedTopicTitles`, silently contradicting AC #4. Fixed with an unfiltered fallback query covering all Topics (archived or not) in the old course.
+- Every pre-existing test that had unknowingly baked in the draft-leak bug (asserting a never-published `createCourseVersion` call became "the latest") was corrected to publish the version it expects to be treated as latest.
+- Live-verified fixes A and D end-to-end against the running `services/courses`: created a published v1, learner pinned it, created an unpublished v2 (confirmed `latestVersionId: null` — no leak), published a v3 (confirmed `latestVersionId` correctly pointed to v3, never the still-draft v2); separately, deselected a Topic in a customisation, archived that Topic's module, called update-to-latest, and confirmed the archived Topic's title appeared in `flaggedTopicTitles` rather than vanishing silently.
+- Two non-blocking findings deferred (documented in `_AI-Agile-Development/implementation-artifacts/deferred-work.md`, not required by any AC): a race in `createCourseVersion`'s version-number assignment (no transaction/unique constraint — low likelihood given rare admin-only usage); the "started"/flagged-topics UI state is ephemeral (not derived from the server, not persisted beyond the immediate response).
+- Final regression after all fixes: 821 tests passing across all 8 workspaces (18+173+12+214+97+107+200, plus service-kernel's 12 unchanged), `tsc --noEmit` and `eslint .` both clean. `services/core`'s 2 unrelated flaky timeouts (auth signup/Google-link tests, seen only under full-monorepo parallel load) reproduce as passing 200/200 in isolation — confirmed unrelated to this story's changes.
+
 ### File List
 
 - `packages/shared-types/src/courseVersioning.ts` (new)
@@ -133,6 +145,23 @@ Claude Sonnet 5
 - `apps/web/tests/modules/courses/CourseDetailPage.test.tsx` (modified)
 - `apps/web/tests/modules/courses/CustomizePage.test.tsx` (modified — fixture updates for new response fields)
 
+## Senior Developer Review (AI)
+
+**Reviewers:** Blind Hunter, Edge Case Hunter, Acceptance Auditor (parallel adversarial review, 2026-08-06)
+**Outcome:** Changes Requested → all 4 confirmed findings fixed and verified this round
+
+### Action Items
+
+- [x] **[High]** Fix draft-leak: `resolveCourseForLearner`/`updateCourseVersionPin` must never report or pin to an unpublished version as "latest" (found independently by Blind Hunter and Edge Case Hunter)
+- [x] **[High]** `CourseDetailPage` must re-fetch course content after a successful "Update to latest," not leave the old version's syllabus/title visibly stale
+- [x] **[Med]** `getCourseTopicGraph`'s Topic query needs a deterministic `ORDER BY` — title-based version reconciliation can behave nondeterministically with duplicate Topic titles otherwise
+- [x] **[Med]** A customisation reference to a Topic archived (not just renamed) in the old version must be flagged in `flaggedTopicTitles`, not silently dropped — violates AC #4's "flagged for review, not silently dropped"
+- [ ] **[Low, deferred]** `createCourseVersion`'s version-number assignment has a race (no transaction/unique constraint) — low likelihood given rare admin-only usage; tracked in `deferred-work.md`
+- [ ] **[Low, deferred]** "Started"/flagged-topics UI state is ephemeral, not server-derived or persisted beyond the immediate response — no AC requires persistence; tracked in `deferred-work.md`
+
+See Dev Agent Record → "Post-review patch round" above for fix details and live-verification evidence.
+
 ## Change Log
 
 - 2026-08-06: Implemented Version catalog courses (Tasks 1-5): shared contract, `services/courses` version groups + pinning + title-based reconciliation, gateway proxy, `apps/web` real "Start course" + update notice. Live-verified end-to-end. Status → review.
+- 2026-08-06: 3-layer adversarial review found 4 bugs (draft-leak, stale post-update content, nondeterministic title reconciliation, archived-Topic silently dropped); all fixed and proven via fail-then-pass regression tests, live-verified against running services. 2 low-severity findings deferred (documented in `deferred-work.md`). Status → done.

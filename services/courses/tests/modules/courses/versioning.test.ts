@@ -5,6 +5,7 @@ import { createDb, type Db } from "../../../src/db/client.js";
 import { concepts, conceptPrerequisites, courseCustomizations, courses, learnerCoursePins, modules, topics } from "../../../src/db/schema.js";
 import { loadCoursesConfig } from "../../../src/config.js";
 import {
+  archiveModule,
   createCourse,
   createCourseVersion,
   createModule,
@@ -76,10 +77,10 @@ describe("createCourseVersion", () => {
 
   it("a third version increments to versionNumber 3 relative to the group's max", async () => {
     const v1 = await seedCourse({ title: "Chain" });
-    const v2 = await createCourseVersion(db, "admin", v1.id, { title: "Chain v2" });
+    const v2 = await createCourseVersion(db, "admin", v1.id, { title: "Chain v2", status: "published" });
     createdCourseIds.push(v2.id);
 
-    const v3 = await createCourseVersion(db, "admin", v2.id, { title: "Chain v3" });
+    const v3 = await createCourseVersion(db, "admin", v2.id, { title: "Chain v3", status: "published" });
     createdCourseIds.push(v3.id);
 
     // Reachable indirectly: v3 becomes the group's latest, confirmed via resolution.
@@ -139,12 +140,23 @@ describe("resolveCourseForLearner", () => {
   it("flags isPinnedToOlderVersion and names the latest version when a newer one exists (AC #3)", async () => {
     const v1 = await seedCourse();
     await startCourse(db, "user1", v1.id);
-    const v2 = await createCourseVersion(db, "admin", v1.id, { title: "v2" });
+    const v2 = await createCourseVersion(db, "admin", v1.id, { title: "v2", status: "published" });
     createdCourseIds.push(v2.id);
 
     const result = await resolveCourseForLearner(db, "user1", v1.id);
 
     expect(result).toMatchObject({ isPinnedToOlderVersion: true, latestVersionId: v2.id });
+  });
+
+  it("never treats a still-draft version as 'the latest available' — a learner pinned to the only published version sees no update notice (review finding)", async () => {
+    const v1 = await seedCourse();
+    await startCourse(db, "user1", v1.id);
+    const v2 = await createCourseVersion(db, "admin", v1.id, { title: "v2 (still drafting)" });
+    createdCourseIds.push(v2.id);
+
+    const result = await resolveCourseForLearner(db, "user1", v1.id);
+
+    expect(result).toMatchObject({ isPinnedToOlderVersion: false, latestVersionId: null });
   });
 
   it("does not flag isPinnedToOlderVersion when the learner's pin already IS the latest", async () => {
@@ -163,7 +175,7 @@ describe("updateCourseVersionPin", () => {
   it("moves the pin to the latest version", async () => {
     const v1 = await seedCourse();
     await startCourse(db, "user1", v1.id);
-    const v2 = await createCourseVersion(db, "admin", v1.id, { title: "v2" });
+    const v2 = await createCourseVersion(db, "admin", v1.id, { title: "v2", status: "published" });
     createdCourseIds.push(v2.id);
 
     const result = await updateCourseVersionPin(db, "user1", v1.id);
@@ -171,6 +183,13 @@ describe("updateCourseVersionPin", () => {
     expect(result.pinnedCourseId).toBe(v2.id);
     const resolved = await resolveCourseForLearner(db, "user1", v1.id);
     expect(resolved.id).toBe(v2.id);
+  });
+
+  it("rejects with a clean error when no version in the group has ever been published (review finding)", async () => {
+    const v1 = await seedCourse({ status: "draft" });
+    await startCourse(db, "user1", v1.id);
+
+    await expect(updateCourseVersionPin(db, "user1", v1.id)).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
   });
 
   it("carries forward a customisation reference when the Topic title matches in the new version, and flags a removed/renamed Topic (AC #4)", async () => {
@@ -181,7 +200,7 @@ describe("updateCourseVersionPin", () => {
     await startCourse(db, "user1", v1.id);
     await saveCourseCustomization(db, "user1", v1.id, { deselectedTopicIds: [keptTopic.id] });
 
-    const v2 = await createCourseVersion(db, "admin", v1.id, { title: "Reconcile v2" });
+    const v2 = await createCourseVersion(db, "admin", v1.id, { title: "Reconcile v2", status: "published" });
     createdCourseIds.push(v2.id);
     const v2Module = await createModule(db, "admin", v2.id, { title: "Module 1", position: 0 });
     const v2KeptTopic = await createTopic(db, "admin", v2Module.id, { title: "Kept Topic", position: 0 });
@@ -202,7 +221,7 @@ describe("updateCourseVersionPin", () => {
     await startCourse(db, "user1", v1.id);
     await saveCourseCustomization(db, "user1", v1.id, { deselectedTopicIds: [droppedTopic.id] });
 
-    const v2 = await createCourseVersion(db, "admin", v1.id, { title: "Reconcile Dropped v2" });
+    const v2 = await createCourseVersion(db, "admin", v1.id, { title: "Reconcile Dropped v2", status: "published" });
     createdCourseIds.push(v2.id);
     const v2Module = await createModule(db, "admin", v2.id, { title: "Module 1", position: 0 });
     await createTopic(db, "admin", v2Module.id, { title: "A Totally Different Topic", position: 0 });
@@ -212,10 +231,28 @@ describe("updateCourseVersionPin", () => {
     expect(result.flaggedTopicTitles).toEqual(["Will Be Removed"]);
   });
 
+  it("flags a Topic that was archived in the old version before updating, rather than silently dropping it with no notice (review finding)", async () => {
+    const v1 = await seedCourse({ title: "Reconcile Archived" });
+    const v1Module = await createModule(db, "admin", v1.id, { title: "Module 1", position: 0 });
+    const archivedTopic = await createTopic(db, "admin", v1Module.id, { title: "Soon Archived", position: 0 });
+    await startCourse(db, "user1", v1.id);
+    await saveCourseCustomization(db, "user1", v1.id, { deselectedTopicIds: [archivedTopic.id] });
+    await archiveModule(db, "admin", v1Module.id);
+
+    const v2 = await createCourseVersion(db, "admin", v1.id, { title: "Reconcile Archived v2", status: "published" });
+    createdCourseIds.push(v2.id);
+    const v2Module = await createModule(db, "admin", v2.id, { title: "Module 1", position: 0 });
+    await createTopic(db, "admin", v2Module.id, { title: "Something Else", position: 0 });
+
+    const result = await updateCourseVersionPin(db, "user1", v1.id);
+
+    expect(result.flaggedTopicTitles).toEqual(["Soon Archived"]);
+  });
+
   it("updates cleanly with an empty flagged list when the learner has no saved customisation", async () => {
     const v1 = await seedCourse();
     await startCourse(db, "user1", v1.id);
-    const v2 = await createCourseVersion(db, "admin", v1.id, { title: "v2" });
+    const v2 = await createCourseVersion(db, "admin", v1.id, { title: "v2", status: "published" });
     createdCourseIds.push(v2.id);
 
     const result = await updateCourseVersionPin(db, "user1", v1.id);
