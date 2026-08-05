@@ -50,6 +50,10 @@ const VALID_COURSE = {
   id: "course1",
   title: "Intro to Algebra",
   description: "A beginner course",
+  subject: "Math",
+  level: "beginner",
+  estimatedDurationHours: 10,
+  status: "published",
   modules: [VALID_MODULE],
   createdAt: "2026-01-15T00:00:00.000Z",
   updatedAt: "2026-01-15T00:00:00.000Z",
@@ -112,6 +116,16 @@ describe("create*InputSchema", () => {
 
   it("createCourseInputSchema rejects an empty title", () => {
     expect(() => createCourseInputSchema.parse({ title: "" })).toThrow();
+  });
+
+  it("createCourseInputSchema accepts the Story 2.2 catalog fields (subject/level/estimatedDurationHours/status), all optional", () => {
+    expect(() =>
+      createCourseInputSchema.parse({ title: "New Course", subject: "Math", level: "beginner", estimatedDurationHours: 10, status: "published" }),
+    ).not.toThrow();
+  });
+
+  it("createCourseInputSchema rejects a negative estimatedDurationHours", () => {
+    expect(() => createCourseInputSchema.parse({ title: "x", estimatedDurationHours: -1 })).toThrow();
   });
 
   it("createModuleInputSchema and createTopicInputSchema require a non-negative position", () => {

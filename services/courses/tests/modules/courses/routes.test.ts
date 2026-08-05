@@ -152,3 +152,30 @@ describe("path-param validation (mirrors Story 1.10's own review-round fix)", ()
     await app.close();
   });
 });
+
+describe("GET /courses (catalog search)", () => {
+  it("requires the internal secret and trusted user headers", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+
+    const response = await app.inject({ method: "GET", url: "/courses" });
+
+    expect(response.statusCode).toBe(401);
+    await app.close();
+  });
+
+  it("returns only published courses through the real route, filterable by query params", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+    const published = await app.inject({ method: "POST", url: "/courses", headers: adminHeaders, payload: { title: "Published", status: "published", subject: "Math" } });
+    createdCourseIds.push((published.json() as { id: string }).id);
+    const draft = await app.inject({ method: "POST", url: "/courses", headers: adminHeaders, payload: { title: "Draft", status: "draft" } });
+    createdCourseIds.push((draft.json() as { id: string }).id);
+
+    const response = await app.inject({ method: "GET", url: "/courses?subject=Math", headers: adminHeaders });
+
+    expect(response.statusCode).toBe(200);
+    const titles = (response.json() as { title: string }[]).map((c) => c.title);
+    expect(titles).toContain("Published");
+    expect(titles).not.toContain("Draft");
+    await app.close();
+  });
+});

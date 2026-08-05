@@ -1,13 +1,16 @@
-import { eq, inArray, sql } from "drizzle-orm";
+import { eq, inArray, sql, type SQL } from "drizzle-orm";
 import { AppError } from "@usavvy/service-kernel";
 import { can, type Role } from "@usavvy/config";
 import type {
+  CatalogSearchParams,
   ConceptResponse,
   CourseResponse,
+  CourseSummary,
   CreateConceptInput,
   CreateCourseInput,
   CreateModuleInput,
   CreateTopicInput,
+  DurationBucket,
   ModuleResponse,
   TopicResponse,
 } from "@usavvy/shared-types";
@@ -28,12 +31,33 @@ export async function createCourse(db: Db, role: Role, input: CreateCourseInput)
   requireCourseHierarchyWriteAccess(role, "create");
   const [row] = await db
     .insert(courses)
-    .values({ title: input.title, description: input.description ?? null })
+    .values({
+      title: input.title,
+      description: input.description ?? null,
+      subject: input.subject ?? null,
+      level: input.level ?? null,
+      estimatedDurationHours: input.estimatedDurationHours ?? null,
+      // Story 2.2: no AC calls for a separate publish-workflow endpoint — status is set
+      // directly at creation time. Defaults to "draft" at the service layer (the DB
+      // column's own DEFAULT 'draft' is defense-in-depth, not the source of truth).
+      status: input.status ?? "draft",
+    })
     .returning();
   if (!row) {
     throw new AppError("INTERNAL_ERROR", "failed to create course", 500);
   }
-  return { id: row.id, title: row.title, description: row.description, modules: [], createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString() };
+  return {
+    id: row.id,
+    title: row.title,
+    description: row.description,
+    subject: row.subject,
+    level: row.level,
+    estimatedDurationHours: row.estimatedDurationHours,
+    status: row.status,
+    modules: [],
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
 }
 
 export async function createModule(db: Db, role: Role, courseId: string, input: CreateModuleInput): Promise<ModuleResponse> {
@@ -277,8 +301,101 @@ export async function getCourse(db: Db, courseId: string): Promise<CourseRespons
     id: course.id,
     title: course.title,
     description: course.description,
+    subject: course.subject,
+    level: course.level,
+    estimatedDurationHours: course.estimatedDurationHours,
+    status: course.status,
     modules: moduleResponses,
     createdAt: course.createdAt.toISOString(),
     updatedAt: course.updatedAt.toISOString(),
   };
+}
+
+interface SearchRow extends Record<string, unknown> {
+  id: string;
+  title: string;
+  description: string | null;
+  subject: string | null;
+  level: string | null;
+  estimated_duration_hours: number | null;
+  status: string;
+}
+
+/**
+ * Story 2.2 (FR-C-2). The first Postgres full-text search in this codebase — no
+ * drizzle-orm query-builder helper exists for tsvector/ts_rank, so this uses drizzle's
+ * raw sql escape hatch (already established by bumpVersion()'s sql`${col} + 1` elsewhere
+ * in this codebase). Every user-supplied value is interpolated via drizzle's own sql
+ * template (parameterized, never string-concatenated) — standard injection hygiene.
+ *
+ * AC #1: unconditionally scoped to status = 'published' — a draft Course never appears
+ * here regardless of filters. AC #4: when `q` is given, results are ranked by ts_rank
+ * against a weighted tsvector (title 'A' > description 'B' > syllabus content 'C', the
+ * latter aggregated from this course's own Topic titles + Concept titles/objectives via
+ * a join — a generated column can't be used here since it would need to reference
+ * modules/topics/concepts, three other tables). Unfiltered/unsearched results order by
+ * title, with `id` as a deterministic tiebreaker (Story 2.1's own review-round lesson).
+ */
+export async function searchCourses(db: Db, params: CatalogSearchParams): Promise<CourseSummary[]> {
+  const conditions: SQL[] = [sql`c.status = 'published'`];
+  if (params.subject !== undefined) {
+    conditions.push(sql`c.subject = ${params.subject}`);
+  }
+  if (params.level !== undefined) {
+    conditions.push(sql`c.level = ${params.level}`);
+  }
+  if (params.durationBucket !== undefined) {
+    conditions.push(durationBucketCondition(params.durationBucket));
+  }
+
+  const hasQuery = params.q !== undefined && params.q.trim() !== "";
+  const searchVector = sql`(
+    setweight(to_tsvector('english', c.title), 'A') ||
+    setweight(to_tsvector('english', coalesce(c.description, '')), 'B') ||
+    setweight(to_tsvector('english', coalesce(syllabus.text, '')), 'C')
+  )`;
+  if (hasQuery) {
+    conditions.push(sql`${searchVector} @@ plainto_tsquery('english', ${params.q})`);
+  }
+
+  const whereClause = sql.join(conditions, sql` AND `);
+  const orderClause = hasQuery
+    ? sql`ORDER BY ts_rank(${searchVector}, plainto_tsquery('english', ${params.q})) DESC, c.title ASC, c.id ASC`
+    : sql`ORDER BY c.title ASC, c.id ASC`;
+
+  const result = await db.execute<SearchRow>(sql`
+    SELECT c.id, c.title, c.description, c.subject, c.level, c.estimated_duration_hours, c.status
+    FROM courses c
+    LEFT JOIN (
+      SELECT m.course_id AS course_id,
+             string_agg(t.title || ' ' || co.title || ' ' || coalesce(array_to_string(co.objectives, ' '), ''), ' ') AS text
+      FROM modules m
+      JOIN topics t ON t.module_id = m.id
+      JOIN concepts co ON co.topic_id = t.id
+      GROUP BY m.course_id
+    ) syllabus ON syllabus.course_id = c.id
+    WHERE ${whereClause}
+    ${orderClause}
+  `);
+
+  return [...result].map((row) => ({
+    id: row.id,
+    title: row.title,
+    description: row.description,
+    subject: row.subject,
+    level: row.level as CourseSummary["level"],
+    estimatedDurationHours: row.estimated_duration_hours,
+    status: row.status as CourseSummary["status"],
+  }));
+}
+
+function durationBucketCondition(bucket: DurationBucket): SQL {
+  switch (bucket) {
+    case "short":
+      return sql`c.estimated_duration_hours < 5`;
+    case "medium":
+      return sql`c.estimated_duration_hours >= 5 AND c.estimated_duration_hours <= 15`;
+    case "long":
+      return sql`c.estimated_duration_hours > 15`;
+  }
 }

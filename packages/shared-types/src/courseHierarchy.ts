@@ -61,10 +61,22 @@ export const moduleResponseSchema = z.object({
 
 export type ModuleResponse = z.infer<typeof moduleResponseSchema>;
 
+// Story 2.2 (FR-C-2). No draft->review->published workflow with reviewer sign-off exists
+// yet (that's a later Epic 9 story) — this is just enough to distinguish "appears in the
+// catalog" from "doesn't." Defined here (not in catalog.ts) since catalog.ts already
+// depends on this file for difficultyTierSchema — avoids a circular import.
+export const courseStatusSchema = z.enum(["draft", "published"]);
+
+export type CourseStatus = z.infer<typeof courseStatusSchema>;
+
 export const courseResponseSchema = z.object({
   id: z.string(),
   title: z.string(),
   description: z.string().nullable(),
+  subject: z.string().nullable(),
+  level: difficultyTierSchema.nullable(),
+  estimatedDurationHours: z.number().nullable(),
+  status: courseStatusSchema,
   modules: z.array(moduleResponseSchema),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -75,6 +87,10 @@ export type CourseResponse = z.infer<typeof courseResponseSchema>;
 export const createCourseInputSchema = z.object({
   title: z.string().min(1),
   description: z.string().optional(),
+  subject: z.string().optional(),
+  level: difficultyTierSchema.optional(),
+  estimatedDurationHours: z.number().nonnegative().optional(),
+  status: courseStatusSchema.optional(),
 });
 
 export type CreateCourseInput = z.infer<typeof createCourseInputSchema>;

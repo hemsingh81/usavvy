@@ -1,6 +1,6 @@
 import { integer, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
-import type { CheckpointQuestion, DifficultyTier } from "@usavvy/shared-types";
+import type { CheckpointQuestion, CourseStatus, DifficultyTier } from "@usavvy/shared-types";
 
 // Story 2.1 (FR-C-1). Same uuidv7() default every other service's tables use
 // (Consistency Conventions) — verified live against the running container in Story 1.0.
@@ -10,6 +10,17 @@ export const courses = pgTable("courses", {
   id: uuid("id").primaryKey().default(uuidv7Default),
   title: text("title").notNull(),
   description: text("description"),
+  // Story 2.2 (FR-C-2): catalog-facet fields, added incrementally to this same table —
+  // no AC in Story 2.1 named them, the same "don't pre-build for a story that hasn't
+  // started" convention this table's own Concept-level fields already follow.
+  subject: text("subject"),
+  level: text("level").$type<DifficultyTier>(),
+  estimatedDurationHours: integer("estimated_duration_hours"),
+  // No draft->review->published workflow with reviewer sign-off exists yet (a later Epic
+  // 9 story owns that) — this is just enough to distinguish "appears in the catalog" from
+  // "doesn't." DB-level default is defense-in-depth for direct-DB-fixture rows in tests;
+  // the service layer's own default is the actual source of truth (Story 1.4's convention).
+  status: text("status").notNull().default("draft").$type<CourseStatus>(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   version: integer("version").notNull().default(1),

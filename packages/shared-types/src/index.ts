@@ -69,6 +69,8 @@ export {
   type TopicResponse,
   moduleResponseSchema,
   type ModuleResponse,
+  courseStatusSchema,
+  type CourseStatus,
   courseResponseSchema,
   type CourseResponse,
   createCourseInputSchema,
@@ -80,3 +82,12 @@ export {
   createConceptInputSchema,
   type CreateConceptInput,
 } from "./courseHierarchy.js";
+export {
+  durationBucketSchema,
+  type DurationBucket,
+  courseSummarySchema,
+  type CourseSummary,
+  catalogSearchParamsSchema,
+  type CatalogSearchParams,
+  catalogListResponseSchema,
+} from "./catalog.js";

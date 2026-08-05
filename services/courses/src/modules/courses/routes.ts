@@ -2,9 +2,15 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { AppError } from "@usavvy/service-kernel";
 import { ROLES, type Role } from "@usavvy/config";
-import { createConceptInputSchema, createCourseInputSchema, createModuleInputSchema, createTopicInputSchema } from "@usavvy/shared-types";
+import {
+  catalogSearchParamsSchema,
+  createConceptInputSchema,
+  createCourseInputSchema,
+  createModuleInputSchema,
+  createTopicInputSchema,
+} from "@usavvy/shared-types";
 import type { Db } from "../../db/client.js";
-import { archiveModule, createConcept, createCourse, createModule, createTopic, getCourse } from "./service.js";
+import { archiveModule, createConcept, createCourse, createModule, createTopic, getCourse, searchCourses } from "./service.js";
 
 export interface CoursesRouteDeps {
   db: Db;
@@ -37,6 +43,14 @@ function parseOrThrow<T>(schema: z.ZodType<T>, data: unknown): T {
 const idParamsSchema = z.object({ id: z.uuid() });
 
 export function registerCoursesRoutes(app: FastifyInstance, deps: CoursesRouteDeps): void {
+  // Story 2.2: catalog browse/search — no RBAC gate, matching GET /courses/:id's own
+  // Story 2.1 precedent (every role can read; only writes are gated).
+  app.get("/courses", async (request, reply) => {
+    requireTrustedUser(request);
+    const params = parseOrThrow(catalogSearchParamsSchema, request.query);
+    reply.send(await searchCourses(deps.db, params));
+  });
+
   app.post("/courses", async (request, reply) => {
     const { role } = requireTrustedUser(request);
     const body = parseOrThrow(createCourseInputSchema, request.body);
