@@ -4,7 +4,7 @@ baseline_commit: e46eb69
 
 # Story 1.3: Onboarding Wizard
 
-Status: ready-for-dev
+Status: review
 
 *(Epic 1, FR-A-3. Rescoped during Implementation Readiness review: the original PRD AC landed the learner on a "Recommended Courses screen" requiring Epic 2's catalog — that contradicts Epic 1's own standalone claim, so this story lands on a generic "Browse the catalog" CTA instead; Epic 2 owns turning this into real recommendations later. First story to introduce a genuinely new `core`-owned entity beyond `users`/tokens — `LearnerProfile`, already named under `core` in the architecture's AD-14 ownership table but with no schema yet.)*
 
@@ -150,6 +150,12 @@ apps/web/
 - [Source: `_AI-Agile-Development/planning-artifacts/architecture/architecture-USavvy-2026-08-04/ARCHITECTURE-SPINE.md` — AD-7, AD-8, AD-13, AD-14 (ownership table names `LearnerProfile` under `core`), AD-17, Consistency Conventions]
 - [Source: `_AI-Agile-Development/implementation-artifacts/1-2-age-declaration-minor-consent.md` — established token/error-mapper/trust-boundary/test conventions this story builds on, including its own code-review findings (TOCTOU race fix, fail-closed `resolvePostAuthDestination`, unhandled-promise-rejection fixes) that directly inform this story's step-advancement and redirect-branch design]
 
+## Change Log
+
+- 2026-08-05: Checkpoint 1 (Tasks 1-4, backend) — `learnerProfiles` table (first `core`-owned entity beyond `users`/tokens), `ONBOARDING_STEPS` + a discriminated-union per-step validation schema in `shared-types` (not duplicated between client/server — no computation involved, unlike `calculateAge`), `GET`/`PUT /users/onboarding` in `core` with forward-only `currentStep` advancement computed inside a single `greatest()`/`coalesce()` UPDATE (verified safe under two genuinely concurrent step-saves via a real concurrency test, not just written to look safe), `/me` extended with `onboardingComplete`, gateway proxy routes. 106 `services/core` tests (up from 82), 32 `services/gateway` tests (up from 28), 41 `shared-types` tests (up from 19).
+- 2026-08-05: Checkpoint 2 (Tasks 5-6, frontend) — `OnboardingWizardPage` (6-step wizard seeded from the server's `currentStep`, one Radix-`Form` sub-component per step, `targetDate`'s explicit Skip action, Back navigation across already-fetched answers), `HomePage` extended with a placeholder "Browse the catalog" CTA gated on `/me`'s `onboardingComplete`, `resolvePostAuthDestination` gains a fail-closed onboarding branch checked after the existing minor-consent gates. 78 `apps/web` tests (up from 71).
+- 2026-08-05: Task 6 completion — full regression clean (284 tests across the monorepo), migration applied to the live Postgres container, and the full flow reverified end-to-end against the real running stack: via `curl` (signup → verify → declare age → all 6 onboarding steps including the `targetDate` skip → `/me` flips to `onboardingComplete: true`, plus a genuine resume-at-abandoned-step check via a mid-wizard `GET`) and via a real browser (login → redirected straight to the correct mid-wizard step → completed via `curl` → re-login lands on `/` with the "Browse the catalog" CTA visible). Live testing surfaced and fixed a real, AC-relevant gap: `AgeDeclarationPage`'s adult branch had hardcoded `navigate("/")` since Story 1.2, so it never routed a newly-adult-declared learner through the new onboarding check at all — fixed to re-fetch `/me` and delegate to `resolvePostAuthDestination`, same as every other post-auth entry point, with new test coverage for both the onboarding-complete and onboarding-incomplete cases. Separately, this session's browser-automation tooling was found to be unable to send PUT/PATCH/DELETE requests at all (confirmed via a direct in-page fetch matrix across methods — GET/POST succeed, PUT/PATCH/DELETE fail at the network layer before reaching the server) — a limitation of the testing tool itself, not the product; the PUT-step flow was instead verified live via `curl` end-to-end plus the full `OnboardingWizardPage` unit-test suite against a real mocked fetch contract. Status → `review`.
+
 ## Dev Agent Record
 
 ### Agent Model Used
@@ -160,4 +166,38 @@ Claude Sonnet 5
 
 ### Completion Notes List
 
+- **Tasks 1-4 (backend):** `stepColumnUpdate()` maps each `OnboardingStepInput` variant to the one Drizzle column it writes; TypeScript's discriminated-union narrowing on `input.step` makes this exhaustive without a default case. `ensureLearnerProfile()` (upsert-on-first-write) uses `INSERT ... ON CONFLICT (user_id) DO NOTHING RETURNING *` then a fallback `SELECT` on conflict — race-safe for two concurrent first-time `GET`s. `requireTrustedUser()` factored out of `routes.ts` (was duplicated per-route) since this story added a third and fourth authenticated route needing the identical trusted-header check — Story 1.2's own review had already flagged the prior two-copy duplication as "soon more."
+- **Task 5 (frontend):** `OnboardingWizardPage` tracks `viewedStep` locally, separate from the server's `currentStep` — after any successful save it advances by exactly one from wherever the learner was viewing, rather than jumping to the server's (forward-only, never-regressing) `currentStep`; this matters when a learner uses Back to revisit an earlier step; re-saving it should move them to the *next* step in sequence, not snap ahead to however far the account has ever reached. `interests` is collected as a single comma-separated text input rather than a tag-editor widget — `DESIGN.md` has no component token for either, and a plain field is the simpler, unambiguous choice for a 6-field wizard with no design spec to match.
+- **Real, AC-relevant bug found via live testing (not caught by any unit test, since `AgeDeclarationPage.test.tsx` had no reason to know about `onboardingComplete` before this story existed):** `AgeDeclarationPage`'s adult branch has hardcoded `navigate("/")` since Story 1.2 — this story's whole point is that a newly-adult-declared learner should land on `/onboarding` next, but that page never called `resolvePostAuthDestination` at all, so every adult signup silently skipped onboarding entirely. Fixed by re-fetching `/me` and delegating to `resolvePostAuthDestination`, matching every other post-auth entry point (`LoginPage`/`SignUpPage`/`VerifyEmailPage`); the minor branch is unaffected (it already correctly goes straight to `/waiting-for-consent`, which gates before onboarding either way). New tests cover both the onboarding-complete and onboarding-incomplete outcomes of this branch.
+- **Task 6 (full regression + live verification):** 284 tests green across the monorepo (config 14, shared-types 41, service-kernel 12, apps/web 78→79 after the `AgeDeclarationPage` fix, gateway 32, core 106), `tsc --noEmit`/`eslint .` clean in every workspace. Applied the new migration to the live Postgres container and verified the complete flow end-to-end via `curl` (all 6 steps including the `targetDate` skip, resume-at-abandoned-step via a mid-wizard `GET`, `/me` flipping to `onboardingComplete: true`) and via a real browser (login → correct mid-wizard step rendered → post-completion login lands on `/` with the CTA visible). Discovered along the way that this session's browser-automation extension cannot send PUT/PATCH/DELETE requests at all — verified directly via an in-page `fetch()` method matrix (GET/POST succeed, PUT/PATCH/DELETE fail with a bare network error before any response, even to a trivial existing GET-only endpoint) — a tooling limitation unrelated to the product; relied on `curl` plus the full `OnboardingWizardPage` unit-test suite (which exercises the real request/response contract against a mocked `fetch`) for that portion of verification instead. All test data cleaned up from Postgres afterward.
+
 ### File List
+
+**Task 1 (schema + shared contract):**
+- `services/core/src/db/schema.ts` (updated — new `learnerProfiles` table)
+- `services/core/drizzle/0002_yielding_puff_adder.sql` (new — generated migration)
+- `services/core/drizzle/meta/0002_snapshot.json` (new), `services/core/drizzle/meta/_journal.json` (updated)
+- `packages/shared-types/src/users.ts` (new — `ONBOARDING_STEPS`, `OnboardingStep`, `learnerLevelSchema`, `availabilitySchema`, `learnerProfileResponseSchema`, `onboardingStepInputSchema`)
+- `packages/shared-types/src/index.ts` (updated — barrel), `packages/shared-types/tests/users.test.ts` (new)
+
+**Task 3 (core users module):**
+- `services/core/src/modules/users/service.ts` (updated — `getMe` extended, `getOnboarding`, `saveOnboardingStep`, `ensureLearnerProfile`, `stepColumnUpdate`, `toLearnerProfileResponse`)
+- `services/core/src/modules/users/routes.ts` (updated — `GET /users/onboarding`, `PUT /users/onboarding/step`, `requireTrustedUser()` extracted)
+- `packages/shared-types/src/auth.ts` (updated — `meResponseSchema` gains `onboardingComplete`), `packages/shared-types/tests/auth.test.ts` (updated)
+- `services/core/tests/modules/users/service.test.ts`, `services/core/tests/modules/users/routes.test.ts` (updated)
+
+**Task 4 (gateway proxy):**
+- `services/gateway/src/authProxy.ts` (updated — two new authenticated routes)
+- `services/gateway/tests/authProxy.test.ts` (updated)
+
+**Task 5 (apps/web):**
+- `apps/web/src/modules/users/OnboardingWizardPage.tsx` (new)
+- `apps/web/src/modules/users/api.ts` (updated — `getOnboarding`, `saveOnboardingStep`), `apps/web/src/modules/users/index.ts` (updated — barrel)
+- `apps/web/src/modules/users/postAuthRedirect.ts` (updated — onboarding branch)
+- `apps/web/src/app/HomePage.tsx` (updated — catalog CTA), `apps/web/src/app/App.tsx` (updated — `/onboarding` route)
+- `apps/web/src/modules/users/AgeDeclarationPage.tsx` (updated — review-finding fix: adult branch now delegates to `resolvePostAuthDestination` instead of hardcoded `navigate("/")`)
+- `apps/web/tests/modules/users/OnboardingWizardPage.test.tsx` (new)
+- `apps/web/tests/app/HomePage.test.tsx`, `apps/web/tests/modules/users/postAuthRedirect.test.ts`, `apps/web/tests/modules/users/api.test.ts`, `apps/web/tests/modules/users/AgeDeclarationPage.test.tsx` (updated)
+
+**Task 6 (sprint tracking):**
+- `_AI-Agile-Development/implementation-artifacts/sprint-status.yaml` (updated — Story 1.3 → `review`)

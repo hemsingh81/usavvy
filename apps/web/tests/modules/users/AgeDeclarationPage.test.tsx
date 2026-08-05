@@ -10,14 +10,15 @@ vi.mock("../../../src/modules/auth/index.js", () => ({
   useAuth: () => useAuthMock(),
 }));
 
-function renderWithSession(session: { accessToken: string } | null) {
-  useAuthMock.mockReturnValue({ session });
+function renderWithSession(session: { accessToken: string } | null, getMe: (accessToken: string) => Promise<unknown> = vi.fn()) {
+  useAuthMock.mockReturnValue({ session, getMe });
   return render(
     <MemoryRouter initialEntries={["/age-declaration"]}>
       <Routes>
         <Route path="/age-declaration" element={<AgeDeclarationPage />} />
         <Route path="/login" element={<div>login page</div>} />
         <Route path="/waiting-for-consent" element={<div>waiting page</div>} />
+        <Route path="/onboarding" element={<div>onboarding page</div>} />
         <Route path="/" element={<div>home page</div>} />
       </Routes>
     </MemoryRouter>,
@@ -55,8 +56,8 @@ describe("AgeDeclarationPage", () => {
     expect(screen.getByLabelText("Parent or guardian's email")).toBeInTheDocument();
   });
 
-  it("submits the adult branch and navigates home", async () => {
-    renderWithSession({ accessToken: "a-token" });
+  it("submits the adult branch and navigates home once /me reports onboarding is already complete", async () => {
+    renderWithSession({ accessToken: "a-token" }, vi.fn().mockResolvedValue({ onboardingComplete: true, isMinor: false, parentalConsentStatus: "not_required", birthdate: "1990-01-01" }));
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({
@@ -70,6 +71,25 @@ describe("AgeDeclarationPage", () => {
     await user.click(screen.getByRole("button", { name: "Continue" }));
 
     expect(await screen.findByText("home page")).toBeInTheDocument();
+  });
+
+  it("submits the adult branch and navigates to /onboarding when onboarding isn't complete yet (review finding: this page previously hardcoded navigate(\"/\"), skipping the onboarding redirect entirely)", async () => {
+    const getMe = vi.fn().mockResolvedValue({ onboardingComplete: false, isMinor: false, parentalConsentStatus: "not_required", birthdate: "1990-01-01" });
+    renderWithSession({ accessToken: "a-token" }, getMe);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ isMinor: false, parentalConsentStatus: "not_required" }),
+      } as unknown as Response),
+    );
+    const user = userEvent.setup();
+
+    await user.type(screen.getByLabelText("Birthdate"), "1990-01-01");
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+
+    expect(await screen.findByText("onboarding page")).toBeInTheDocument();
+    expect(getMe).toHaveBeenCalledWith("a-token");
   });
 
   it("submits the minor branch with a parent email and navigates to the waiting screen", async () => {

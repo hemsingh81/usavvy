@@ -7,6 +7,7 @@ import { getWebConfig } from "../../app/config.js";
 import { useAuth } from "../auth/index.js";
 import { createUsersApi } from "./api.js";
 import { calculateAge } from "./age.js";
+import { resolvePostAuthDestination } from "./postAuthRedirect.js";
 
 const MINOR_AGE_THRESHOLD = 18;
 
@@ -20,7 +21,7 @@ function todayIso(): string {
  * than rendering a form with nothing to submit.
  */
 export function AgeDeclarationPage() {
-  const { session } = useAuth();
+  const { session, getMe } = useAuth();
   const navigate = useNavigate();
   const [birthdate, setBirthdate] = useState("");
   const [serverError, setServerError] = useState<string | undefined>();
@@ -54,9 +55,18 @@ export function AgeDeclarationPage() {
         birthdate: declaredBirthdate,
         ...(parentEmail ? { parentEmail: String(parentEmail) } : {}),
       });
-      // AC #3/#4: adult proceeds to the same placeholder-for-onboarding destination
-      // Story 1.1 uses; minor goes to the waiting screen.
-      navigate(result.isMinor ? "/waiting-for-consent" : "/");
+      // AC #3/#4: a minor goes straight to the waiting screen (consent gates before
+      // onboarding either way). An adult's next stop depends on onboarding state, which
+      // this response doesn't carry — re-fetch /me and let the one shared function decide,
+      // same as every other page that establishes/advances auth state (review finding:
+      // this page previously hardcoded navigate("/"), skipping the onboarding redirect
+      // entirely for every newly-adult-declared user).
+      if (result.isMinor) {
+        navigate("/waiting-for-consent");
+      } else {
+        const me = await getMe(accessToken);
+        navigate(resolvePostAuthDestination(me));
+      }
     } catch (error) {
       setServerError(error instanceof ApiError ? error.message : "something went wrong — please try again");
     } finally {
