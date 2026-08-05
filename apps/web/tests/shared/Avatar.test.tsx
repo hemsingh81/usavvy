@@ -47,4 +47,23 @@ describe("Avatar", () => {
 
     expect(firstColor).not.toBe(secondColor);
   });
+
+  it("the color stays the same when label changes but colorSeed doesn't (review finding: color was previously keyed on the mutable display name)", () => {
+    const { container: first } = render(<Avatar label="ananya" colorSeed="user-123" />);
+    const firstColor = (first.firstElementChild as HTMLElement).style.backgroundColor;
+    cleanup();
+
+    const { container: second } = render(<Avatar label="Ananya Sharma" colorSeed="user-123" />);
+    const secondColor = (second.firstElementChild as HTMLElement).style.backgroundColor;
+
+    expect(firstColor).toBe(secondColor);
+  });
+
+  it("does not break a surrogate-pair (astral-plane) character into a broken glyph", () => {
+    // U+1F600 (😀) is a single code point encoded as a UTF-16 surrogate pair — slicing
+    // by code unit would split it in half.
+    render(<Avatar label="😀 smiley" />);
+
+    expect(screen.getByText("😀S")).toBeInTheDocument();
+  });
 });

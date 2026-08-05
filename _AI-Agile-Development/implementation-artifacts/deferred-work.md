@@ -52,3 +52,14 @@
 - No `aria-invalid`/`aria-describedby` wiring linking a preferences field's error text to its control. A systemic pre-existing gap across every form in the app (`AgeDeclarationPage`, `SignUpPage`, etc. all use bare `role="alert"` spans with no programmatic field association) — an app-wide accessibility polish pass, not a one-off fix for this story.
 - No in-page retry action when `PreferencesPage`'s initial load fails. Matches the same dead-end error-view pattern every other page in the app already has.
 - `PUT` used for `/users/preferences`'s genuine partial update rather than `PATCH`. An intentional consistency choice matching `PUT /users/onboarding/step`'s identical existing convention rather than introducing a second verb convention for near-identical route shapes.
+
+## Deferred from: code review of story-1-5 (2026-08-05)
+
+- `updateDisplayName`'s `UPDATE` and its supplementary `learnerProfiles` read are two separate statements, not wrapped in a transaction. Same shape as `getMe`'s own pre-existing two-query design; no invariant is actually violated by a concurrent write in that gap.
+- TOCTOU: a user row deleted between `updateDisplayName`'s write and its response-building read would just return an empty `learnerProfiles` lookup (safe, no crash). Unreachable today regardless — no account-deletion feature exists yet (Story 1.7, still backlog), matching Story 1.3's identical FK-violation dismissal.
+- `memberSince` has no format validation in `meResponseSchema` (`z.string()`, not `.datetime()`) — unreachable today since its only producer (`user.createdAt.toISOString()`) is always valid.
+- `toLocaleDateString()` renders `memberSince` (UTC) in the viewer's local timezone, which can shift the displayed calendar date by one day near midnight. Matches the identical, already-deferred `todayIso()`/local-date-math pattern from Stories 1.2/1.3.
+- `displayNameSchema.max(60)` bounds length in UTF-16 code units, not grapheme clusters — matches the same counting convention every other bounded text field in this codebase already uses.
+- Pressing Enter in the display-name field doesn't trigger a save (only blur does) — matches `PreferencesPage`'s identical established blur-only-save convention.
+- No in-flight guard against the mount-time `getMe` effect re-firing mid-edit — currently unreachable (no silent token-refresh exists in `useAuth` yet).
+- The Profile page's placeholder sections and identity block have no per-section heading/landmark, just flat `<div>`s under one `<h1>` — a systemic, app-wide gap affecting every page, not unique to this story.

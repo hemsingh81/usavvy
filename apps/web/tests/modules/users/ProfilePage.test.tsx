@@ -128,6 +128,43 @@ describe("ProfilePage", () => {
     expect(screen.getByDisplayValue("ananya")).toBeInTheDocument();
   });
 
+  it("an earlier-issued save's late-arriving response doesn't clobber a later-issued save (review finding: all three review layers independently flagged this race)", async () => {
+    const pending: Array<{ resolve: (displayName: string) => void }> = [];
+    const fetchMock = vi.fn().mockImplementation((_url: string, init: RequestInit) => {
+      if (init.method === "GET") return jsonResponse(DEFAULT_ME);
+      return new Promise((resolve) => {
+        pending.push({
+          resolve: (displayName: string) =>
+            resolve({ ok: true, json: () => Promise.resolve({ ...DEFAULT_ME, displayName }) } as unknown as Response),
+        });
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderWithSession({ accessToken: "a-token" });
+    const user = userEvent.setup();
+    await waitFor(() => expect(screen.getByDisplayValue("ananya")).toBeInTheDocument());
+
+    await user.clear(screen.getByDisplayValue("ananya"));
+    await user.type(screen.getByRole("textbox", { name: "Display name" }), "First Edit");
+    await user.tab();
+    await waitFor(() => expect(pending).toHaveLength(1));
+
+    await user.clear(screen.getByDisplayValue("First Edit"));
+    await user.type(screen.getByRole("textbox", { name: "Display name" }), "Second Edit");
+    await user.tab();
+    await waitFor(() => expect(pending).toHaveLength(2));
+
+    // Resolve the newer (second-issued) request first...
+    pending[1]!.resolve("Second Edit");
+    await waitFor(() => expect(screen.getByDisplayValue("Second Edit")).toBeInTheDocument());
+
+    // ...then the older (first-issued) request resolves late and must be ignored, not
+    // overwrite the newer save's already-applied result.
+    pending[0]!.resolve("First Edit");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.getByDisplayValue("Second Edit")).toBeInTheDocument();
+  });
+
   it("shows a generic error view when the initial load fails", async () => {
     const getMe = vi.fn().mockRejectedValue(new Error("network down"));
     renderWithSession({ accessToken: "a-token" }, getMe);

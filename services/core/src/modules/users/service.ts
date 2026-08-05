@@ -55,18 +55,22 @@ function deriveAgeFields(user: Pick<UserRow, "birthdate" | "parentConsentedAt">)
   return { isMinor: true, parentalConsentStatus: user.parentConsentedAt !== null ? "granted" : "pending" };
 }
 
-export async function getMe(db: Db, userId: string, role: Role): Promise<MeResponse> {
+// Review finding: `updateDisplayName` originally re-fetched via a second `getMe(db,
+// userId, role)` call after its own UPDATE. If that second SELECT ever threw (transient
+// DB error, a future permission-matrix change), the client would be told the save
+// failed and revert its optimistic update — even though the write itself had already
+// committed, an AD-17 "database says one thing, UI says another" bug. Factoring the
+// response assembly out to take an already-loaded `user` row lets `updateDisplayName`
+// build its response directly from the row its own UPDATE just returned, with no
+// second `users` SELECT at all.
+async function buildMeResponse(db: Db, user: UserRow, role: Role): Promise<MeResponse> {
   if (!can(role, "read", "self")) {
     throw new AppError("FORBIDDEN", "not permitted", 403);
-  }
-  const [user] = await db.select().from(users).where(eq(users.id, userId));
-  if (!user) {
-    throw new AppError("NOT_FOUND", "user not found", 404);
   }
   // A plain read, not ensureLearnerProfile's upsert — checking /me must not have the
   // side effect of creating a row; "no row yet" and "onboardingComplete: false" mean
   // the same thing here; there's no need to persist that fact just to report it.
-  const [profile] = await db.select({ completedAt: learnerProfiles.completedAt }).from(learnerProfiles).where(eq(learnerProfiles.userId, userId));
+  const [profile] = await db.select({ completedAt: learnerProfiles.completedAt }).from(learnerProfiles).where(eq(learnerProfiles.userId, user.id));
   return {
     id: user.id,
     email: user.email,
@@ -76,11 +80,21 @@ export async function getMe(db: Db, userId: string, role: Role): Promise<MeRespo
     ...deriveAgeFields(user),
     onboardingComplete: (profile?.completedAt ?? null) !== null,
     // Story 1.5 (FR-A-5): the fallback is computed here, once, rather than duplicated
-    // client-side — `email` is always non-empty (validated at signup), so `split("@")[0]`
-    // always yields at least one character.
-    displayName: user.displayName ?? user.email.split("@")[0]!,
+    // client-side. Review finding: `email` being non-empty (validated at signup) only
+    // guarantees `split("@")[0]` is non-empty when the local part itself is non-empty —
+    // `z.email()` does reject a bare `@example.com` today, but the `|| "learner"` guard
+    // costs nothing and removes the dependency on that being true forever.
+    displayName: user.displayName ?? (user.email.split("@")[0] || "learner"),
     memberSince: user.createdAt.toISOString(),
   };
+}
+
+export async function getMe(db: Db, userId: string, role: Role): Promise<MeResponse> {
+  const [user] = await db.select().from(users).where(eq(users.id, userId));
+  if (!user) {
+    throw new AppError("NOT_FOUND", "user not found", 404);
+  }
+  return buildMeResponse(db, user, role);
 }
 
 /**
@@ -93,11 +107,11 @@ export async function updateDisplayName(db: Db, userId: string, role: Role, inpu
     .update(users)
     .set({ displayName: input.displayName, updatedAt: new Date(), version: bumpVersion() })
     .where(eq(users.id, userId))
-    .returning({ id: users.id });
+    .returning();
   if (!updated) {
     throw new AppError("NOT_FOUND", "user not found", 404);
   }
-  return getMe(db, userId, role);
+  return buildMeResponse(db, updated, role);
 }
 
 /**

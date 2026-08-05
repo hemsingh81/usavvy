@@ -478,6 +478,17 @@ describe("updateDisplayName", () => {
     expect(result.displayName).toBe("Second");
   });
 
+  it("bumps version and updatedAt, same discipline as every other write to this table (review finding: previously untested)", async () => {
+    const email = uniqueEmail("display-name-version-bump");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+
+    await updateDisplayName(db, user!.id, "student", { displayName: "Ananya" });
+
+    const [updated] = await db.select().from(users).where(eq(users.id, user!.id));
+    expect(updated?.version).toBe(user!.version + 1);
+    expect(updated?.updatedAt.getTime()).toBeGreaterThan(user!.updatedAt.getTime());
+  });
+
   it("throws NOT_FOUND for a user id that doesn't exist", async () => {
     await expect(updateDisplayName(db, "00000000-0000-0000-0000-000000000000", "student", { displayName: "Ghost" })).rejects.toMatchObject({
       code: "NOT_FOUND",

@@ -28,6 +28,12 @@ export function ProfilePage() {
   const [displayNameInput, setDisplayNameInput] = useState("");
   const [fieldError, setFieldError] = useState<string | undefined>();
   const isMountedRef = useRef(true);
+  // Review finding (all three review layers): overlapping saves (edit, blur, edit
+  // again, blur again before the first request resolves) previously let whichever
+  // response *arrived* last win, not whichever request was *issued* last. This counter
+  // tags each request at issue time; a response is only applied if it's still the most
+  // recently issued one by the time it resolves.
+  const saveRequestIdRef = useRef(0);
   useEffect(
     () => () => {
       isMountedRef.current = false;
@@ -65,23 +71,28 @@ export function ProfilePage() {
     const trimmed = displayNameInput.trim();
     if (!me || trimmed === me.displayName) {
       // No-op edit (matches PreferencesPage's speechRate precedent of only saving on
-      // an actual change) — also covers the empty-string case, which the field's own
-      // client-side "required" validation already surfaces without a round trip.
-      if (me) setDisplayNameInput(me.displayName);
+      // an actual change). An empty value falls through to the real save path below —
+      // TextField isn't rendered with `required` here, so no client-side short-circuit
+      // exists; the server's VALIDATION_ERROR is what actually rejects it.
+      if (me) {
+        setDisplayNameInput(me.displayName);
+        setFieldError(undefined);
+      }
       return;
     }
     const previous = me;
     setFieldError(undefined);
+    const requestId = ++saveRequestIdRef.current;
     const { apiUrl } = getWebConfig();
     createUsersApi(apiUrl)
       .updateDisplayName(accessToken, { displayName: trimmed })
       .then((updated) => {
-        if (!isMountedRef.current) return;
+        if (!isMountedRef.current || saveRequestIdRef.current !== requestId) return;
         setMe(updated);
         setDisplayNameInput(updated.displayName);
       })
       .catch((error: unknown) => {
-        if (!isMountedRef.current) return;
+        if (!isMountedRef.current || saveRequestIdRef.current !== requestId) return;
         setDisplayNameInput(previous.displayName);
         setFieldError(error instanceof ApiError ? error.message : "something went wrong — please try again");
       });
@@ -111,7 +122,7 @@ export function ProfilePage() {
     <main>
       <h1>Profile</h1>
       <div style={{ display: "flex", alignItems: "center", gap: "var(--spacing-4)" }}>
-        <Avatar label={me.displayName} />
+        <Avatar label={me.displayName} colorSeed={me.id} />
         {/* Form.Root: TextField uses Radix Form.Field internally, which requires a
             Form.Root ancestor (Story 1.3/1.4's established fix for this exact gap). */}
         <Form.Root onSubmit={(event) => event.preventDefault()} style={{ flex: 1 }}>
@@ -119,6 +130,7 @@ export function ProfilePage() {
             name="displayName"
             label="Display name"
             value={displayNameInput}
+            maxLength={60}
             onChange={(event) => setDisplayNameInput(event.target.value)}
             onBlur={handleDisplayNameBlur}
             {...(fieldError !== undefined ? { serverError: fieldError } : {})}
