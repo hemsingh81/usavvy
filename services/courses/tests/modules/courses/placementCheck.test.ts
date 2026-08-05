@@ -188,4 +188,26 @@ describe("scorePlacementCheck", () => {
       scorePlacementCheck(db, course.id, [{ topicId: "019fd200-0000-7000-8000-000000000000", conceptId: conceptA.id, masteryDemonstrated: true }]),
     ).rejects.toMatchObject({ code: "VALIDATION_ERROR", message: expect.stringContaining("019fd200-0000-7000-8000-000000000000") });
   });
+
+  it("rejects an answer whose conceptId doesn't actually belong to the claimed topicId (review finding)", async () => {
+    const { course, topicA, conceptB } = await seedCourseWithQuestions();
+
+    await expect(
+      scorePlacementCheck(db, course.id, [{ topicId: topicA.id, conceptId: conceptB.id, masteryDemonstrated: true }]),
+    ).rejects.toMatchObject({ code: "VALIDATION_ERROR", message: expect.stringContaining(conceptB.id) });
+  });
+
+  it("dedupes duplicate answers for the same topic, keeping only the last one, before computing the mastery ratio (review finding)", async () => {
+    const { course, topicA, conceptA } = await seedCourseWithQuestions();
+
+    const proposal = await scorePlacementCheck(db, course.id, [
+      { topicId: topicA.id, conceptId: conceptA.id, masteryDemonstrated: true },
+      { topicId: topicA.id, conceptId: conceptA.id, masteryDemonstrated: false },
+    ]);
+
+    // A single real topic was answered (contradictorily) — the ratio must be computed
+    // over 1 unique topic, not 2 raw answers padding the denominator.
+    expect(proposal.proposedStartingDifficultyTier).toBe("beginner");
+    expect(proposal.proposedDeselectedTopicIds).toEqual([]);
+  });
 });

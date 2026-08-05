@@ -772,16 +772,23 @@ export async function scorePlacementCheck(db: Db, courseId: string, answers: Pla
     if (!graph.topicIds.has(answer.topicId)) {
       throw new AppError("VALIDATION_ERROR", `invalid topic reference: topic "${answer.topicId}" does not exist in this Course`, 400);
     }
-    if (!graph.conceptTopicId.has(answer.conceptId)) {
+    // Review finding: each check was previously independent — a conceptId genuinely in
+    // this Course but under a DIFFERENT Topic than the one claimed passed both checks.
+    if (graph.conceptTopicId.get(answer.conceptId) !== answer.topicId) {
       throw new AppError("VALIDATION_ERROR", `invalid concept reference: concept "${answer.conceptId}" does not exist in this Course`, 400);
     }
   }
 
-  const masteryCount = answers.filter((answer) => answer.masteryDemonstrated).length;
-  const masteryRatio = answers.length > 0 ? masteryCount / answers.length : 0;
-  // Review-lesson from Story 2.4, applied proactively: dedupe before handing this to the
-  // frontend, which will route it through saveCourseCustomization's own deduping write path.
-  const proposedDeselectedTopicIds = [...new Set(answers.filter((answer) => answer.masteryDemonstrated).map((answer) => answer.topicId))];
+  // Review finding: a duplicate answer for the same Topic previously padded the mastery-
+  // ratio denominator (raw answer count), skewing the result toward whichever value was
+  // repeated rather than reflecting the actual number of Topics assessed. Keyed by topicId
+  // so the LAST answer for a given Topic wins, then scored over unique Topics only.
+  const answerByTopicId = new Map(answers.map((answer) => [answer.topicId, answer]));
+  const uniqueAnswers = [...answerByTopicId.values()];
+
+  const masteryCount = uniqueAnswers.filter((answer) => answer.masteryDemonstrated).length;
+  const masteryRatio = uniqueAnswers.length > 0 ? masteryCount / uniqueAnswers.length : 0;
+  const proposedDeselectedTopicIds = uniqueAnswers.filter((answer) => answer.masteryDemonstrated).map((answer) => answer.topicId);
 
   return {
     proposedDeselectedTopicIds,

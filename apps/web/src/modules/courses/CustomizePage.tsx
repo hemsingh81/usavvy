@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, Navigate, useLocation, useParams } from "react-router-dom";
+import { Link, Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
 import type { CourseCustomizationDepth, CourseResponse, DependencyConflict, DifficultyTier, ExplanationStyle, PlacementCheckProposal } from "@usavvy/shared-types";
 import { ApiError } from "../../shared/apiClient.js";
 import { getWebConfig } from "../../app/config.js";
@@ -52,6 +52,7 @@ export function CustomizePage() {
   const { session } = useAuth();
   const { id } = useParams<{ id: string }>();
   const location = useLocation();
+  const navigate = useNavigate();
   const [view, setView] = useState<ViewState>({ kind: "loading" });
   const [conflict, setConflict] = useState<PendingConflict | null>(null);
   const [pendingPlacementProposal, setPendingPlacementProposal] = useState(false);
@@ -68,6 +69,14 @@ export function CustomizePage() {
     Promise.all([coursesApi.getCourse(session.accessToken, id), coursesApi.getCustomization(session.accessToken, id), usersApi.getPreferences(session.accessToken)])
       .then(([course, customization, preferences]) => {
         if (cancelled) return;
+        if (proposal !== undefined) {
+          // Review finding: clear the router state immediately after consuming it —
+          // otherwise a page reload or back/forward navigation re-reads this same stale
+          // proposal from history and silently overwrites freshly-fetched, already-saved
+          // data with results from a placement check taken (and possibly already applied)
+          // earlier.
+          navigate(location.pathname, { replace: true, state: null });
+        }
         setPendingPlacementProposal(proposal !== undefined);
         setView({
           kind: "ready",
@@ -137,6 +146,9 @@ export function CustomizePage() {
       });
     } catch (error) {
       if (error instanceof ApiError && error.code === "DEPENDENCY_CONFLICT") {
+        // Review finding: the conflict banner takes over "review before proceeding" duty
+        // here — leaving the placement-proposal banner up too would show both at once.
+        setPendingPlacementProposal(false);
         setConflict({ conflicts: (error.details as DependencyConflict[] | undefined) ?? [], pendingDeselectedTopicIds: next.deselectedTopicIds });
       } else {
         setView({ kind: "error", message: error instanceof ApiError ? error.message : "something went wrong — please try again" });
@@ -344,7 +356,14 @@ export function CustomizePage() {
             </select>
           </label>
 
-          <p>Estimated hours: {view.estimatedHours !== null ? `${view.estimatedHours}h` : "not yet estimated"}</p>
+          <p>
+            Estimated hours:{" "}
+            {pendingPlacementProposal
+              ? "will update once confirmed"
+              : view.estimatedHours !== null
+                ? `${view.estimatedHours}h`
+                : "not yet estimated"}
+          </p>
         </>
       ) : null}
     </main>

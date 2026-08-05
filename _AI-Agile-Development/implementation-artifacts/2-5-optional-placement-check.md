@@ -4,7 +4,7 @@ baseline_commit: 5a19983
 
 # Story 2.5: Optional placement check
 
-Status: review
+Status: done
 
 *(Epic 2, FR-C-5. Reuses Story 2.1's existing `checkpointQuestions` (Concept-level, `{question: string}` only — no answer/grading shape, by that story's own explicit design) as the placement check's question pool, and Story 2.4's `course_customizations` table as where a completed placement check's results land. No AI generation is used or needed: `GenerationPort` (architecture's own binding list) is scoped to `board-orchestration`/`ingestion`/`assignments`, none of which exist yet, and `courses` isn't a listed consumer at all. Scoring is a small, self-contained, self-assessment mechanism — the learner rates their own mastery per question — not real auto-grading, which is explicitly Epic 6's future concern per Story 2.1's own Dev Notes.)*
 
@@ -132,6 +132,24 @@ Claude Sonnet 5
 - `apps/web/tests/modules/courses/PlacementCheckPage.test.tsx` (new)
 - `apps/web/tests/modules/courses/CustomizePage.test.tsx` (modified)
 
+## Senior Developer Review (AI)
+
+Three parallel adversarial reviewers (Blind Hunter, Edge Case Hunter, Acceptance Auditor) ran against the full diff (`4323d00..afcf5ae`).
+
+**Acceptance Auditor:** AC #1 and AC #4 SATISFIED outright. AC #2 and AC #3 were functionally correct but had real test-coverage gaps — the "manually override before confirming" half of AC #2 and the "genuinely uses the Course's `level`, not a hardcoded fallback" half of AC #3 were never directly asserted. Both gaps closed with new tests proving the already-correct behavior (`CustomizePage.test.tsx`, "lets the learner manually override..." and "shows the Course's own level as the starting difficulty default...").
+
+**Confirmed and patched:**
+1. **HIGH — a confirmed placement-check proposal could resurface and silently overwrite freshly-saved data on page reload** (Blind Hunter) — `CustomizePage`'s mount effect read `location.state.placementProposal` but never cleared it from router history; a reload or back/forward navigation re-applied the same stale proposal over already-saved, possibly further-edited customization data. Fixed by calling `navigate(location.pathname, { replace: true, state: null })` immediately after consuming the proposal. Regression test added and proven to fail before / pass after, using `createMemoryRouter`/`RouterProvider` to inspect `router.state.location.state` directly.
+2. **Partial placement-check submission silently skewed the mastery ratio** (Edge Case Hunter) — a learner could submit after answering only 1 of 8 questions, and the ratio was computed over answered questions only, not the full question set, so a single "I know this" produced the same "advanced" result as acing all 8. Fixed by disabling Submit until every presented question has an answer, with a visible progress hint. Regression test added and proven to fail before / pass after.
+3. **`scorePlacementCheck` didn't verify a submitted concept actually belonged to its claimed topic** (Blind Hunter) — `topicId`/`conceptId` were validated independently, so `{topicId: T1, conceptId: <a real concept under T2>}` passed. Fixed to check `conceptTopicId.get(conceptId) === topicId`. Also fixed: a duplicate answer for the same Topic previously padded the mastery-ratio denominator (raw answer count) rather than being deduped first — now keyed by `topicId` (last answer wins) before scoring. Both proven via failing-then-passing regression tests.
+4. **Stale "Estimated hours" during the AC #2 review window** (Edge Case Hunter) — while a placement-check proposal was pending confirmation, the displayed hours still reflected the OLD saved state, not the newly-proposed deselections, contradicting the checkboxes shown directly above it. Fixed to show "will update once confirmed" instead of a stale, misleading number while a proposal is pending.
+5. **Minor:** if confirming a placement proposal itself hit a `DEPENDENCY_CONFLICT`, both the placement-proposal banner and the conflict banner rendered simultaneously. Fixed by clearing the placement-proposal flag whenever a conflict is raised — the conflict banner takes over "review before proceeding" duty at that point.
+
+**Deferred (not blocking, no FR calls for it):** dependency-conflict detection remains single-hop (a multi-Topic transitive chain isn't fully traced) — already an accepted Story 2.4 limitation, unrelated to this story's own changes.
+
+Post-patch: full monorepo regression (784 tests across 8 workspaces), `tsc --noEmit` and `eslint .` clean.
+
 ## Change Log
 
 - 2026-08-06: Implemented Optional placement check (Tasks 1-5): shared contract, `services/courses` question sampling + stateless scoring + `startingDifficultyTier` persistence, gateway proxy, `apps/web` PlacementCheckPage plus CustomizePage's proposal-review flow. Live-verified end-to-end. Status → review.
+- 2026-08-06: Code review round — fixed a stale-router-state data-loss bug, partial-submission ratio skew, a missing topic/concept pairing check, duplicate-answer padding, and a stale-hours display during proposal review (all proven via failing-then-passing regression tests); closed two test-coverage gaps flagged by the Acceptance Auditor. Status → done.

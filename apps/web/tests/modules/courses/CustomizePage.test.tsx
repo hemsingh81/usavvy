@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { createMemoryRouter, MemoryRouter, Route, Routes, RouterProvider } from "react-router-dom";
 import { CustomizePage } from "../../../src/modules/courses/CustomizePage.js";
 
 const useAuthMock = vi.fn();
@@ -280,6 +280,79 @@ describe("CustomizePage", () => {
     await waitFor(() => expect(screen.queryByText("Placement check results — review the topics below, then confirm.")).not.toBeInTheDocument());
     const putCallsAfterConfirm = fetchMock.mock.calls.filter((call) => (call[1] as { method?: string } | undefined)?.method === "PUT").length;
     expect(putCallsAfterConfirm).toBe(1);
+  });
+
+  it("lets the learner manually override a placement-proposal-seeded selection before it's ever saved (Story 2.5, AC #2)", async () => {
+    const fetchMock = mockFetch({
+      save: (body: unknown) =>
+        jsonResponse({
+          courseId: "c1",
+          ...(body as Record<string, unknown>),
+          deselectedTopicIds: (body as { deselectedTopicIds: string[] }).deselectedTopicIds,
+          startingDifficultyTier: (body as { startingDifficultyTier?: string }).startingDifficultyTier ?? null,
+          priorityTopicIds: [],
+          depth: "standard",
+          explanationStyle: "concise",
+          estimatedHours: 12,
+          updatedAt: "2026-01-15T00:00:00.000Z",
+        }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderWithPlacementProposal(
+      { accessToken: "a-token" },
+      { proposedDeselectedTopicIds: ["t1"], proposedStartingDifficultyTier: "advanced" },
+    );
+    const user = userEvent.setup();
+    await waitFor(() => expect(screen.getByLabelText("I already know this: Basics")).toBeChecked());
+
+    // Override the proposal's auto-deselection and starting difficulty BEFORE confirming.
+    await user.click(screen.getByLabelText("I already know this: Basics"));
+    await user.selectOptions(screen.getByLabelText("Starting difficulty"), "beginner");
+
+    await waitFor(() => expect(screen.getByLabelText("I already know this: Basics")).not.toBeChecked());
+    const putCalls = fetchMock.mock.calls.filter((call) => (call[1] as { method?: string } | undefined)?.method === "PUT");
+    const lastBody = JSON.parse((putCalls.at(-1)?.[1] as { body: string }).body) as { deselectedTopicIds: string[]; startingDifficultyTier?: string };
+    expect(lastBody.deselectedTopicIds).toEqual([]);
+    expect(lastBody.startingDifficultyTier).toBe("beginner");
+  });
+
+  it("shows the Course's own level as the starting difficulty default when no proposal or saved tier exists (Story 2.5, AC #3)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((url: string) => {
+        if (url.endsWith("/courses/c1/customization")) return errorResponse("NOT_FOUND", "no customization saved yet");
+        if (url.endsWith("/courses/c1")) return jsonResponse({ ...COURSE, level: "advanced" });
+        if (url.endsWith("/users/preferences")) return jsonResponse(PREFERENCES);
+        throw new Error(`unexpected fetch: ${url}`);
+      }),
+    );
+    renderWithSession({ accessToken: "a-token" });
+
+    await waitFor(() => expect(screen.getByText("Basics")).toBeInTheDocument());
+    expect(screen.getByLabelText("I already know this: Basics")).not.toBeChecked();
+    expect(screen.getByLabelText("I already know this: Advanced")).not.toBeChecked();
+    expect(screen.getByLabelText("Starting difficulty")).toHaveValue("advanced");
+  });
+
+  it("clears the incoming placement proposal from router state after applying it, so a reload can't re-apply stale results (review finding)", async () => {
+    vi.stubGlobal("fetch", mockFetch());
+    useAuthMock.mockReturnValue({ session: { accessToken: "a-token" } });
+    const router = createMemoryRouter(
+      [
+        { path: "/courses/:id/customize", element: <CustomizePage /> },
+        { path: "/login", element: <div>login page</div> },
+      ],
+      {
+        initialEntries: [
+          { pathname: "/courses/c1/customize", state: { placementProposal: { proposedDeselectedTopicIds: ["t1"], proposedStartingDifficultyTier: "advanced" } } },
+        ],
+      },
+    );
+
+    render(<RouterProvider router={router} />);
+
+    await waitFor(() => expect(screen.getByLabelText("I already know this: Basics")).toBeChecked());
+    expect(router.state.location.state).toBeNull();
   });
 
   it("shows a distinguishable error rather than a blank page when the initial fetch fails", async () => {

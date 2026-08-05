@@ -75,6 +75,24 @@ describe("PlacementCheckPage", () => {
     expect(screen.getByRole("link", { name: /back to customise/i })).toHaveAttribute("href", "/courses/c1/customize");
   });
 
+  it("disables Submit until every question has been answered, to avoid skewing the score toward a partial subset (review finding)", async () => {
+    vi.stubGlobal("fetch", mockFetch(QUESTIONS));
+    renderWithSession({ accessToken: "a-token" });
+    const user = userEvent.setup();
+    await waitFor(() => expect(screen.getByText("What is a variable?")).toBeInTheDocument());
+
+    expect(screen.getByRole("button", { name: "Submit" })).toBeDisabled();
+
+    await user.click(screen.getAllByRole("button", { name: "I know this" })[0]!);
+
+    expect(screen.getByRole("button", { name: "Submit" })).toBeDisabled();
+    expect(screen.getByText("Answer all questions to submit (1/2)")).toBeInTheDocument();
+
+    await user.click(screen.getAllByRole("button", { name: "I'm not sure yet" })[1]!);
+
+    expect(screen.getByRole("button", { name: "Submit" })).toBeEnabled();
+  });
+
   it("submitting navigates to the customize screen carrying the scored proposal", async () => {
     vi.stubGlobal(
       "fetch",

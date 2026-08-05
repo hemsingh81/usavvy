@@ -101,7 +101,16 @@ export function PlacementCheckPage() {
               </li>
             ))}
           </ul>
-          <button type="button" className="usavvy-button-primary" onClick={() => void submit()} disabled={submitting}>
+          {/* Review finding: an unanswered question isn't neutral — omitting it from the
+              submission shrinks the denominator scorePlacementCheck ratios against, silently
+              skewing the result toward whatever subset was actually answered. Every question
+              must be answered before scoring runs. */}
+          {answers.size < view.questions.length ? (
+            <p role="status">
+              Answer all questions to submit ({answers.size}/{view.questions.length})
+            </p>
+          ) : null}
+          <button type="button" className="usavvy-button-primary" onClick={() => void submit()} disabled={submitting || answers.size < view.questions.length}>
             Submit
           </button>
         </>
