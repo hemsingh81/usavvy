@@ -1,10 +1,12 @@
 import {
+  accountDeletionResponseSchema,
   ageDeclarationResponseSchema,
   learnerPreferencesSchema,
   learnerPrivacySettingsSchema,
   learnerProfileResponseSchema,
   meResponseSchema,
   parentalConsentResponseSchema,
+  type AccountDeletionResponse,
   type AgeDeclarationResponse,
   type LearnerPreferences,
   type LearnerPrivacySettings,
@@ -39,6 +41,8 @@ export function createUsersApi(apiUrl: string) {
       apiRequest(apiUrl, "/users/privacy-settings", learnerPrivacySettingsSchema, { method: "GET", accessToken }),
     savePrivacySettings: (accessToken: string, input: PrivacySettingsUpdateInput): Promise<LearnerPrivacySettings> =>
       apiRequest(apiUrl, "/users/privacy-settings", learnerPrivacySettingsSchema, { method: "PUT", body: input, accessToken }),
+    requestAccountDeletion: (accessToken: string): Promise<AccountDeletionResponse> =>
+      apiRequest(apiUrl, "/users/account-deletion", accountDeletionResponseSchema, { method: "POST", accessToken }),
   };
 }
 

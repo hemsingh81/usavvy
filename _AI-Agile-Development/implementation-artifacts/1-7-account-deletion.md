@@ -4,7 +4,7 @@ baseline_commit: c62736c
 
 # Story 1.7: Account Deletion
 
-Status: ready-for-dev
+Status: review
 
 *(Epic 1, FR-A-7. Per the Implementation Readiness Report's own Major finding — "Story 1.7's account-deletion AC implies direct cross-module deletion, violating AD-14 (should publish a domain event instead)" — this story does not have `core` reach into other services' data. It can't, structurally: uploads/notes/submissions/progress belong to `ingestion`/`engagement`/`assignments`/`plans-progress`, none of which are scaffolded yet (all still "scaffolded when their epic starts" per the architecture spine's own source tree), and AD-14 forbids a direct cross-database write/delete regardless. Following AD-13's actual rule ("a state change... must additionally be published as a domain event on Redis... event emission is not optional just because a caller also invoked the HTTP API directly"), this story builds the missing piece the readiness report flagged: a minimal `PubSubPort` (mirroring `NotificationPort`'s exact AD-1 port pattern from Story 1.0 — mock adapter only, no new npm dependency, matching AD-12's "config-driven, swap the real adapter in later" philosophy) that `core` uses to publish `user.deletion_requested`. Actual data purge — the "removed within 30 days" half of the AC — needs two things that don't exist yet: a real event *subscriber* in each owning service (none exist), and a durable scheduled job (`JobQueuePort`, AD-15, "entirely unwired" per Story 1.1's own identical deferred item for token cleanup). This story's buildable scope is the request → confirm → schedule → notify → publish-event vertical slice; the actual purge is deferred exactly the way Story 1.1 deferred its own JobQueuePort-dependent cleanup.)*
 
@@ -43,18 +43,18 @@ so that I can exercise my right to be forgotten.
 - [x] **Task 4: `services/gateway` — proxy the new route** (AC: #1, #2, #3)
   - [x] `POST /users/account-deletion` → authenticated, identical `requireAuth` `preHandler` + trusted-header forwarding pattern already used for every other `users/*` route in `authProxy.ts`
 
-- [ ] **Task 5: `apps/web` — a dedicated confirmation page** (AC: #1, #2, #3)
-  - [ ] New route `/account-deletion` (protected — no session → redirect to `/login`, same pattern as every other authenticated page). This is a **new, dedicated page** (`AccountDeletionPage.tsx` in `apps/web/src/modules/users/`), **not** a control bolted onto `ProfilePage` — matches `AgeDeclarationPage`'s precedent of a standalone page for a single, high-consequence, one-time confirmation, unlike `ProfilePage`'s freely-repeatable identity/privacy edits. No IA/nav doc places this control anywhere specific either, so a direct, un-navigated route is consistent with every other page added so far
-  - [ ] Render an explanation of what deletion means (mentioning the 30-day window) and a single confirm action (`Button`, primary or a distinct destructive styling if one exists in `components.css` — check first; if none exists, use the existing error-color tokens already defined in `tokens.css`, don't invent a new color). On confirm, `POST /users/account-deletion` (add `requestAccountDeletion` to `apps/web/src/modules/users/api.ts`'s `createUsersApi`, matching the existing method shapes). On success, replace the confirm UI with a plain-text confirmation showing the returned `scheduledDeletionAt` date and a note to check email. On a `409 ACCOUNT_DELETION_ALREADY_REQUESTED` failure, show that as a specific inline message (not a generic error) — the account already has a pending deletion, which is useful information, not a failure
-  - [ ] No client-side cancellation/undo flow in this story (not in the AC; a natural near-term follow-up, same "flag it, don't build it" treatment Stories 1.1/1.2 gave their own out-of-scope follow-ups)
+- [x] **Task 5: `apps/web` — a dedicated confirmation page** (AC: #1, #2, #3)
+  - [x] New route `/account-deletion` (protected — no session → redirect to `/login`, same pattern as every other authenticated page). This is a **new, dedicated page** (`AccountDeletionPage.tsx` in `apps/web/src/modules/users/`), **not** a control bolted onto `ProfilePage` — matches `AgeDeclarationPage`'s precedent of a standalone page for a single, high-consequence, one-time confirmation, unlike `ProfilePage`'s freely-repeatable identity/privacy edits. No IA/nav doc places this control anywhere specific either, so a direct, un-navigated route is consistent with every other page added so far
+  - [x] Render an explanation of what deletion means (mentioning the 30-day window) and a single confirm action (`Button`, primary or a distinct destructive styling if one exists in `components.css` — check first; if none exists, use the existing error-color tokens already defined in `tokens.css`, don't invent a new color). On confirm, `POST /users/account-deletion` (add `requestAccountDeletion` to `apps/web/src/modules/users/api.ts`'s `createUsersApi`, matching the existing method shapes). On success, replace the confirm UI with a plain-text confirmation showing the returned `scheduledDeletionAt` date and a note to check email. On a `409 ACCOUNT_DELETION_ALREADY_REQUESTED` failure, show that as a specific inline message (not a generic error) — the account already has a pending deletion, which is useful information, not a failure
+  - [x] No client-side cancellation/undo flow in this story (not in the AC; a natural near-term follow-up, same "flag it, don't build it" treatment Stories 1.1/1.2 gave their own out-of-scope follow-ups)
 
-- [ ] **Task 6: Tests mirroring `src/` 1:1** (AD-8)
-  - [ ] `services/core/tests/modules/pubsub/factory.test.ts` and/or `mock.test.ts` (new, mirroring however `notification`'s own tests are organized — check first) — the mock adapter logs and resolves successfully; the factory returns the mock adapter for `"mock"`
-  - [ ] `services/core/tests/modules/users/service.test.ts` — `requestAccountDeletion` sets `deletionRequestedAt`/`scheduledDeletionAt` (30 days out) and returns the same ISO date; sends exactly one confirmation email to the account's own address; publishes exactly one `user.deletion_requested` event with the correct `userId`/`scheduledDeletionAt` payload; rejects a second request with `409 ACCOUNT_DELETION_ALREADY_REQUESTED`, sending no second email and publishing no second event; under two concurrent requests for the same account, exactly one succeeds (mirrors `declareAge`'s own concurrent-request test precedent)
-  - [ ] `services/core/tests/modules/users/routes.test.ts` — `POST /users/account-deletion` requires authentication (401 with no trusted headers); a valid request returns `200` with a `scheduledDeletionAt` field; a second request returns `409` through the real route
-  - [ ] `services/gateway/tests/authProxy.test.ts` — the new proxy route requires auth (401 with no token)
-  - [ ] `packages/shared-types/tests/accountDeletion.test.ts` (new) — `accountDeletionResponseSchema` accepts a valid ISO-date shape, rejects a missing field
-  - [ ] `apps/web/tests/modules/users/AccountDeletionPage.test.tsx` (new) — redirects to `/login` with no session; renders the confirm action; confirming fires `POST /users/account-deletion` and shows the returned scheduled date on success; a `409` response shows the "already requested" message instead of a generic error
+- [x] **Task 6: Tests mirroring `src/` 1:1** (AD-8)
+  - [x] `services/core/tests/modules/pubsub/factory.test.ts` and/or `mock.test.ts` (new, mirroring however `notification`'s own tests are organized — check first) — the mock adapter logs and resolves successfully; the factory returns the mock adapter for `"mock"`
+  - [x] `services/core/tests/modules/users/service.test.ts` — `requestAccountDeletion` sets `deletionRequestedAt`/`scheduledDeletionAt` (30 days out) and returns the same ISO date; sends exactly one confirmation email to the account's own address; publishes exactly one `user.deletion_requested` event with the correct `userId`/`scheduledDeletionAt` payload; rejects a second request with `409 ACCOUNT_DELETION_ALREADY_REQUESTED`, sending no second email and publishing no second event; under two concurrent requests for the same account, exactly one succeeds (mirrors `declareAge`'s own concurrent-request test precedent)
+  - [x] `services/core/tests/modules/users/routes.test.ts` — `POST /users/account-deletion` requires authentication (401 with no trusted headers); a valid request returns `200` with a `scheduledDeletionAt` field; a second request returns `409` through the real route
+  - [x] `services/gateway/tests/authProxy.test.ts` — the new proxy route requires auth (401 with no token)
+  - [x] `packages/shared-types/tests/accountDeletion.test.ts` (new) — `accountDeletionResponseSchema` accepts a valid ISO-date shape, rejects a missing field
+  - [x] `apps/web/tests/modules/users/AccountDeletionPage.test.tsx` (new) — redirects to `/login` with no session; renders the confirm action; confirming fires `POST /users/account-deletion` and shows the returned scheduled date on success; a `409` response shows the "already requested" message instead of a generic error
 
 ## Dev Notes
 
@@ -164,6 +164,8 @@ apps/web/
 ## Change Log
 
 - 2026-08-05: Checkpoint 1 (Tasks 1-4, backend) — new `PubSubPort` (mock adapter, mirroring `NotificationPort`'s exact 4-file shape, no new dependency), `users` gains `deletionRequestedAt`/`scheduledDeletionAt`, `POST /users/account-deletion` (core + gateway proxy) with `declareAge`-style compare-and-swap one-time-action guard, confirmation email, and domain event publish. 155 `services/core` tests (up from 144), 44 `services/gateway` tests (up from 42), 73 `shared-types` tests (up from 71).
+- 2026-08-05: Checkpoint 2 (Task 5, frontend) — new dedicated `AccountDeletionPage` (`/account-deletion`, not bolted onto `ProfilePage`), confirm action → `POST /users/account-deletion` → success shows the scheduled date, a `409` shows a specific "already requested" message rather than a generic error. `requestAccountDeletion` added to `users/api.ts`. 118 `apps/web` tests (up from 113).
+- 2026-08-05: Task 6 completion — full regression clean (416 tests across the monorepo: 14 config, 73 shared-types, 12 service-kernel, 118 apps/web, 44 gateway, 155 core), `tsc --noEmit`/`eslint .` clean in every workspace. Migration applied to the live Postgres container and the full flow reverified end-to-end via `curl` directly against `core`: a first request returns `200` with a `scheduledDeletionAt` 30 days out, a second returns `409 ACCOUNT_DELETION_ALREADY_REQUESTED`, and the gateway proxy rejects an unauthenticated request with `401`. A live browser render/interaction check of `AccountDeletionPage` was not performed — this session's browser-automation tooling was already confirmed unable to send non-GET/POST-with-body requests reliably in earlier stories; `curl` + mocked-fetch component tests cover the same contract. Test data cleaned up from Postgres. Status → `review`.
 
 ### Agent Model Used
 
@@ -197,3 +199,12 @@ Claude Sonnet 5
 **Task 4 (gateway proxy):**
 - `services/gateway/src/authProxy.ts` (updated — one new authenticated route)
 - `services/gateway/tests/authProxy.test.ts` (updated)
+
+**Task 5 (apps/web):**
+- `apps/web/src/modules/users/AccountDeletionPage.tsx` (new)
+- `apps/web/src/modules/users/api.ts` (updated — `requestAccountDeletion`), `apps/web/src/modules/users/index.ts` (updated — barrel)
+- `apps/web/src/app/App.tsx` (updated — `/account-deletion` route)
+- `apps/web/tests/modules/users/AccountDeletionPage.test.tsx` (new)
+
+**Task 6 (sprint tracking):**
+- `_AI-Agile-Development/implementation-artifacts/sprint-status.yaml` (updated — Story 1.7 → `in-progress`, then `review`)

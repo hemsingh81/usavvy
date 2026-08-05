@@ -3,6 +3,7 @@ import { HomePage } from "./HomePage.js";
 import { getWebConfig } from "./config.js";
 import { AuthProvider, LoginPage, SignUpPage, VerifyEmailPage } from "../modules/auth/index.js";
 import {
+  AccountDeletionPage,
   AgeDeclarationPage,
   OnboardingWizardPage,
   ParentalConsentPage,
@@ -51,6 +52,7 @@ export function App() {
           <Route path="/onboarding" element={<OnboardingWizardPage />} />
           <Route path="/preferences" element={<PreferencesPage />} />
           <Route path="/profile" element={<ProfilePage />} />
+          <Route path="/account-deletion" element={<AccountDeletionPage />} />
           <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </BrowserRouter>
