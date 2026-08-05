@@ -3,14 +3,17 @@ import { AppError } from "@usavvy/service-kernel";
 import { can, type Role } from "@usavvy/config";
 import {
   DEFAULT_LEARNER_PREFERENCES,
+  DEFAULT_PRIVACY_SETTINGS,
   ONBOARDING_STEPS,
   type AgeDeclarationResponse,
   type LearnerPreferences,
+  type LearnerPrivacySettings,
   type LearnerProfileResponse,
   type MeResponse,
   type OnboardingStepInput,
   type ParentalConsentStatus,
   type PreferencesUpdateInput,
+  type PrivacySettingsUpdateInput,
   type UpdateDisplayNameInput,
 } from "@usavvy/shared-types";
 import type { Db } from "../../db/client.js";
@@ -344,4 +347,40 @@ export async function savePreferences(db: Db, userId: string, input: Preferences
     throw new AppError("INTERNAL_ERROR", "failed to save preferences", 500);
   }
   return toLearnerPreferences(updated);
+}
+
+function toPrivacySettings(row: LearnerProfileRow): LearnerPrivacySettings {
+  return {
+    publicLeaderboardSharing: row.publicLeaderboardSharing ?? DEFAULT_PRIVACY_SETTINGS.publicLeaderboardSharing,
+    cohortDisplayName: row.cohortDisplayName ?? DEFAULT_PRIVACY_SETTINGS.cohortDisplayName,
+    uploadsForTraining: row.uploadsForTraining ?? DEFAULT_PRIVACY_SETTINGS.uploadsForTraining,
+  };
+}
+
+export async function getPrivacySettings(db: Db, userId: string): Promise<LearnerPrivacySettings> {
+  return toPrivacySettings(await ensureLearnerProfile(db, userId));
+}
+
+/**
+ * Story 1.6 (FR-A-6). No CAS/step-order check needed — identical reasoning
+ * `savePreferences` already established for a freely re-editable field with no
+ * ordering invariant.
+ */
+export async function savePrivacySettings(db: Db, userId: string, input: PrivacySettingsUpdateInput): Promise<LearnerPrivacySettings> {
+  await ensureLearnerProfile(db, userId);
+
+  const [updated] = await db
+    .update(learnerProfiles)
+    .set({
+      ...input,
+      updatedAt: new Date(),
+      version: sql`${learnerProfiles.version} + 1`,
+    })
+    .where(eq(learnerProfiles.userId, userId))
+    .returning();
+
+  if (!updated) {
+    throw new AppError("INTERNAL_ERROR", "failed to save privacy settings", 500);
+  }
+  return toPrivacySettings(updated);
 }

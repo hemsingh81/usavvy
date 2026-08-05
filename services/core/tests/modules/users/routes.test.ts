@@ -555,3 +555,80 @@ describe("PUT /users/display-name", () => {
     await app.close();
   });
 });
+
+describe("GET /users/privacy-settings", () => {
+  it("requires authentication (401 with no trusted headers)", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+
+    const response = await app.inject({ method: "GET", url: "/users/privacy-settings", headers: internalHeaders });
+
+    expect(response.statusCode).toBe(401);
+    await app.close();
+  });
+
+  it("returns the default privacy settings on first call", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+    const email = uniqueEmail("privacy-get");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/users/privacy-settings",
+      headers: { ...internalHeaders, "x-user-id": user!.id, "x-user-role": "student" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ publicLeaderboardSharing: false, cohortDisplayName: true, uploadsForTraining: false });
+    await app.close();
+  });
+});
+
+describe("PUT /users/privacy-settings", () => {
+  it("requires authentication (401 with no trusted headers)", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+
+    const response = await app.inject({
+      method: "PUT",
+      url: "/users/privacy-settings",
+      headers: internalHeaders,
+      payload: { publicLeaderboardSharing: true },
+    });
+
+    expect(response.statusCode).toBe(401);
+    await app.close();
+  });
+
+  it("saves a partial update and returns the full privacy-settings shape", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+    const email = uniqueEmail("privacy-put");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+
+    const response = await app.inject({
+      method: "PUT",
+      url: "/users/privacy-settings",
+      headers: { ...internalHeaders, "x-user-id": user!.id, "x-user-role": "student" },
+      payload: { uploadsForTraining: true },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ uploadsForTraining: true, cohortDisplayName: true });
+    await app.close();
+  });
+
+  it("rejects an empty update body with a VALIDATION_ERROR envelope", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+    const email = uniqueEmail("privacy-empty");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+
+    const response = await app.inject({
+      method: "PUT",
+      url: "/users/privacy-settings",
+      headers: { ...internalHeaders, "x-user-id": user!.id, "x-user-role": "student" },
+      payload: {},
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ error: { code: "VALIDATION_ERROR" } });
+    await app.close();
+  });
+});

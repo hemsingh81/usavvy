@@ -252,3 +252,63 @@ describe("PUT /users/display-name", () => {
     await app.close();
   });
 });
+
+describe("GET /users/privacy-settings", () => {
+  it("returns 401 with no token and never calls core", async () => {
+    const forwardToCore = vi.fn();
+    const app = buildApp(createTestAppDeps({ forwardToCore }));
+
+    const response = await app.inject({ method: "GET", url: "/users/privacy-settings" });
+
+    expect(response.statusCode).toBe(401);
+    expect(forwardToCore).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("forwards trusted x-user-id/x-user-role headers derived from a valid token", async () => {
+    const forwardToCore = vi.fn().mockResolvedValue({ status: 200, body: { publicLeaderboardSharing: false } });
+    const app = buildApp(createTestAppDeps({ forwardToCore }));
+    await app.ready();
+    const token = app.jwt.sign({ sub: "u1", role: "student", typ: "access" });
+
+    const response = await app.inject({ method: "GET", url: "/users/privacy-settings", headers: { authorization: `Bearer ${token}` } });
+
+    expect(response.statusCode).toBe(200);
+    expect(forwardToCore).toHaveBeenCalledWith("GET", "/users/privacy-settings", { headers: { "x-user-id": "u1", "x-user-role": "student" } });
+    await app.close();
+  });
+});
+
+describe("PUT /users/privacy-settings", () => {
+  it("returns 401 with no token and never calls core", async () => {
+    const forwardToCore = vi.fn();
+    const app = buildApp(createTestAppDeps({ forwardToCore }));
+
+    const response = await app.inject({ method: "PUT", url: "/users/privacy-settings", payload: { publicLeaderboardSharing: true } });
+
+    expect(response.statusCode).toBe(401);
+    expect(forwardToCore).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("forwards the body plus trusted headers derived from a valid token", async () => {
+    const forwardToCore = vi.fn().mockResolvedValue({ status: 200, body: { publicLeaderboardSharing: true } });
+    const app = buildApp(createTestAppDeps({ forwardToCore }));
+    await app.ready();
+    const token = app.jwt.sign({ sub: "u1", role: "student", typ: "access" });
+
+    const response = await app.inject({
+      method: "PUT",
+      url: "/users/privacy-settings",
+      headers: { authorization: `Bearer ${token}` },
+      payload: { publicLeaderboardSharing: true },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(forwardToCore).toHaveBeenCalledWith("PUT", "/users/privacy-settings", {
+      body: { publicLeaderboardSharing: true },
+      headers: { "x-user-id": "u1", "x-user-role": "student" },
+    });
+    await app.close();
+  });
+});

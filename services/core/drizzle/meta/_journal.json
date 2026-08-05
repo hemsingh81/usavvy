@@ -43,6 +43,13 @@
       "when": 1785930911701,
       "tag": "0005_same_stark_industries",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1785933703611,
+      "tag": "0006_furry_azazel",
+      "breakpoints": true
     }
   ]
 }

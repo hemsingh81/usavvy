@@ -2,7 +2,12 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { AppError } from "@usavvy/service-kernel";
 import { ROLES, type Role } from "@usavvy/config";
-import { onboardingStepInputSchema, preferencesUpdateInputSchema, updateDisplayNameInputSchema } from "@usavvy/shared-types";
+import {
+  onboardingStepInputSchema,
+  preferencesUpdateInputSchema,
+  privacySettingsUpdateInputSchema,
+  updateDisplayNameInputSchema,
+} from "@usavvy/shared-types";
 import { emailField } from "../auth/index.js";
 import { parseOrThrow } from "../auth/validation.js";
 import type { Db } from "../../db/client.js";
@@ -13,9 +18,11 @@ import {
   getMe,
   getOnboarding,
   getPreferences,
+  getPrivacySettings,
   recordParentalConsent,
   saveOnboardingStep,
   savePreferences,
+  savePrivacySettings,
   updateDisplayName,
 } from "./service.js";
 
@@ -103,5 +110,16 @@ export function registerUsersRoutes(app: FastifyInstance, deps: UsersRouteDeps):
     const { userId, role } = requireTrustedUser(request);
     const body = parseOrThrow(updateDisplayNameInputSchema, request.body);
     reply.send(await updateDisplayName(deps.db, userId, role, body));
+  });
+
+  app.get("/users/privacy-settings", async (request, reply) => {
+    const { userId } = requireTrustedUser(request);
+    reply.send(await getPrivacySettings(deps.db, userId));
+  });
+
+  app.put("/users/privacy-settings", async (request, reply) => {
+    const { userId } = requireTrustedUser(request);
+    const body = parseOrThrow(privacySettingsUpdateInputSchema, request.body);
+    reply.send(await savePrivacySettings(deps.db, userId, body));
   });
 }

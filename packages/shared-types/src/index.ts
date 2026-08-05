@@ -39,3 +39,10 @@ export {
   type PreferencesUpdateInput,
 } from "./preferences.js";
 export { displayNameSchema, updateDisplayNameInputSchema, type UpdateDisplayNameInput } from "./profile.js";
+export {
+  learnerPrivacySettingsSchema,
+  type LearnerPrivacySettings,
+  DEFAULT_PRIVACY_SETTINGS,
+  privacySettingsUpdateInputSchema,
+  type PrivacySettingsUpdateInput,
+} from "./privacy.js";

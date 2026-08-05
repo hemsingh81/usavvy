@@ -104,6 +104,12 @@ export const learnerProfiles = pgTable("learner_profiles", {
   explanationStyle: text("explanation_style").$type<ExplanationStyle>(),
   captionsEnabled: boolean("captions_enabled"),
   reducedMotion: boolean("reduced_motion"),
+  // Story 1.6 (FR-A-6): same nullable-not-defaulted-at-the-DB-level convention as the
+  // preference columns above — defaults are FR-A-6's own literal values, computed at
+  // the service layer via DEFAULT_PRIVACY_SETTINGS.
+  publicLeaderboardSharing: boolean("public_leaderboard_sharing"),
+  cohortDisplayName: boolean("cohort_display_name"),
+  uploadsForTraining: boolean("uploads_for_training"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   version: integer("version").notNull().default(1),

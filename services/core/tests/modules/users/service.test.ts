@@ -5,7 +5,16 @@ import { createDb, type Db } from "../../../src/db/client.js";
 import { learnerProfiles, parentalConsentTokens, users } from "../../../src/db/schema.js";
 import { loadCoreConfig } from "../../../src/config.js";
 import { createMockNotificationPort } from "../../testHelpers.js";
-import { declareAge, getMe, getOnboarding, recordParentalConsent, saveOnboardingStep, updateDisplayName } from "../../../src/modules/users/service.js";
+import {
+  declareAge,
+  getMe,
+  getOnboarding,
+  getPrivacySettings,
+  recordParentalConsent,
+  saveOnboardingStep,
+  savePrivacySettings,
+  updateDisplayName,
+} from "../../../src/modules/users/service.js";
 import { hashToken } from "../../../src/modules/auth/tokens.js";
 
 const config = loadCoreConfig(process.env);
@@ -494,5 +503,57 @@ describe("updateDisplayName", () => {
       code: "NOT_FOUND",
       statusCode: 404,
     });
+  });
+});
+
+describe("getPrivacySettings", () => {
+  it("returns DEFAULT_PRIVACY_SETTINGS verbatim before any write", async () => {
+    const email = uniqueEmail("privacy-get-default");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+
+    const result = await getPrivacySettings(db, user!.id);
+
+    expect(result).toEqual({ publicLeaderboardSharing: false, cohortDisplayName: true, uploadsForTraining: false });
+  });
+
+  it("upsert-on-first-write: creates a row on the first call rather than 404ing", async () => {
+    const email = uniqueEmail("privacy-get-first");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+
+    await getPrivacySettings(db, user!.id);
+
+    const rows = await db.select().from(learnerProfiles).where(eq(learnerProfiles.userId, user!.id));
+    expect(rows).toHaveLength(1);
+  });
+});
+
+describe("savePrivacySettings", () => {
+  it("a partial update sets only the given field(s), leaving the rest at their defaults", async () => {
+    const email = uniqueEmail("privacy-put-partial");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+
+    const result = await savePrivacySettings(db, user!.id, { publicLeaderboardSharing: true });
+
+    expect(result).toEqual({ publicLeaderboardSharing: true, cohortDisplayName: true, uploadsForTraining: false });
+  });
+
+  it("a second partial update leaves the first update's field untouched", async () => {
+    const email = uniqueEmail("privacy-put-sequential");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+    await savePrivacySettings(db, user!.id, { publicLeaderboardSharing: true });
+
+    const result = await savePrivacySettings(db, user!.id, { uploadsForTraining: true });
+
+    expect(result).toEqual({ publicLeaderboardSharing: true, cohortDisplayName: true, uploadsForTraining: true });
+  });
+
+  it("bumps version and updatedAt", async () => {
+    const email = uniqueEmail("privacy-put-version");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+
+    await savePrivacySettings(db, user!.id, { cohortDisplayName: false });
+
+    const [profile] = await db.select().from(learnerProfiles).where(eq(learnerProfiles.userId, user!.id));
+    expect(profile?.version).toBe(2);
   });
 });
