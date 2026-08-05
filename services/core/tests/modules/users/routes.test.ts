@@ -372,7 +372,16 @@ describe("GET /users/preferences", () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toMatchObject({ voiceEnabled: true, boardTheme: "dark" });
+    // Review finding: asserting only 2 of 6 fields wouldn't catch a bug that drops or
+    // mis-serializes one of the other four specifically at the HTTP response boundary.
+    expect(response.json()).toEqual({
+      voiceEnabled: true,
+      speechRate: 1,
+      boardTheme: "dark",
+      explanationStyle: "concise",
+      captionsEnabled: false,
+      reducedMotion: false,
+    });
     await app.close();
   });
 });
@@ -436,6 +445,40 @@ describe("PUT /users/preferences", () => {
       url: "/users/preferences",
       headers: { ...internalHeaders, "x-user-id": user!.id, "x-user-role": "student" },
       payload: { speechRate: 5 },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ error: { code: "VALIDATION_ERROR" } });
+    await app.close();
+  });
+
+  it("rejects an unrecognized boardTheme value (review finding: only schema-unit-tested before, not through the real route)", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+    const email = uniqueEmail("preferences-bad-theme");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+
+    const response = await app.inject({
+      method: "PUT",
+      url: "/users/preferences",
+      headers: { ...internalHeaders, "x-user-id": user!.id, "x-user-role": "student" },
+      payload: { boardTheme: "neon" },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ error: { code: "VALIDATION_ERROR" } });
+    await app.close();
+  });
+
+  it("rejects an unrecognized explanationStyle value", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+    const email = uniqueEmail("preferences-bad-style");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+
+    const response = await app.inject({
+      method: "PUT",
+      url: "/users/preferences",
+      headers: { ...internalHeaders, "x-user-id": user!.id, "x-user-role": "student" },
+      payload: { explanationStyle: "sarcastic" },
     });
 
     expect(response.statusCode).toBe(400);

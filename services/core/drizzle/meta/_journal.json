@@ -29,6 +29,13 @@
       "when": 1785927225553,
       "tag": "0003_superb_iceman",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1785929360642,
+      "tag": "0004_strong_juggernaut",
+      "breakpoints": true
     }
   ]
 }

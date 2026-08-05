@@ -1,0 +1,1 @@
+ALTER TABLE "learner_profiles" ALTER COLUMN "speech_rate" SET DATA TYPE numeric(3, 1);

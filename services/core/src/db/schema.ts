@@ -1,4 +1,4 @@
-import { boolean, date, integer, jsonb, pgTable, real, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { boolean, date, integer, jsonb, numeric, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import type { Availability, BoardTheme, ExplanationStyle, LearnerLevel } from "@usavvy/shared-types";
 
@@ -90,7 +90,11 @@ export const learnerProfiles = pgTable("learner_profiles", {
   // onboarding fields above, these have no "not yet answered" meaning to preserve —
   // null here just means "hasn't overridden the default yet."
   voiceEnabled: boolean("voice_enabled"),
-  speechRate: real("speech_rate"),
+  // Review finding: `real` (IEEE-754 float) round-trips 0.1-step values with rounding
+  // artifacts (e.g. 1.2 becoming 1.2000000476837158). Fixed-point numeric(3,1) avoids
+  // that entirely for a bounded 0.5–2.0 rate; `mode: "number"` keeps the JS-side type a
+  // plain number rather than Postgres's default numeric-as-string.
+  speechRate: numeric("speech_rate", { precision: 3, scale: 1, mode: "number" }),
   boardTheme: text("board_theme").$type<BoardTheme>(),
   explanationStyle: text("explanation_style").$type<ExplanationStyle>(),
   captionsEnabled: boolean("captions_enabled"),

@@ -11,12 +11,18 @@ export const explanationStyleSchema = z.enum(["concise", "detailed", "example-fi
 
 export type ExplanationStyle = z.infer<typeof explanationStyleSchema>;
 
+// Shared by both the response shape and the update input — review finding: these two
+// previously disagreed (the response side had no bound at all), so an out-of-range
+// value written outside the normal PUT path (a direct DB edit, a future migration bug)
+// would have round-tripped back to a client as "valid."
+const speechRateSchema = z.number().min(0.5).max(2);
+
 // Every field is required — unlike onboarding's learnerProfileResponseSchema, there is
 // no "not yet answered" state for a preference; GET always returns a fully-populated,
 // immediately-actionable object.
 export const learnerPreferencesSchema = z.object({
   voiceEnabled: z.boolean(),
-  speechRate: z.number(),
+  speechRate: speechRateSchema,
   boardTheme: boardThemeSchema,
   explanationStyle: explanationStyleSchema,
   captionsEnabled: z.boolean(),
@@ -40,7 +46,7 @@ export const DEFAULT_LEARNER_PREFERENCES: LearnerPreferences = {
 export const preferencesUpdateInputSchema = z
   .object({
     voiceEnabled: z.boolean().optional(),
-    speechRate: z.number().min(0.5).max(2).optional(),
+    speechRate: speechRateSchema.optional(),
     boardTheme: boardThemeSchema.optional(),
     explanationStyle: explanationStyleSchema.optional(),
     captionsEnabled: z.boolean().optional(),

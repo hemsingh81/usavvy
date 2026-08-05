@@ -109,4 +109,40 @@ describe("PreferencesPage", () => {
     // Reverted back to the loaded value rather than staying optimistically toggled.
     expect(screen.getByRole("switch", { name: "Voice" })).toHaveAttribute("aria-checked", "true");
   });
+
+  it("a slower-resolving save for one field doesn't clobber a faster-resolving save for a different field (review finding: all three review layers independently flagged this race)", async () => {
+    const pending: Record<string, { resolve: (value: unknown) => void }> = {};
+    const fetchMock = vi.fn().mockImplementation((_url: string, init: RequestInit) => {
+      if (init.method === "GET") return jsonResponse(DEFAULT_PREFERENCES);
+      const body = JSON.parse(init.body as string) as Record<string, unknown>;
+      const field = Object.keys(body)[0] as string;
+      return new Promise((resolve) => {
+        pending[field] = {
+          resolve: (fieldValue: unknown) =>
+            resolve({ ok: true, json: () => Promise.resolve({ ...DEFAULT_PREFERENCES, [field]: fieldValue }) } as unknown as Response),
+        };
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderWithSession({ accessToken: "a-token" });
+    const user = userEvent.setup();
+    await waitFor(() => expect(screen.getByRole("switch", { name: "Voice" })).toBeInTheDocument());
+
+    // Issue the "voice" save first, then the "captions" save — but resolve captions'
+    // request FIRST, simulating out-of-order network responses.
+    await user.click(screen.getByRole("switch", { name: "Voice" }));
+    await user.click(screen.getByRole("switch", { name: "Captions" }));
+    await waitFor(() => expect(pending.voiceEnabled).toBeDefined());
+    await waitFor(() => expect(pending.captionsEnabled).toBeDefined());
+
+    pending.captionsEnabled!.resolve(true);
+    await waitFor(() => expect(screen.getByRole("switch", { name: "Captions" })).toHaveAttribute("aria-checked", "true"));
+
+    pending.voiceEnabled!.resolve(false);
+    await waitFor(() => expect(screen.getByRole("switch", { name: "Voice" })).toHaveAttribute("aria-checked", "false"));
+
+    // The earlier-issued, later-resolving voiceEnabled response must not have reset
+    // captions back to the stale value it carried in its own response snapshot.
+    expect(screen.getByRole("switch", { name: "Captions" })).toHaveAttribute("aria-checked", "true");
+  });
 });
