@@ -4,7 +4,7 @@ baseline_commit: 7f67318
 
 # Story 2.1: Model the Course→Module→Topic→Concept hierarchy
 
-Status: ready-for-dev
+Status: review
 
 *(Epic 2, FR-C-1. First story of Epic 2 — the first story in this codebase to scaffold a brand-new microservice (`services/courses`), per the architecture's own "scaffold-on-demand" convention (AD-1): "every other service's folder is created when its owning epic starts." This story is the entity/CRUD owner for `Course`/`Module`/`Topic`/`Concept` per AD-14's ownership table (`| Enrollment, Course, Module, Topic, Concept | courses |`) — `Enrollment` is explicitly NOT built here, since no AC in this story mentions it; it belongs to whichever future story actually needs it. A later Epic 9 story (9.1, "Course hierarchy builder") builds an admin authoring-console UI on top of this story's own service API — its own text is explicit: *"Epic 2 Story 2.1 is the entity/CRUD owner per AD-14 (courses module); this story is the authoring console UI on top of that same rule, not a second, competing implementation of it."* This story therefore has NO frontend UI at all — its AC text is entirely data/service-layer language ("Given the courses module's data store..."), and Story 9.1 is where a human actually interacts with this through a UI. "Content operations user" in the story statement maps to the existing `admin` RBAC role per the architecture's own explicit rule: "the PRD's Content-Ops and Admin/Moderation personas both map to `Admin`.")*
 
@@ -23,52 +23,52 @@ so that catalog courses can be authored and later browsed, customised, and taugh
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1: Shared contract** (AC: #1-4)
-  - [ ] New `packages/shared-types/src/courseHierarchy.ts`: `difficultyTierSchema = z.enum(["beginner", "intermediate", "advanced"])` (same 3-tier scale as `learnerLevelSchema`, kept as its own schema since a Concept's difficulty and a learner's own level are distinct domain concepts that happen to share a scale — do not import/reuse `learnerLevelSchema` directly)
-  - [ ] `checkpointQuestionSchema = z.object({ question: z.string().min(1) })` — the minimal shape AC #1 actually names ("checkpoint questions"); no answer/grading shape invented here, that's Epic 6's (assignments) concern
-  - [ ] `conceptResponseSchema`: `{ id, topicId, title, position, objectives: z.array(z.string()), sourceMaterialRefs: z.array(z.string()), boardAssetRefs: z.array(z.string()), checkpointQuestions: z.array(checkpointQuestionSchema), difficultyTier: difficultyTierSchema.nullable(), prerequisites: z.array(z.object({ conceptId: z.string(), archived: z.boolean() })), archivedAt: z.string().nullable(), createdAt, updatedAt }` — `prerequisites` carries a computed `archived` flag per entry (AC #3's "flagged rather than silently left dangling"), not a stored column
-  - [ ] `topicResponseSchema`: `{ id, moduleId, title, position, archivedAt: z.string().nullable(), concepts: z.array(conceptResponseSchema) }`
-  - [ ] `moduleResponseSchema`: `{ id, courseId, title, position, archivedAt: z.string().nullable(), topics: z.array(topicResponseSchema) }`
-  - [ ] `courseResponseSchema`: `{ id, title, description: z.string().nullable(), modules: z.array(moduleResponseSchema), createdAt, updatedAt }` — this is the full-tree shape AC #4 requires
-  - [ ] Input schemas (one per creatable node, matching the granular per-node API in Task 2 — see Dev Notes on why this story exposes node-by-node creation, not one giant nested-create call): `createCourseInputSchema { title: z.string().min(1), description: z.string().optional() }`, `createModuleInputSchema { title: z.string().min(1), position: z.number().int().nonnegative() }` (matches this package's existing `z.number().int()...` convention in `users.ts`, not the `z.int()` shorthand), `createTopicInputSchema` (same shape as module), `createConceptInputSchema { title, position, objectives?: string[], sourceMaterialRefs?: string[], boardAssetRefs?: string[], checkpointQuestions?: checkpointQuestionSchema[], difficultyTier?: difficultyTierSchema, prerequisiteConceptIds?: string[] }`
-  - [ ] Export everything from the barrel; new `packages/shared-types/tests/courseHierarchy.test.ts`
+- [x] **Task 1: Shared contract** (AC: #1-4)
+  - [x] New `packages/shared-types/src/courseHierarchy.ts`: `difficultyTierSchema = z.enum(["beginner", "intermediate", "advanced"])` (same 3-tier scale as `learnerLevelSchema`, kept as its own schema since a Concept's difficulty and a learner's own level are distinct domain concepts that happen to share a scale — do not import/reuse `learnerLevelSchema` directly)
+  - [x] `checkpointQuestionSchema = z.object({ question: z.string().min(1) })` — the minimal shape AC #1 actually names ("checkpoint questions"); no answer/grading shape invented here, that's Epic 6's (assignments) concern
+  - [x] `conceptResponseSchema`: `{ id, topicId, title, position, objectives: z.array(z.string()), sourceMaterialRefs: z.array(z.string()), boardAssetRefs: z.array(z.string()), checkpointQuestions: z.array(checkpointQuestionSchema), difficultyTier: difficultyTierSchema.nullable(), prerequisites: z.array(z.object({ conceptId: z.string(), archived: z.boolean() })), archivedAt: z.string().nullable(), createdAt, updatedAt }` — `prerequisites` carries a computed `archived` flag per entry (AC #3's "flagged rather than silently left dangling"), not a stored column
+  - [x] `topicResponseSchema`: `{ id, moduleId, title, position, archivedAt: z.string().nullable(), concepts: z.array(conceptResponseSchema) }`
+  - [x] `moduleResponseSchema`: `{ id, courseId, title, position, archivedAt: z.string().nullable(), topics: z.array(topicResponseSchema) }`
+  - [x] `courseResponseSchema`: `{ id, title, description: z.string().nullable(), modules: z.array(moduleResponseSchema), createdAt, updatedAt }` — this is the full-tree shape AC #4 requires
+  - [x] Input schemas (one per creatable node, matching the granular per-node API in Task 2 — see Dev Notes on why this story exposes node-by-node creation, not one giant nested-create call): `createCourseInputSchema { title: z.string().min(1), description: z.string().optional() }`, `createModuleInputSchema { title: z.string().min(1), position: z.number().int().nonnegative() }` (matches this package's existing `z.number().int()...` convention in `users.ts`, not the `z.int()` shorthand), `createTopicInputSchema` (same shape as module), `createConceptInputSchema { title, position, objectives?: string[], sourceMaterialRefs?: string[], boardAssetRefs?: string[], checkpointQuestions?: checkpointQuestionSchema[], difficultyTier?: difficultyTierSchema, prerequisiteConceptIds?: string[] }`
+  - [x] Export everything from the barrel; new `packages/shared-types/tests/courseHierarchy.test.ts`
 
-- [ ] **Task 2: Scaffold `services/courses`** (AC: #1-4)
-  - [ ] New workspace package `services/courses` — copy the exact shape of `services/core` (already fully read for this story): `package.json` (deps: `@usavvy/config`, `@usavvy/service-kernel`, `@usavvy/shared-types`, `drizzle-orm`, `fastify`, `postgres`, `zod`; devDeps: `@types/node`, `drizzle-kit`, `tsx`, `typescript`, `vitest`; scripts: `dev`/`build`/`test`/`typecheck`/`db:generate`/`db:migrate`, identical to core's), `tsconfig.json` (identical to core's, extending root), `drizzle.config.ts` (same shape, pointed at `usavvy_courses`)
-  - [ ] `src/config.ts`: `coursesEnvSchema = baseServiceEnvSchema.extend({ PORT: ...default(3002), DATABASE_URL: ...default("postgres://usavvy:usavvy@localhost:5433/usavvy_courses"), INTERNAL_SERVICE_SECRET: ...same dev default as core/gateway })` — no JWT verification needed here (courses never issues/verifies tokens itself, same as every non-`core` service will be); the internal-secret preHandler guard is still required (same reasoning as core's own — nothing should reach this service except gateway)
-  - [ ] `src/db/schema.ts`: four tables, `courses`/`modules`/`topics`/`concepts`, plus a `concept_prerequisites` join table (`conceptId`, `prerequisiteConceptId`, both FK to `concepts.id`) for the many-to-many prerequisite links. `modules.courseId`/`topics.moduleId`/`concepts.topicId` are FKs with `.notNull()`. Every node table gets `position` (`integer().notNull()`), `archivedAt` (`timestamp({ withTimezone: true })`, nullable — the archive mechanism for AC #3), `createdAt`/`updatedAt`/`version` (same Consistency-Conventions shape every `core` table already uses). `concepts` also gets `objectives`/`sourceMaterialRefs`/`boardAssetRefs` (`text().array()`, nullable), `checkpointQuestions` (`jsonb()`, nullable, `$type<{question: string}[]>()`), `difficultyTier` (`text()`, nullable, `$type<DifficultyTier>()`)
-  - [ ] `src/db/client.ts`, `src/db/migrate.ts` — identical to core's, just importing this service's own `config.ts`/`schema.ts`
-  - [ ] `src/modules/courses/service.ts` + `routes.ts` + `index.ts` (mirroring `core`'s `modules/<name>/index.ts`-barrel convention, AD-13):
+- [x] **Task 2: Scaffold `services/courses`** (AC: #1-4)
+  - [x] New workspace package `services/courses` — copy the exact shape of `services/core` (already fully read for this story): `package.json` (deps: `@usavvy/config`, `@usavvy/service-kernel`, `@usavvy/shared-types`, `drizzle-orm`, `fastify`, `postgres`, `zod`; devDeps: `@types/node`, `drizzle-kit`, `tsx`, `typescript`, `vitest`; scripts: `dev`/`build`/`test`/`typecheck`/`db:generate`/`db:migrate`, identical to core's), `tsconfig.json` (identical to core's, extending root), `drizzle.config.ts` (same shape, pointed at `usavvy_courses`)
+  - [x] `src/config.ts`: `coursesEnvSchema = baseServiceEnvSchema.extend({ PORT: ...default(3002), DATABASE_URL: ...default("postgres://usavvy:usavvy@localhost:5433/usavvy_courses"), INTERNAL_SERVICE_SECRET: ...same dev default as core/gateway })` — no JWT verification needed here (courses never issues/verifies tokens itself, same as every non-`core` service will be); the internal-secret preHandler guard is still required (same reasoning as core's own — nothing should reach this service except gateway)
+  - [x] `src/db/schema.ts`: four tables, `courses`/`modules`/`topics`/`concepts`, plus a `concept_prerequisites` join table (`conceptId`, `prerequisiteConceptId`, both FK to `concepts.id`) for the many-to-many prerequisite links. `modules.courseId`/`topics.moduleId`/`concepts.topicId` are FKs with `.notNull()`. Every node table gets `position` (`integer().notNull()`), `archivedAt` (`timestamp({ withTimezone: true })`, nullable — the archive mechanism for AC #3), `createdAt`/`updatedAt`/`version` (same Consistency-Conventions shape every `core` table already uses). `concepts` also gets `objectives`/`sourceMaterialRefs`/`boardAssetRefs` (`text().array()`, nullable), `checkpointQuestions` (`jsonb()`, nullable, `$type<{question: string}[]>()`), `difficultyTier` (`text()`, nullable, `$type<DifficultyTier>()`)
+  - [x] `src/db/client.ts`, `src/db/migrate.ts` — identical to core's, just importing this service's own `config.ts`/`schema.ts`
+  - [x] `src/modules/courses/service.ts` + `routes.ts` + `index.ts` (mirroring `core`'s `modules/<name>/index.ts`-barrel convention, AD-13):
     - `createCourse(db, role, input)` — `can(role, "create", "courseHierarchy")` guard (403 if not admin/superadmin — see Task 5), inserts a `courses` row
     - `createModule(db, role, courseId, input)`, `createTopic(db, role, moduleId, input)` — same guard, insert scoped to the given parent id (404 if the parent doesn't exist)
     - `createConcept(db, role, topicId, input)` — same guard; if `input.prerequisiteConceptIds` is given, validate each id (a) exists as a `concepts` row and (b) belongs to the SAME course as the concept being created (traced via `topic → module → course`) — **AC #2**: any failing id throws `AppError("VALIDATION_ERROR", ...)` naming that specific id, before the insert happens (no partial write)
     - `archiveModule(db, role, moduleId)` — same guard; in one transaction, sets `archivedAt = now()` on the module and cascades the same timestamp to every topic under it and every concept under those topics (**AC #3**'s "deleted or archived consistently" — this codebase archives, per the epics.md fix-note establishing this as Story 2.1's own rule that Story 9.1 builds on top of, not a hard delete)
     - `getCourse(db, courseId)` — **AC #4**: returns the full nested tree (course → modules → topics → concepts), each concept's `prerequisites` array computed by joining `concept_prerequisites` against `concepts.archivedAt` to set the `archived` flag per entry (**AC #3**'s "flagged rather than silently left dangling") — open to any authenticated role (see Task 5), not admin-gated, since a future catalog/browse story will read through this same function
-  - [ ] `src/app.ts`: same shape as core's — `fastifyJwt` is NOT registered here (courses never issues/verifies a JWT itself), just the internal-secret preHandler guard, `registerErrorHandler`, `/health`, and `registerCoursesRoutes`
-  - [ ] `src/main.ts`: same shape as core's boot sequence (create `sql`, `db`, `buildApp`, listen, graceful shutdown on SIGTERM/SIGINT)
-  - [ ] Routes in `courses` module: `POST /courses`, `POST /courses/:id/modules`, `POST /modules/:id/topics`, `POST /topics/:id/concepts`, `DELETE /modules/:id`, `GET /courses/:id` — trusted `x-user-id`/`x-user-role` headers read the same way `core`'s `requireTrustedUser` does (duplicate that small helper here; no shared package exists for it, and `core`'s own version is private to its module per AD-13 — do not import across `services/*`, AD-9)
-  - [ ] Generate + apply the migration
+  - [x] `src/app.ts`: same shape as core's — `fastifyJwt` is NOT registered here (courses never issues/verifies a JWT itself), just the internal-secret preHandler guard, `registerErrorHandler`, `/health`, and `registerCoursesRoutes`
+  - [x] `src/main.ts`: same shape as core's boot sequence (create `sql`, `db`, `buildApp`, listen, graceful shutdown on SIGTERM/SIGINT)
+  - [x] Routes in `courses` module: `POST /courses`, `POST /courses/:id/modules`, `POST /modules/:id/topics`, `POST /topics/:id/concepts`, `DELETE /modules/:id`, `GET /courses/:id` — trusted `x-user-id`/`x-user-role` headers read the same way `core`'s `requireTrustedUser` does (duplicate that small helper here; no shared package exists for it, and `core`'s own version is private to its module per AD-13 — do not import across `services/*`, AD-9)
+  - [x] Generate + apply the migration
 
-- [ ] **Task 3: RBAC — extend the permission matrix** (AC: #1-3)
-  - [ ] `packages/config/src/rbac.ts`: extend `Action` to `"read" | "create" | "update" | "delete"`, extend `Resource` to `"self" | "courseHierarchy"`. `PERMISSION_MATRIX`: `superadmin`/`admin` get `courseHierarchy: ["create", "update", "delete"]` (matches "content operations user" mapping to `admin` per the architecture's own explicit rule); `mentor`/`student` get no `courseHierarchy` entry (fails closed, per this file's own existing convention). `getCourse`'s read path (Task 2) is intentionally NOT gated through `can()` at all — every role can read, matching a future catalog/browse story's needs; only the four write operations are gated
-  - [ ] Extend `packages/config/tests/rbac.test.ts` (check exact filename first) for the new resource/actions
+- [x] **Task 3: RBAC — extend the permission matrix** (AC: #1-3)
+  - [x] `packages/config/src/rbac.ts`: extend `Action` to `"read" | "create" | "update" | "delete"`, extend `Resource` to `"self" | "courseHierarchy"`. `PERMISSION_MATRIX`: `superadmin`/`admin` get `courseHierarchy: ["create", "update", "delete"]` (matches "content operations user" mapping to `admin` per the architecture's own explicit rule); `mentor`/`student` get no `courseHierarchy` entry (fails closed, per this file's own existing convention). `getCourse`'s read path (Task 2) is intentionally NOT gated through `can()` at all — every role can read, matching a future catalog/browse story's needs; only the four write operations are gated
+  - [x] Extend `packages/config/tests/rbac.test.ts` (check exact filename first) for the new resource/actions
 
-- [ ] **Task 4: `services/gateway` — proxy to the new service** (AC: #1-4)
-  - [ ] New `services/gateway/src/coursesClient.ts`, structurally identical to `coreClient.ts`'s `forward()` (same `ProxyResult`/`ProxyOptions` shapes, same try/catch-to-503 pattern) but pointed at `COURSES_SERVICE_URL` — a sibling client, not a generalization of `coreClient.ts` into one parameterized client (matches this codebase's own precedent of `forward`/`forwardBinary` staying separate rather than one contorted shared function)
-  - [ ] `services/gateway/src/config.ts`: add `COURSES_SERVICE_URL: z.url().default("http://localhost:3002")`
-  - [ ] New routes in a `coursesProxy.ts` (sibling to `authProxy.ts`, not added into it — a distinct downstream service deserves its own proxy-registration file): `POST /courses`, `POST /courses/:id/modules`, `POST /modules/:id/topics`, `POST /topics/:id/concepts`, `DELETE /modules/:id`, `GET /courses/:id` — same `requireAuth` + `trustedHeaders` shape as every existing proxy route, forwarding to `forwardToCourses` instead of `forwardToCore`. The four write routes' path-param ids (`:id` appearing on `/courses/:id/modules`, `/modules/:id/topics`, etc.) get the same `z.uuid()` validation Story 1.10's review round established for `/users/notifications/:id` — do not repeat that story's original mistake of skipping it
-  - [ ] Wire `coursesClient`/`coursesProxy` into `app.ts`/`main.ts` alongside the existing `core` wiring
+- [x] **Task 4: `services/gateway` — proxy to the new service** (AC: #1-4)
+  - [x] New `services/gateway/src/coursesClient.ts`, structurally identical to `coreClient.ts`'s `forward()` (same `ProxyResult`/`ProxyOptions` shapes, same try/catch-to-503 pattern) but pointed at `COURSES_SERVICE_URL` — a sibling client, not a generalization of `coreClient.ts` into one parameterized client (matches this codebase's own precedent of `forward`/`forwardBinary` staying separate rather than one contorted shared function)
+  - [x] `services/gateway/src/config.ts`: add `COURSES_SERVICE_URL: z.url().default("http://localhost:3002")`
+  - [x] New routes in a `coursesProxy.ts` (sibling to `authProxy.ts`, not added into it — a distinct downstream service deserves its own proxy-registration file): `POST /courses`, `POST /courses/:id/modules`, `POST /modules/:id/topics`, `POST /topics/:id/concepts`, `DELETE /modules/:id`, `GET /courses/:id` — same `requireAuth` + `trustedHeaders` shape as every existing proxy route, forwarding to `forwardToCourses` instead of `forwardToCore`. The four write routes' path-param ids (`:id` appearing on `/courses/:id/modules`, `/modules/:id/topics`, etc.) get the same `z.uuid()` validation Story 1.10's review round established for `/users/notifications/:id` — do not repeat that story's original mistake of skipping it
+  - [x] Wire `coursesClient`/`coursesProxy` into `app.ts`/`main.ts` alongside the existing `core` wiring
 
-- [ ] **Task 5: Infra — the new service must actually run** (AC: #1-4)
-  - [ ] `infra/init-db.sh`: add `CREATE DATABASE usavvy_courses;` alongside the existing `usavvy_core` line (AD-14, database-per-service) — no `vector` extension needed here (that's `ingestion`'s concern once embeddings land, Story 2.12)
-  - [ ] Root `package.json`'s `dev` script: add `courses` to the `concurrently` invocation (`-n gateway,core,courses,web ... "pnpm --filter @usavvy/courses dev"`) — without this, the new service exists in the workspace but never actually starts in local dev, leaving the system not genuinely working end-to-end (the create-story workflow's own standing rule)
+- [x] **Task 5: Infra — the new service must actually run** (AC: #1-4)
+  - [x] `infra/init-db.sh`: add `CREATE DATABASE usavvy_courses;` alongside the existing `usavvy_core` line (AD-14, database-per-service) — no `vector` extension needed here (that's `ingestion`'s concern once embeddings land, Story 2.12)
+  - [x] Root `package.json`'s `dev` script: add `courses` to the `concurrently` invocation (`-n gateway,core,courses,web ... "pnpm --filter @usavvy/courses dev"`) — without this, the new service exists in the workspace but never actually starts in local dev, leaving the system not genuinely working end-to-end (the create-story workflow's own standing rule)
 
-- [ ] **Task 6: Tests mirroring `src/` 1:1** (AD-8)
-  - [ ] `packages/shared-types/tests/courseHierarchy.test.ts` — see Task 1
-  - [ ] `services/courses/tests/modules/courses/service.test.ts` (new, DB-integration mirroring `core`'s own test style) — `createCourse`/`createModule`/`createTopic`/`createConcept` persist correctly with position recorded; `createConcept` with a prerequisite from a DIFFERENT course is rejected (AC #2, naming the bad id); `archiveModule` cascades `archivedAt` to its topics and concepts (AC #3); `getCourse` returns the full nested tree (AC #4) with a prerequisite's `archived` flag correctly `true` once its target concept is archived and `false` otherwise; all four write operations reject a non-admin role with 403
-  - [ ] `services/courses/tests/modules/courses/routes.test.ts` (new) — each route requires the internal secret; end-to-end create-course → create-module → create-topic → create-concept → get-course round trip returns the expected tree; `DELETE /modules/:id` archives correctly through the real route
-  - [ ] `packages/config/tests/rbac.test.ts` (extend) — see Task 3
-  - [ ] `services/gateway/tests/coursesProxy.test.ts` (new) — each route requires authentication (401); a non-admin token's write attempt still forwards to `courses` (RBAC is enforced at the service layer per Task 2/3's design, not re-implemented at the gateway — mirrors how `core`'s routes, not `gateway`'s, own every existing authorization decision); path-param ids are validated before forwarding (mirrors Story 1.10's own review-round fix)
+- [x] **Task 6: Tests mirroring `src/` 1:1** (AD-8)
+  - [x] `packages/shared-types/tests/courseHierarchy.test.ts` — see Task 1
+  - [x] `services/courses/tests/modules/courses/service.test.ts` (new, DB-integration mirroring `core`'s own test style) — `createCourse`/`createModule`/`createTopic`/`createConcept` persist correctly with position recorded; `createConcept` with a prerequisite from a DIFFERENT course is rejected (AC #2, naming the bad id); `archiveModule` cascades `archivedAt` to its topics and concepts (AC #3); `getCourse` returns the full nested tree (AC #4) with a prerequisite's `archived` flag correctly `true` once its target concept is archived and `false` otherwise; all four write operations reject a non-admin role with 403
+  - [x] `services/courses/tests/modules/courses/routes.test.ts` (new) — each route requires the internal secret; end-to-end create-course → create-module → create-topic → create-concept → get-course round trip returns the expected tree; `DELETE /modules/:id` archives correctly through the real route
+  - [x] `packages/config/tests/rbac.test.ts` (extend) — see Task 3
+  - [x] `services/gateway/tests/coursesProxy.test.ts` (new) — each route requires authentication (401); a non-admin token's write attempt still forwards to `courses` (RBAC is enforced at the service layer per Task 2/3's design, not re-implemented at the gateway — mirrors how `core`'s routes, not `gateway`'s, own every existing authorization decision); path-param ids are validated before forwarding (mirrors Story 1.10's own review-round fix)
 
 ## Dev Notes
 
@@ -114,6 +114,10 @@ Story 9.1 (the future authoring console) describes a learner... a content-ops ad
 - [Source: `packages/config/src/rbac.ts` — the existing `can()`/`PERMISSION_MATRIX` this story extends, and its own "don't pre-populate permissions for resources that don't exist yet" convention now satisfied by this story actually needing `courseHierarchy`]
 - [Source: `infra/docker-compose.yml`, `infra/init-db.sh` — the database-per-service bootstrap this story extends with `usavvy_courses`]
 
+## Change Log
+
+- 2026-08-06: Full implementation in one pass (Tasks 1-6) — first new microservice since Story 1.0. `packages/shared-types/src/courseHierarchy.ts` (schemas), `packages/config/src/rbac.ts` extended (`courseHierarchy` create/update/delete gated to admin/superadmin), new `services/courses` (schema, service, routes, app/main/config/db boilerplate copied from `core`'s own shape), new `services/gateway/src/{coursesClient,coursesProxy}.ts` siblings to the existing core ones with `z.uuid()` path-param validation applied from the start (Story 1.10's own review-round fix, not repeated here as a mistake). `infra/init-db.sh` and root `package.json`'s `dev` script updated so the new service actually runs. Full monorepo regression clean: 623 tests (18 config, 124 shared-types, 12 service-kernel, 166 apps/web, 78 gateway, 25 courses, 200 core), `tsc --noEmit`/`eslint .` clean across all 8 workspaces. Live-verified end-to-end: created a full Course→Module→Topic→Concept tree directly against `courses` (port 3002) with all AC #1 fields persisted; a cross-course prerequisite was rejected naming the specific bad id (AC #2); a non-admin role was rejected with 403; archiving a Module cascaded `archivedAt` to its Topic and Concepts and the dependent Concept's prerequisite came back flagged `archived: true` on retrieval (AC #3/#4); confirmed the same `POST /courses` flow succeeds through `gateway` with a real signed JWT (not just directly against `courses`). Status → `review`.
+
 ## Dev Agent Record
 
 ### Agent Model Used
@@ -124,4 +128,37 @@ Claude Sonnet 5
 
 ### Completion Notes List
 
+- **This story is data/service-layer only** — no `apps/web` changes. Its AC text is entirely "given the courses module's data store" language; Epic 9's own Story 9.1 is where a human-facing authoring console gets built against this same API, per an epics.md fix-note settling that exact division (quoted in this story's own frontmatter).
+- **Granular per-node API, not one bulk nested-create call** — `POST /courses` → `POST /courses/:id/modules` → `POST /modules/:id/topics` → `POST /topics/:id/concepts`. Matches how Story 9.1's own future authoring-console UI describes building a hierarchy incrementally (add a module, then topics, then concepts, with drag-reorder later), and is simpler to validate/test than a single large nested payload.
+- **Archive, not hard-delete, on Module removal** — settled by the epics.md fix-note this story's own frontmatter quotes; `archiveModule` cascades the same timestamp to child Topics/Concepts in one transaction. Dangling prerequisites into an archived subtree are flagged via a value **computed at `getCourse` read time** (comparing a prerequisite's target `archivedAt`), not a stored/trigger-maintained column — matches this codebase's existing "derive, don't snapshot" philosophy.
+- **`GET /courses/:id` is intentionally not RBAC-gated** — every role can read (a future catalog/browse story needs this); only the four write operations (`create`/`update`/`delete` on `courseHierarchy`) are gated through `can()`.
+- **Ownership tables (`courses`/`modules`/`topics`/`concepts`/`concept_prerequisites`) live in `services/courses`' own Postgres database (`usavvy_courses`)**, per AD-14's database-per-service rule — no cross-service DB access from `core` or anywhere else.
+- **`services/courses/src/modules/courses/routes.ts` duplicates `core`'s own `requireTrustedUser` helper** rather than importing it — AD-9/AD-13 forbid one `services/*` importing another's private module internals, and no shared package currently exists for this small piece of header-reading logic.
+
 ### File List
+
+**Task 1 (shared contract):**
+- `packages/shared-types/src/courseHierarchy.ts` (new)
+- `packages/shared-types/src/index.ts` (updated — barrel)
+- `packages/shared-types/tests/courseHierarchy.test.ts` (new)
+
+**Task 2 (services/courses scaffold):**
+- `services/courses/package.json`, `tsconfig.json`, `drizzle.config.ts` (new)
+- `services/courses/src/config.ts`, `src/app.ts`, `src/main.ts` (new)
+- `services/courses/src/db/{schema.ts,client.ts,migrate.ts}` (new)
+- `services/courses/drizzle/0000_skinny_alice.sql` + `meta/` (new migration)
+- `services/courses/src/modules/courses/{service.ts,routes.ts,index.ts}` (new)
+- `services/courses/tests/testHelpers.ts`, `tests/modules/courses/{service.test.ts,routes.test.ts}` (new)
+
+**Task 3 (RBAC):**
+- `packages/config/src/rbac.ts` (updated — `courseHierarchy` resource)
+- `packages/config/tests/rbac.test.ts` (updated)
+
+**Task 4 (gateway):**
+- `services/gateway/src/{coursesClient.ts,coursesProxy.ts}` (new)
+- `services/gateway/src/{app.ts,main.ts,config.ts}` (updated — wiring)
+- `services/gateway/tests/coursesProxy.test.ts` (new), `tests/testHelpers.ts` (updated)
+
+**Task 5 (infra):**
+- `infra/init-db.sh` (updated — `usavvy_courses`)
+- `package.json` (updated — `dev` script)
