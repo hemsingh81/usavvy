@@ -57,3 +57,4 @@ export {
   type NotificationResponse,
   notificationListResponseSchema,
 } from "./notification.js";
+export { activityHistoryEntrySchema, type ActivityHistoryEntry, activityHistoryResponseSchema } from "./activityHistory.js";

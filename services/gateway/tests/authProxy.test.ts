@@ -563,3 +563,29 @@ describe("DELETE /users/notifications/:id", () => {
     await app.close();
   });
 });
+
+describe("GET /users/activity-history", () => {
+  it("returns 401 with no token and never calls core", async () => {
+    const forwardToCore = vi.fn();
+    const app = buildApp(createTestAppDeps({ forwardToCore }));
+
+    const response = await app.inject({ method: "GET", url: "/users/activity-history" });
+
+    expect(response.statusCode).toBe(401);
+    expect(forwardToCore).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("forwards trusted x-user-id/x-user-role headers derived from a valid token", async () => {
+    const forwardToCore = vi.fn().mockResolvedValue({ status: 200, body: [] });
+    const app = buildApp(createTestAppDeps({ forwardToCore }));
+    await app.ready();
+    const token = app.jwt.sign({ sub: "u1", role: "student", typ: "access" });
+
+    const response = await app.inject({ method: "GET", url: "/users/activity-history", headers: { authorization: `Bearer ${token}` } });
+
+    expect(response.statusCode).toBe(200);
+    expect(forwardToCore).toHaveBeenCalledWith("GET", "/users/activity-history", { headers: { "x-user-id": "u1", "x-user-role": "student" } });
+    await app.close();
+  });
+});

@@ -19,6 +19,7 @@ import {
   clearNotification,
   declareAge,
   generateDataExport,
+  getActivityHistory,
   getMe,
   getOnboarding,
   getPreferences,
@@ -176,5 +177,10 @@ export function registerUsersRoutes(app: FastifyInstance, deps: UsersRouteDeps):
     const { id } = parseOrThrow(notificationIdParamsSchema, request.params);
     await clearNotification(deps.db, userId, id);
     reply.code(204).send();
+  });
+
+  app.get("/users/activity-history", async (request, reply) => {
+    requireTrustedUser(request);
+    reply.send(await getActivityHistory());
   });
 }

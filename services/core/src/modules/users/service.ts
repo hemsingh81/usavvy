@@ -6,6 +6,7 @@ import {
   DEFAULT_PRIVACY_SETTINGS,
   ONBOARDING_STEPS,
   type AccountDeletionResponse,
+  type ActivityHistoryEntry,
   type AgeDeclarationResponse,
   type DataExport,
   type LearnerPreferences,
@@ -591,4 +592,21 @@ export async function clearNotification(db: Db, userId: string, notificationId: 
     throw new AppError("NOTIFICATION_STILL_IN_PROGRESS", "this notification can't be cleared until its process resolves", 409);
   }
   await db.delete(notifications).where(and(eq(notifications.id, notificationId), eq(notifications.userId, userId)));
+}
+
+/**
+ * Story 1.11 (FR-A-11). AD-18: a read-only cross-module aggregator — reads
+ * `SessionEvent` (board-orchestration), `AssignmentSubmission` (assignments), and
+ * cohort attendance data (cohorts) directly, never duplicating them into a table owned
+ * here. None of those three services exist yet (scaffold-on-demand — each is created
+ * when its own epic starts), so this correctly returns `[]` today; this is where
+ * Story 3.x/6.x/7.x each add their own read once their owning service and its HTTP
+ * contract exist. Deliberately takes no parameters yet rather than pre-accepting a
+ * `db`/`userId` it can't use today — the same "don't pre-build for a story that hasn't
+ * started" principle this story's own Dev Notes apply to the response shape. Whichever
+ * future story adds the first real read is the one that adds whatever parameters it
+ * actually needs, at that time.
+ */
+export async function getActivityHistory(): Promise<ActivityHistoryEntry[]> {
+  return [];
 }

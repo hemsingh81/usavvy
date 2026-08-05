@@ -100,6 +100,11 @@ export function registerAuthProxyRoutes(app: FastifyInstance, deps: AuthProxyDep
     reply.code(result.status).send(result.body);
   });
 
+  app.get("/users/activity-history", { preHandler: requireAuth }, async (request, reply) => {
+    const result = await deps.forwardToCore("GET", "/users/activity-history", { headers: trustedHeaders(request) });
+    reply.code(result.status).send(result.body);
+  });
+
   // Story 1.10: the first path-param routes in this proxy — the id is interpolated
   // directly into the forwarded path string; forwardToCore already takes an arbitrary
   // path, so no change to it or coreClient.ts is needed.

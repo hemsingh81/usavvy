@@ -956,3 +956,30 @@ describe("DELETE /users/notifications/:id", () => {
     await app.close();
   });
 });
+
+describe("GET /users/activity-history", () => {
+  it("requires authentication (401 with no trusted headers)", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+
+    const response = await app.inject({ method: "GET", url: "/users/activity-history", headers: internalHeaders });
+
+    expect(response.statusCode).toBe(401);
+    await app.close();
+  });
+
+  it("returns 200 with an empty array (the only real case today — no Epic 3/6/7 source data exists yet)", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+    const email = uniqueEmail("activity-history");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/users/activity-history",
+      headers: { ...internalHeaders, "x-user-id": user!.id, "x-user-role": "student" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual([]);
+    await app.close();
+  });
+});
