@@ -526,6 +526,14 @@ export async function createNotification(
   userId: string,
   input: { type: string; message: string; sourceProcessType?: string; sourceProcessStatus?: NotificationSourceProcessStatus },
 ): Promise<NotificationResponse> {
+  // Review finding: sourceProcessType/sourceProcessStatus must be both-set or both-unset
+  // — one without the other would produce a notification that looks tied to a process
+  // (so a learner would expect it to be lockable) but silently bypasses clearNotification's
+  // "in_progress" check, or conversely carries a status with nothing to attach it to.
+  if ((input.sourceProcessType === undefined) !== (input.sourceProcessStatus === undefined)) {
+    throw new AppError("VALIDATION_ERROR", "sourceProcessType and sourceProcessStatus must both be set or both be omitted", 400);
+  }
+
   const [row] = await db
     .insert(notifications)
     .values({

@@ -76,6 +76,32 @@ describe("createNotification", () => {
     expect(result.sourceProcessStatus).toBeNull();
   });
 
+  it("rejects a sourceProcessType with no sourceProcessStatus (review finding: this pair must be both-or-neither, or a process-tied notification could silently become always-clearable)", async () => {
+    const email = uniqueEmail("mismatched-type-only");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+
+    await expect(
+      createNotification(db, createMockNotificationPort(), testLogger, user!.id, {
+        type: "info",
+        message: "oops",
+        sourceProcessType: "account_deletion",
+      }),
+    ).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+  });
+
+  it("rejects a sourceProcessStatus with no sourceProcessType", async () => {
+    const email = uniqueEmail("mismatched-status-only");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+
+    await expect(
+      createNotification(db, createMockNotificationPort(), testLogger, user!.id, {
+        type: "info",
+        message: "oops",
+        sourceProcessStatus: "in_progress",
+      }),
+    ).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+  });
+
   it("does not throw when sendInApp fails (best-effort, logged not swallowed)", async () => {
     const email = uniqueEmail("sendinapp-fails");
     const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();

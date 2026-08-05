@@ -132,4 +132,38 @@ describe("AppHeader", () => {
 
     await waitFor(() => expect(screen.getByText("No notifications")).toBeInTheDocument());
   });
+
+  it("shows actionError as an alert inside the panel when a markRead/clear fails (review finding)", async () => {
+    useAuthMock.mockReturnValue({ session: { accessToken: "a-token" } });
+    useNotificationsMock.mockReturnValue({
+      notifications: [RESOLVED_NOTIFICATION],
+      unreadCount: 1,
+      markRead: vi.fn(),
+      clear: vi.fn(),
+      actionError: "something went wrong — please try again",
+    });
+    const user = userEvent.setup();
+    render(<AppHeader />);
+
+    await user.click(screen.getByRole("button", { name: /notifications/i }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent("something went wrong — please try again");
+  });
+
+  it("resets the panel to closed when the session ends (review finding: a stale open panel previously snapped open for the next learner on login)", async () => {
+    useAuthMock.mockReturnValue({ session: { accessToken: "a-token" } });
+    useNotificationsMock.mockReturnValue({ notifications: [RESOLVED_NOTIFICATION], unreadCount: 1, markRead: vi.fn(), clear: vi.fn() });
+    const user = userEvent.setup();
+    const { rerender } = render(<AppHeader />);
+    await user.click(screen.getByRole("button", { name: /notifications/i }));
+    expect(screen.getByText("A resolved thing")).toBeInTheDocument();
+
+    useAuthMock.mockReturnValue({ session: null });
+    rerender(<AppHeader />);
+    expect(screen.queryByText("A resolved thing")).not.toBeInTheDocument();
+
+    useAuthMock.mockReturnValue({ session: { accessToken: "new-token" } });
+    rerender(<AppHeader />);
+    expect(screen.queryByText("A resolved thing")).not.toBeInTheDocument();
+  });
 });

@@ -59,7 +59,12 @@ const birthdateField = z.iso
 
 const ageDeclarationSchema = z.object({ birthdate: birthdateField, parentEmail: emailField.optional() });
 const parentalConsentSchema = z.object({ token: z.string().min(1) });
-const notificationIdParamsSchema = z.object({ id: z.string().min(1) });
+// Review finding: a non-UUID id (e.g. a client typo, or an id that arrived after the
+// gateway's own path-traversal attempt) previously passed a bare z.string().min(1) check
+// and then hit Postgres's uuid-typed column, surfacing as an unhandled 500 rather than a
+// clean 400 — and, at the gateway layer, a validation this loose does nothing to stop a
+// slash/dot-segment id from being spliced into a forwarded path in the first place.
+const notificationIdParamsSchema = z.object({ id: z.uuid() });
 
 // Trusted headers set only by gateway's JWT-verify preHandler (AD-7) — core never
 // re-verifies the JWT itself. A request missing them didn't come through gateway

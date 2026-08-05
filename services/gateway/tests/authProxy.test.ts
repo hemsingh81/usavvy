@@ -470,7 +470,7 @@ describe("PUT /users/notifications/:id/read", () => {
     const forwardToCore = vi.fn();
     const app = buildApp(createTestAppDeps({ forwardToCore }));
 
-    const response = await app.inject({ method: "PUT", url: "/users/notifications/n1/read" });
+    const response = await app.inject({ method: "PUT", url: "/users/notifications/019fd2fd-0000-7000-8000-000000000001/read" });
 
     expect(response.statusCode).toBe(401);
     expect(forwardToCore).not.toHaveBeenCalled();
@@ -483,10 +483,27 @@ describe("PUT /users/notifications/:id/read", () => {
     await app.ready();
     const token = app.jwt.sign({ sub: "u1", role: "student", typ: "access" });
 
-    const response = await app.inject({ method: "PUT", url: "/users/notifications/n1/read", headers: { authorization: `Bearer ${token}` } });
+    const response = await app.inject({ method: "PUT", url: "/users/notifications/019fd2fd-0000-7000-8000-000000000001/read", headers: { authorization: `Bearer ${token}` } });
 
     expect(response.statusCode).toBe(200);
-    expect(forwardToCore).toHaveBeenCalledWith("PUT", "/users/notifications/n1/read", { headers: { "x-user-id": "u1", "x-user-role": "student" } });
+    expect(forwardToCore).toHaveBeenCalledWith("PUT", "/users/notifications/019fd2fd-0000-7000-8000-000000000001/read", { headers: { "x-user-id": "u1", "x-user-role": "student" } });
+    await app.close();
+  });
+
+  it("rejects a path-traversal id with a 400 rather than forwarding it (review finding)", async () => {
+    const forwardToCore = vi.fn();
+    const app = buildApp(createTestAppDeps({ forwardToCore }));
+    await app.ready();
+    const token = app.jwt.sign({ sub: "u1", role: "student", typ: "access" });
+
+    const response = await app.inject({
+      method: "PUT",
+      url: "/users/notifications/..%2Faccount-deletion/read",
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(forwardToCore).not.toHaveBeenCalled();
     await app.close();
   });
 });
@@ -496,7 +513,7 @@ describe("DELETE /users/notifications/:id", () => {
     const forwardToCore = vi.fn();
     const app = buildApp(createTestAppDeps({ forwardToCore }));
 
-    const response = await app.inject({ method: "DELETE", url: "/users/notifications/n1" });
+    const response = await app.inject({ method: "DELETE", url: "/users/notifications/019fd2fd-0000-7000-8000-000000000001" });
 
     expect(response.statusCode).toBe(401);
     expect(forwardToCore).not.toHaveBeenCalled();
@@ -509,10 +526,27 @@ describe("DELETE /users/notifications/:id", () => {
     await app.ready();
     const token = app.jwt.sign({ sub: "u1", role: "student", typ: "access" });
 
-    const response = await app.inject({ method: "DELETE", url: "/users/notifications/n1", headers: { authorization: `Bearer ${token}` } });
+    const response = await app.inject({ method: "DELETE", url: "/users/notifications/019fd2fd-0000-7000-8000-000000000001", headers: { authorization: `Bearer ${token}` } });
 
     expect(response.statusCode).toBe(204);
-    expect(forwardToCore).toHaveBeenCalledWith("DELETE", "/users/notifications/n1", { headers: { "x-user-id": "u1", "x-user-role": "student" } });
+    expect(forwardToCore).toHaveBeenCalledWith("DELETE", "/users/notifications/019fd2fd-0000-7000-8000-000000000001", { headers: { "x-user-id": "u1", "x-user-role": "student" } });
+    await app.close();
+  });
+
+  it("rejects a path-traversal id with a 400 rather than forwarding it (review finding)", async () => {
+    const forwardToCore = vi.fn();
+    const app = buildApp(createTestAppDeps({ forwardToCore }));
+    await app.ready();
+    const token = app.jwt.sign({ sub: "u1", role: "student", typ: "access" });
+
+    const response = await app.inject({
+      method: "DELETE",
+      url: "/users/notifications/..%2Faccount-deletion",
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(forwardToCore).not.toHaveBeenCalled();
     await app.close();
   });
 
@@ -522,7 +556,7 @@ describe("DELETE /users/notifications/:id", () => {
     await app.ready();
     const token = app.jwt.sign({ sub: "u1", role: "student", typ: "access" });
 
-    const response = await app.inject({ method: "DELETE", url: "/users/notifications/n1", headers: { authorization: `Bearer ${token}` } });
+    const response = await app.inject({ method: "DELETE", url: "/users/notifications/019fd2fd-0000-7000-8000-000000000001", headers: { authorization: `Bearer ${token}` } });
 
     expect(response.statusCode).toBe(409);
     expect(response.json()).toEqual({ error: { code: "NOTIFICATION_STILL_IN_PROGRESS", message: "still in progress" } });

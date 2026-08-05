@@ -828,6 +828,22 @@ describe("PUT /users/notifications/:id/read", () => {
     await app.close();
   });
 
+  it("returns a clean 400 VALIDATION_ERROR (not a raw 500) for a malformed, non-UUID id (review finding)", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+    const email = uniqueEmail("notifications-read-malformed");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+
+    const response = await app.inject({
+      method: "PUT",
+      url: "/users/notifications/not-a-uuid/read",
+      headers: { ...internalHeaders, "x-user-id": user!.id, "x-user-role": "student" },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ error: { code: "VALIDATION_ERROR" } });
+    await app.close();
+  });
+
   it("returns 404 for another user's notification id (ownership check through the real route)", async () => {
     const app = buildApp(createTestAppDeps({ db }));
     const email = uniqueEmail("notifications-read-owner");
@@ -864,6 +880,22 @@ describe("DELETE /users/notifications/:id", () => {
     const response = await app.inject({ method: "DELETE", url: "/users/notifications/some-id", headers: internalHeaders });
 
     expect(response.statusCode).toBe(401);
+    await app.close();
+  });
+
+  it("returns a clean 400 VALIDATION_ERROR (not a raw 500) for a malformed, non-UUID id (review finding)", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+    const email = uniqueEmail("notifications-clear-malformed");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+
+    const response = await app.inject({
+      method: "DELETE",
+      url: "/users/notifications/not-a-uuid",
+      headers: { ...internalHeaders, "x-user-id": user!.id, "x-user-role": "student" },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ error: { code: "VALIDATION_ERROR" } });
     await app.close();
   });
 

@@ -1,6 +1,23 @@
 import type { FastifyInstance } from "fastify";
+import { z } from "zod";
+import { AppError } from "@usavvy/service-kernel";
 import type { BinaryProxyOptions, BinaryProxyResult, ProxyOptions, ProxyResult } from "./coreClient.js";
 import { requireAuth, trustedHeaders } from "./authPlugin.js";
+
+// Review finding: this proxy previously spliced an unvalidated :id path param directly
+// into a forwarded path string — an encoded "../" segment (e.g. "..%2Faccount-deletion")
+// gets decoded by the router and, once interpolated, retargets the forwarded request at
+// an entirely different core route. Validating the id's shape here, before it's ever
+// used to build a path, closes that off regardless of what core itself later validates.
+const notificationIdSchema = z.uuid();
+
+function requireValidNotificationId(id: string): string {
+  const result = notificationIdSchema.safeParse(id);
+  if (!result.success) {
+    throw new AppError("VALIDATION_ERROR", "invalid notification id", 400);
+  }
+  return result.data;
+}
 
 export interface AuthProxyDeps {
   forwardToCore: (method: string, path: string, options?: ProxyOptions) => Promise<ProxyResult>;
@@ -87,13 +104,13 @@ export function registerAuthProxyRoutes(app: FastifyInstance, deps: AuthProxyDep
   // directly into the forwarded path string; forwardToCore already takes an arbitrary
   // path, so no change to it or coreClient.ts is needed.
   app.put("/users/notifications/:id/read", { preHandler: requireAuth }, async (request, reply) => {
-    const { id } = request.params as { id: string };
+    const id = requireValidNotificationId((request.params as { id: string }).id);
     const result = await deps.forwardToCore("PUT", `/users/notifications/${id}/read`, { headers: trustedHeaders(request) });
     reply.code(result.status).send(result.body);
   });
 
   app.delete("/users/notifications/:id", { preHandler: requireAuth }, async (request, reply) => {
-    const { id } = request.params as { id: string };
+    const id = requireValidNotificationId((request.params as { id: string }).id);
     const result = await deps.forwardToCore("DELETE", `/users/notifications/${id}`, { headers: trustedHeaders(request) });
     reply.code(result.status).send(result.body);
   });

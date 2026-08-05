@@ -78,6 +78,42 @@ describe("NotificationsProvider / useNotifications", () => {
     expect(result.current.notifications).toEqual([]);
   });
 
+  it("markRead surfaces an error via actionError rather than an unhandled rejection when the PUT fails (review finding)", async () => {
+    useAuthMock.mockReturnValue({ session: { accessToken: "a-token" } });
+    const fetchMock = vi.fn().mockImplementation((_url: string, init: RequestInit) => {
+      if (init.method === "PUT") return Promise.resolve({ ok: false, json: () => Promise.resolve({ error: { code: "NOT_FOUND", message: "gone" } }) } as unknown as Response);
+      return jsonResponse([NOTIFICATION_A]);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { result } = renderHook(() => useNotifications(), { wrapper });
+    await waitFor(() => expect(result.current.notifications).toHaveLength(1));
+
+    await act(async () => {
+      await result.current.markRead("n1");
+    });
+
+    expect(result.current.actionError).toBe("gone");
+  });
+
+  it("clear surfaces an error via actionError rather than an unhandled rejection when the DELETE fails (review finding)", async () => {
+    useAuthMock.mockReturnValue({ session: { accessToken: "a-token" } });
+    const fetchMock = vi.fn().mockImplementation((_url: string, init: RequestInit) => {
+      if (init.method === "DELETE") return Promise.resolve({ ok: false, json: () => Promise.resolve({ error: { code: "NOTIFICATION_STILL_IN_PROGRESS", message: "still going" } }) } as unknown as Response);
+      return jsonResponse([NOTIFICATION_A]);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { result } = renderHook(() => useNotifications(), { wrapper });
+    await waitFor(() => expect(result.current.notifications).toHaveLength(1));
+
+    await act(async () => {
+      await result.current.clear("n1");
+    });
+
+    expect(result.current.actionError).toBe("still going");
+    // A failed clear must not remove the notification from local state.
+    expect(result.current.notifications).toHaveLength(1);
+  });
+
   it("markRead calls the API and updates only that notification in local state", async () => {
     useAuthMock.mockReturnValue({ session: { accessToken: "a-token" } });
     const fetchMock = vi.fn().mockImplementation((_url: string, init: RequestInit) => {

@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { NotificationResponse } from "@usavvy/shared-types";
 import { getWebConfig } from "./config.js";
+import { ApiError } from "../shared/apiClient.js";
 import { useAuth } from "../modules/auth/index.js";
 import { createUsersApi } from "../modules/users/api.js";
 
@@ -9,6 +10,11 @@ export interface NotificationsContextValue {
   unreadCount: number;
   markRead: (id: string) => Promise<void>;
   clear: (id: string) => Promise<void>;
+  // Review finding: markRead/clear previously had no error handling at all — a failed
+  // request became an unhandled promise rejection with no user-visible feedback and no
+  // reconciliation of local state (AD-17). Surfaced here instead of thrown, since
+  // AppHeader's callers fire these off with `void` rather than awaiting them.
+  actionError: string | undefined;
 }
 
 const NotificationsContext = createContext<NotificationsContextValue | undefined>(undefined);
@@ -26,6 +32,7 @@ const NotificationsContext = createContext<NotificationsContextValue | undefined
 export function NotificationsProvider({ children }: { children: ReactNode }) {
   const { session } = useAuth();
   const [notifications, setNotifications] = useState<NotificationResponse[]>([]);
+  const [actionError, setActionError] = useState<string | undefined>(undefined);
 
   useEffect(() => {
     if (!session) {
@@ -51,9 +58,14 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
   const markRead = useCallback(
     async (id: string): Promise<void> => {
       if (!session) return;
-      const { apiUrl } = getWebConfig();
-      const updated = await createUsersApi(apiUrl).markNotificationRead(session.accessToken, id);
-      setNotifications((current) => current.map((n) => (n.id === id ? updated : n)));
+      setActionError(undefined);
+      try {
+        const { apiUrl } = getWebConfig();
+        const updated = await createUsersApi(apiUrl).markNotificationRead(session.accessToken, id);
+        setNotifications((current) => current.map((n) => (n.id === id ? updated : n)));
+      } catch (error) {
+        setActionError(error instanceof ApiError ? error.message : "something went wrong — please try again");
+      }
     },
     [session?.accessToken],
   );
@@ -61,9 +73,14 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
   const clear = useCallback(
     async (id: string): Promise<void> => {
       if (!session) return;
-      const { apiUrl } = getWebConfig();
-      await createUsersApi(apiUrl).clearNotification(session.accessToken, id);
-      setNotifications((current) => current.filter((n) => n.id !== id));
+      setActionError(undefined);
+      try {
+        const { apiUrl } = getWebConfig();
+        await createUsersApi(apiUrl).clearNotification(session.accessToken, id);
+        setNotifications((current) => current.filter((n) => n.id !== id));
+      } catch (error) {
+        setActionError(error instanceof ApiError ? error.message : "something went wrong — please try again");
+      }
     },
     [session?.accessToken],
   );
@@ -71,8 +88,8 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
   const unreadCount = notifications.filter((n) => n.readAt === null).length;
 
   const value = useMemo<NotificationsContextValue>(
-    () => ({ notifications, unreadCount, markRead, clear }),
-    [notifications, unreadCount, markRead, clear],
+    () => ({ notifications, unreadCount, markRead, clear, actionError }),
+    [notifications, unreadCount, markRead, clear, actionError],
   );
 
   return <NotificationsContext.Provider value={value}>{children}</NotificationsContext.Provider>;

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "../modules/auth/index.js";
 import { useNotifications } from "./useNotifications.js";
 
@@ -10,8 +10,15 @@ import { useNotifications } from "./useNotifications.js";
  */
 export function AppHeader() {
   const { session } = useAuth();
-  const { notifications, unreadCount, markRead, clear } = useNotifications();
+  const { notifications, unreadCount, markRead, clear, actionError } = useNotifications();
   const [open, setOpen] = useState(false);
+
+  // Review finding: `open` previously survived a logout/login cycle (this component
+  // never unmounts, only returns null) — a different learner could log in and find the
+  // panel already snapped open with no click of their own.
+  useEffect(() => {
+    if (!session) setOpen(false);
+  }, [session]);
 
   if (!session) {
     return null;
@@ -32,6 +39,11 @@ export function AppHeader() {
 
       {open ? (
         <div className="usavvy-notification-panel" role="region" aria-label="Notification Center">
+          {actionError ? (
+            <p className="usavvy-message-error" role="alert">
+              {actionError}
+            </p>
+          ) : null}
           {notifications.length === 0 ? (
             <p className="usavvy-notification-empty">No notifications</p>
           ) : (
