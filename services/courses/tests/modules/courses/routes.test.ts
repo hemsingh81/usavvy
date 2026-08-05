@@ -223,3 +223,72 @@ describe("GET/PUT /courses/:id/customization", () => {
     await app.close();
   });
 });
+
+describe("GET /courses/:id/placement-check and POST /courses/:id/placement-check/score", () => {
+  it("requires the internal secret and trusted user headers (GET)", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+
+    const response = await app.inject({ method: "GET", url: "/courses/019fd200-0000-7000-8000-000000000000/placement-check" });
+
+    expect(response.statusCode).toBe(401);
+    await app.close();
+  });
+
+  it("requires the internal secret and trusted user headers (POST score)", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/courses/019fd200-0000-7000-8000-000000000000/placement-check/score",
+      payload: { answers: [] },
+    });
+
+    expect(response.statusCode).toBe(401);
+    await app.close();
+  });
+
+  it("returns a real question sample, and scoring it proposes deselections without persisting anything", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+    const courseResponse = await app.inject({ method: "POST", url: "/courses", headers: adminHeaders, payload: { title: "x" } });
+    const course = courseResponse.json() as { id: string };
+    createdCourseIds.push(course.id);
+    const moduleResponse = await app.inject({
+      method: "POST",
+      url: `/courses/${course.id}/modules`,
+      headers: adminHeaders,
+      payload: { title: "Module 1", position: 0 },
+    });
+    const module_ = moduleResponse.json() as { id: string };
+    const topicResponse = await app.inject({
+      method: "POST",
+      url: `/modules/${module_.id}/topics`,
+      headers: adminHeaders,
+      payload: { title: "Topic 1", position: 0 },
+    });
+    const topic = topicResponse.json() as { id: string };
+    const conceptResponse = await app.inject({
+      method: "POST",
+      url: `/topics/${topic.id}/concepts`,
+      headers: adminHeaders,
+      payload: { title: "Concept 1", position: 0, checkpointQuestions: [{ question: "What is X?" }] },
+    });
+    const concept = conceptResponse.json() as { id: string };
+
+    const questionsResponse = await app.inject({ method: "GET", url: `/courses/${course.id}/placement-check`, headers: adminHeaders });
+    expect(questionsResponse.statusCode).toBe(200);
+    expect(questionsResponse.json()).toEqual([{ topicId: topic.id, topicTitle: "Topic 1", conceptId: concept.id, question: "What is X?" }]);
+
+    const scoreResponse = await app.inject({
+      method: "POST",
+      url: `/courses/${course.id}/placement-check/score`,
+      headers: adminHeaders,
+      payload: { answers: [{ topicId: topic.id, conceptId: concept.id, masteryDemonstrated: true }] },
+    });
+    expect(scoreResponse.statusCode).toBe(200);
+    expect(scoreResponse.json()).toEqual({ proposedDeselectedTopicIds: [topic.id], proposedStartingDifficultyTier: "advanced" });
+
+    const customizationResponse = await app.inject({ method: "GET", url: `/courses/${course.id}/customization`, headers: adminHeaders });
+    expect(customizationResponse.statusCode).toBe(404);
+    await app.close();
+  });
+});

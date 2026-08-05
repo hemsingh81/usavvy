@@ -87,6 +87,7 @@ describe("createCoursesApi", () => {
       priorityTopicIds: [],
       depth: "standard",
       explanationStyle: "concise",
+      startingDifficultyTier: null,
       estimatedHours: 6,
       updatedAt: "2026-01-15T00:00:00.000Z",
     };
@@ -105,6 +106,7 @@ describe("createCoursesApi", () => {
       priorityTopicIds: [],
       depth: "deep-dive",
       explanationStyle: "concise",
+      startingDifficultyTier: null,
       estimatedHours: 9,
       updatedAt: "2026-01-15T00:00:00.000Z",
     };

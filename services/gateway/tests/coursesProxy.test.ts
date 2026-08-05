@@ -340,3 +340,82 @@ describe("GET/PUT /courses/:id/customization", () => {
     await app.close();
   });
 });
+
+describe("GET /courses/:id/placement-check and POST /courses/:id/placement-check/score", () => {
+  it("returns 401 with no token and never calls courses (GET)", async () => {
+    const forwardToCourses = vi.fn();
+    const app = buildApp(createTestAppDeps({ forwardToCourses }));
+
+    const response = await app.inject({ method: "GET", url: `/courses/${VALID_ID}/placement-check` });
+
+    expect(response.statusCode).toBe(401);
+    expect(forwardToCourses).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("returns 401 with no token and never calls courses (POST score)", async () => {
+    const forwardToCourses = vi.fn();
+    const app = buildApp(createTestAppDeps({ forwardToCourses }));
+
+    const response = await app.inject({ method: "POST", url: `/courses/${VALID_ID}/placement-check/score`, payload: { answers: [] } });
+
+    expect(response.statusCode).toBe(401);
+    expect(forwardToCourses).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("GET forwards trusted headers derived from a valid token", async () => {
+    const forwardToCourses = vi.fn().mockResolvedValue({ status: 200, body: [] });
+    const app = buildApp(createTestAppDeps({ forwardToCourses }));
+    await app.ready();
+    const token = app.jwt.sign({ sub: "u1", role: "student", typ: "access" });
+
+    const response = await app.inject({ method: "GET", url: `/courses/${VALID_ID}/placement-check`, headers: { authorization: `Bearer ${token}` } });
+
+    expect(response.statusCode).toBe(200);
+    expect(forwardToCourses).toHaveBeenCalledWith("GET", `/courses/${VALID_ID}/placement-check`, {
+      headers: { "x-user-id": "u1", "x-user-role": "student" },
+    });
+    await app.close();
+  });
+
+  it("POST score forwards the body and trusted headers derived from a valid token", async () => {
+    const forwardToCourses = vi
+      .fn()
+      .mockResolvedValue({ status: 200, body: { proposedDeselectedTopicIds: [], proposedStartingDifficultyTier: "beginner" } });
+    const app = buildApp(createTestAppDeps({ forwardToCourses }));
+    await app.ready();
+    const token = app.jwt.sign({ sub: "u1", role: "student", typ: "access" });
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/courses/${VALID_ID}/placement-check/score`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { answers: [] },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(forwardToCourses).toHaveBeenCalledWith("POST", `/courses/${VALID_ID}/placement-check/score`, {
+      body: { answers: [] },
+      headers: { "x-user-id": "u1", "x-user-role": "student" },
+    });
+    await app.close();
+  });
+
+  it("rejects a malformed, non-UUID id with a 400 rather than forwarding it", async () => {
+    const forwardToCourses = vi.fn();
+    const app = buildApp(createTestAppDeps({ forwardToCourses }));
+    await app.ready();
+    const token = app.jwt.sign({ sub: "u1", role: "student", typ: "access" });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/courses/not-a-uuid/placement-check",
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(forwardToCourses).not.toHaveBeenCalled();
+    await app.close();
+  });
+});

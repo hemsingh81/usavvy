@@ -264,6 +264,18 @@ describe("getCourseCustomization", () => {
     });
   });
 
+  it("defaults startingDifficultyTier to null until explicitly set, then round-trips it (Story 2.5)", async () => {
+    const { course } = await seedCourseWithTwoDependentTopics();
+    const beforeSet = await saveCourseCustomization(db, "user1", course.id, {});
+    expect(beforeSet.startingDifficultyTier).toBeNull();
+
+    const afterSet = await saveCourseCustomization(db, "user1", course.id, { startingDifficultyTier: "advanced" });
+
+    expect(afterSet.startingDifficultyTier).toBe("advanced");
+    const reread = await getCourseCustomization(db, "user1", course.id);
+    expect(reread?.startingDifficultyTier).toBe("advanced");
+  });
+
   it("scopes customizations per user — a different user sees no customization", async () => {
     const { course, topicA } = await seedCourseWithTwoDependentTopics();
     await saveCourseCustomization(db, "user1", course.id, { deselectedTopicIds: [topicA.id], force: true });

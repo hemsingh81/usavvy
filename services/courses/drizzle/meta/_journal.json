@@ -29,6 +29,13 @@
       "when": 1785963304148,
       "tag": "0003_cultured_katie_power",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1785966375351,
+      "tag": "0004_adorable_paibok",
+      "breakpoints": true
     }
   ]
 }

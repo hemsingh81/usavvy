@@ -2,10 +2,15 @@ import {
   catalogListResponseSchema,
   courseCustomizationResponseSchema,
   courseResponseSchema,
+  placementCheckProposalSchema,
+  placementCheckQuestionsResponseSchema,
   type CatalogSearchParams,
   type CourseCustomizationResponse,
   type CourseResponse,
   type CourseSummary,
+  type PlacementCheckAnswerInput,
+  type PlacementCheckProposal,
+  type PlacementCheckQuestion,
   type SaveCourseCustomizationInput,
 } from "@usavvy/shared-types";
 import { apiRequest, ApiError } from "../../shared/apiClient.js";
@@ -45,6 +50,15 @@ export function createCoursesApi(apiUrl: string) {
     // `details` (the conflict list), not a swallowed generic message.
     saveCustomization: (accessToken: string, courseId: string, input: SaveCourseCustomizationInput): Promise<CourseCustomizationResponse> =>
       apiRequest(apiUrl, `/courses/${courseId}/customization`, courseCustomizationResponseSchema, { method: "PUT", body: input, accessToken }),
+    // Story 2.5: the question pool, and the (stateless — not yet saved) scored proposal.
+    getPlacementCheckQuestions: (accessToken: string, courseId: string): Promise<PlacementCheckQuestion[]> =>
+      apiRequest(apiUrl, `/courses/${courseId}/placement-check`, placementCheckQuestionsResponseSchema, { method: "GET", accessToken }),
+    scorePlacementCheck: (accessToken: string, courseId: string, answers: PlacementCheckAnswerInput[]): Promise<PlacementCheckProposal> =>
+      apiRequest(apiUrl, `/courses/${courseId}/placement-check/score`, placementCheckProposalSchema, {
+        method: "POST",
+        body: { answers },
+        accessToken,
+      }),
   };
 }
 

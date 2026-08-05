@@ -101,3 +101,14 @@ export {
   dependencyConflictSchema,
   type DependencyConflict,
 } from "./courseCustomization.js";
+export {
+  placementCheckQuestionSchema,
+  type PlacementCheckQuestion,
+  placementCheckQuestionsResponseSchema,
+  placementCheckAnswerInputSchema,
+  type PlacementCheckAnswerInput,
+  scorePlacementCheckInputSchema,
+  type ScorePlacementCheckInput,
+  placementCheckProposalSchema,
+  type PlacementCheckProposal,
+} from "./placementCheck.js";

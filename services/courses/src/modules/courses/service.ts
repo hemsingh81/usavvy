@@ -13,8 +13,12 @@ import type {
   CreateModuleInput,
   CreateTopicInput,
   DependencyConflict,
+  DifficultyTier,
   DurationBucket,
   ModuleResponse,
+  PlacementCheckAnswerInput,
+  PlacementCheckProposal,
+  PlacementCheckQuestion,
   SaveCourseCustomizationInput,
   TopicResponse,
 } from "@usavvy/shared-types";
@@ -554,6 +558,7 @@ function toCourseCustomizationResponse(
     priorityTopicIds: string[] | null;
     depth: CourseCustomizationDepth;
     explanationStyle: CourseCustomizationResponse["explanationStyle"];
+    startingDifficultyTier: CourseCustomizationResponse["startingDifficultyTier"];
     updatedAt: Date;
   },
   graph: CourseTopicGraph,
@@ -565,6 +570,7 @@ function toCourseCustomizationResponse(
     priorityTopicIds: row.priorityTopicIds ?? [],
     depth: row.depth,
     explanationStyle: row.explanationStyle,
+    startingDifficultyTier: row.startingDifficultyTier ?? null,
     estimatedHours: computeEstimatedHours(graph, deselectedTopicIds, row.depth),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -616,6 +622,9 @@ export async function saveCourseCustomization(
   const effectivePriority = priorityTopicIds ?? existing?.priorityTopicIds ?? [];
   const effectiveDepth = input.depth ?? existing?.depth ?? "standard";
   const effectiveExplanationStyle = input.explanationStyle ?? existing?.explanationStyle ?? "concise";
+  // Story 2.5: no DB-level default (unlike depth/explanationStyle) — falls through to null
+  // (AC #3's Course-level fallback, applied by the caller) until explicitly set.
+  const effectiveStartingDifficultyTier = input.startingDifficultyTier ?? existing?.startingDifficultyTier ?? null;
 
   // AC #3: only re-check conflicts when the EFFECTIVE deselected set actually changes from
   // what's already saved — comparing by value, not by whether the caller happened to
@@ -651,6 +660,7 @@ export async function saveCourseCustomization(
       priorityTopicIds: effectivePriority,
       depth: effectiveDepth,
       explanationStyle: effectiveExplanationStyle,
+      startingDifficultyTier: effectiveStartingDifficultyTier,
     })
     .onConflictDoUpdate({
       target: [courseCustomizations.userId, courseCustomizations.courseId],
@@ -659,6 +669,7 @@ export async function saveCourseCustomization(
         priorityTopicIds: effectivePriority,
         depth: effectiveDepth,
         explanationStyle: effectiveExplanationStyle,
+        startingDifficultyTier: effectiveStartingDifficultyTier,
         updatedAt: sql`now()`,
         version: sql`${courseCustomizations.version} + 1`,
       },
@@ -669,4 +680,111 @@ export async function saveCourseCustomization(
     throw new AppError("INTERNAL_ERROR", "failed to save course customization", 500);
   }
   return toCourseCustomizationResponse(courseId, row, graph);
+}
+
+const MAX_PLACEMENT_CHECK_QUESTIONS = 8;
+
+/**
+ * Story 2.5 (FR-C-5). AC #1: one representative question per live Topic (position order),
+ * skipping any Topic with no checkpoint question on any of its Concepts — no question bank
+ * or generation exists; this samples Story 2.1's existing checkpointQuestions as-is.
+ */
+export async function getPlacementCheckQuestions(db: Db, courseId: string): Promise<PlacementCheckQuestion[]> {
+  const [course] = await db.select().from(courses).where(eq(courses.id, courseId));
+  if (!course) {
+    throw new AppError("NOT_FOUND", "course not found", 404);
+  }
+
+  const moduleRows = await db.select({ id: modules.id }).from(modules).where(eq(modules.courseId, courseId));
+  const moduleIds = moduleRows.map((m) => m.id);
+  const topicRows =
+    moduleIds.length > 0
+      ? await db
+          .select({ id: topics.id, title: topics.title })
+          .from(topics)
+          .where(and(inArray(topics.moduleId, moduleIds), isNull(topics.archivedAt)))
+          .orderBy(topics.position, topics.id)
+      : [];
+  const topicIds = topicRows.map((t) => t.id);
+
+  const conceptRows =
+    topicIds.length > 0
+      ? await db
+          .select({ id: concepts.id, topicId: concepts.topicId, checkpointQuestions: concepts.checkpointQuestions })
+          .from(concepts)
+          .where(inArray(concepts.topicId, topicIds))
+          .orderBy(concepts.position, concepts.id)
+      : [];
+
+  const firstQuestionByTopicId = new Map<string, { conceptId: string; question: string }>();
+  for (const concept of conceptRows) {
+    if (firstQuestionByTopicId.has(concept.topicId)) {
+      continue;
+    }
+    const firstQuestion = concept.checkpointQuestions?.[0];
+    if (!firstQuestion) {
+      continue;
+    }
+    firstQuestionByTopicId.set(concept.topicId, { conceptId: concept.id, question: firstQuestion.question });
+  }
+
+  const questions: PlacementCheckQuestion[] = [];
+  for (const topic of topicRows) {
+    const found = firstQuestionByTopicId.get(topic.id);
+    if (!found) {
+      continue;
+    }
+    questions.push({ topicId: topic.id, topicTitle: topic.title, conceptId: found.conceptId, question: found.question });
+    if (questions.length >= MAX_PLACEMENT_CHECK_QUESTIONS) {
+      break;
+    }
+  }
+  return questions;
+}
+
+/**
+ * AC #4: 0 answers (or all `masteryDemonstrated: false`) resolves to "beginner", the
+ * course's easiest tier, without error. AC #2: all-mastery resolves to "advanced". No FR
+ * names these exact thresholds — a documented product default, same class as Story 2.2's
+ * duration buckets and Story 2.4's depth multipliers.
+ */
+function difficultyTierFromMasteryRatio(masteryRatio: number): DifficultyTier {
+  if (masteryRatio >= 1) {
+    return "advanced";
+  }
+  if (masteryRatio <= 0) {
+    return "beginner";
+  }
+  return "intermediate";
+}
+
+/**
+ * Story 2.5 (FR-C-5). Pure, stateless — no database write. AC #2 requires the learner to
+ * see and manually override any auto-deselection BEFORE confirming; persisting this result
+ * directly would save an unwanted deselection before that review ever happens. The caller
+ * applies (or discards) this proposal through the existing saveCourseCustomization
+ * (Story 2.4) instead.
+ */
+export async function scorePlacementCheck(db: Db, courseId: string, answers: PlacementCheckAnswerInput[]): Promise<PlacementCheckProposal> {
+  const graph = await getCourseTopicGraph(db, courseId);
+
+  for (const answer of answers) {
+    if (!graph.topicIds.has(answer.topicId)) {
+      throw new AppError("VALIDATION_ERROR", `invalid topic reference: topic "${answer.topicId}" does not exist in this Course`, 400);
+    }
+    if (!graph.conceptTopicId.has(answer.conceptId)) {
+      throw new AppError("VALIDATION_ERROR", `invalid concept reference: concept "${answer.conceptId}" does not exist in this Course`, 400);
+    }
+  }
+
+  const masteryCount = answers.filter((answer) => answer.masteryDemonstrated).length;
+  const masteryRatio = answers.length > 0 ? masteryCount / answers.length : 0;
+  // Review-lesson from Story 2.4, applied proactively: dedupe before handing this to the
+  // frontend, which will route it through saveCourseCustomization's own deduping write path.
+  const proposedDeselectedTopicIds = [...new Set(answers.filter((answer) => answer.masteryDemonstrated).map((answer) => answer.topicId))];
+
+  return {
+    proposedDeselectedTopicIds,
+    proposedStartingDifficultyTier: difficultyTierFromMasteryRatio(masteryRatio),
+  };
 }

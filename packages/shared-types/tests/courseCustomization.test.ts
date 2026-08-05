@@ -28,9 +28,14 @@ describe("saveCourseCustomizationInputSchema", () => {
         priorityTopicIds: ["t2"],
         depth: "deep-dive",
         explanationStyle: "analogy-first",
+        startingDifficultyTier: "advanced",
         force: true,
       }),
     ).not.toThrow();
+  });
+
+  it("rejects an invalid startingDifficultyTier (Story 2.5)", () => {
+    expect(() => saveCourseCustomizationInputSchema.parse({ startingDifficultyTier: "expert" })).toThrow();
   });
 
   it("rejects an invalid explanationStyle", () => {
@@ -45,6 +50,7 @@ describe("courseCustomizationResponseSchema", () => {
     priorityTopicIds: ["t2"],
     depth: "standard",
     explanationStyle: "concise",
+    startingDifficultyTier: "intermediate",
     estimatedHours: 7.5,
     updatedAt: "2026-01-15T00:00:00.000Z",
   };
@@ -55,6 +61,15 @@ describe("courseCustomizationResponseSchema", () => {
 
   it("accepts a null estimatedHours (course has no estimatedDurationHours)", () => {
     expect(() => courseCustomizationResponseSchema.parse({ ...VALID_RESPONSE, estimatedHours: null })).not.toThrow();
+  });
+
+  it("accepts a null startingDifficultyTier (Story 2.5: never set yet)", () => {
+    expect(() => courseCustomizationResponseSchema.parse({ ...VALID_RESPONSE, startingDifficultyTier: null })).not.toThrow();
+  });
+
+  it("rejects a response missing startingDifficultyTier entirely (Story 2.5)", () => {
+    const rest = Object.fromEntries(Object.entries(VALID_RESPONSE).filter(([k]) => k !== "startingDifficultyTier"));
+    expect(() => courseCustomizationResponseSchema.parse(rest)).toThrow();
   });
 
   it("rejects a response missing depth", () => {

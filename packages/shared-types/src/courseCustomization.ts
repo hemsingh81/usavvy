@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { explanationStyleSchema } from "./preferences.js";
+import { difficultyTierSchema } from "./courseHierarchy.js";
 
 // Story 2.4 (FR-C-4). No exact depth levels/multipliers are named anywhere in the
 // PRD/epics beyond these three labels — the multiplier values applied to them are a
@@ -17,6 +18,9 @@ export const saveCourseCustomizationInputSchema = z.object({
   priorityTopicIds: z.array(z.string()).optional(),
   depth: courseCustomizationDepthSchema.optional(),
   explanationStyle: explanationStyleSchema.optional(),
+  // Story 2.5 (FR-C-5): settable manually (AC #2's "can... manually override") or via an
+  // applied placement-check proposal — both go through this same save path.
+  startingDifficultyTier: difficultyTierSchema.optional(),
   force: z.boolean().optional(),
 });
 
@@ -28,6 +32,10 @@ export const courseCustomizationResponseSchema = z.object({
   priorityTopicIds: z.array(z.string()),
   depth: courseCustomizationDepthSchema,
   explanationStyle: explanationStyleSchema,
+  // Story 2.5 (FR-C-5): null until a placement check is confirmed or the learner manually
+  // sets one — AC #3's Course-level fallback is applied by the caller (apps/web), which is
+  // the one place that already has both this value and the Course's own `level` in hand.
+  startingDifficultyTier: difficultyTierSchema.nullable(),
   estimatedHours: z.number().nullable(),
   updatedAt: z.string(),
 });

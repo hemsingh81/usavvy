@@ -22,6 +22,18 @@ function renderWithSession(session: { accessToken: string } | null, courseId = "
   );
 }
 
+function renderWithPlacementProposal(session: { accessToken: string }, proposal: unknown, courseId = "c1") {
+  useAuthMock.mockReturnValue({ session });
+  return render(
+    <MemoryRouter initialEntries={[{ pathname: `/courses/${courseId}/customize`, state: { placementProposal: proposal } }]}>
+      <Routes>
+        <Route path="/courses/:id/customize" element={<CustomizePage />} />
+        <Route path="/login" element={<div>login page</div>} />
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
 function jsonResponse(body: unknown) {
   return Promise.resolve({ ok: true, json: () => Promise.resolve(body) } as unknown as Response);
 }
@@ -72,7 +84,18 @@ function mockFetch(overrides: { customization?: Response | Promise<Response>; sa
   return vi.fn().mockImplementation((url: string, init?: { method?: string; body?: string }) => {
     if (url.endsWith("/courses/c1/customization") && init?.method === "PUT") {
       const body: unknown = init.body ? JSON.parse(init.body) : {};
-      return overrides.save ? overrides.save(body) : jsonResponse({ courseId: "c1", deselectedTopicIds: [], priorityTopicIds: [], depth: "standard", explanationStyle: "concise", estimatedHours: 12, updatedAt: "2026-01-15T00:00:00.000Z" });
+      return overrides.save
+        ? overrides.save(body)
+        : jsonResponse({
+            courseId: "c1",
+            deselectedTopicIds: [],
+            priorityTopicIds: [],
+            depth: "standard",
+            explanationStyle: "concise",
+            startingDifficultyTier: null,
+            estimatedHours: 12,
+            updatedAt: "2026-01-15T00:00:00.000Z",
+          });
     }
     if (url.endsWith("/courses/c1/customization")) {
       return overrides.customization ?? errorResponse("NOT_FOUND", "no customization saved yet");
@@ -105,7 +128,7 @@ describe("CustomizePage", () => {
     renderWithSession({ accessToken: "a-token" });
 
     await waitFor(() => expect(screen.getByText("Basics")).toBeInTheDocument());
-    expect(screen.getByText("Advanced")).toBeInTheDocument();
+    expect(screen.getByLabelText("I already know this: Advanced")).toBeInTheDocument();
     expect(screen.getByText(/Estimated hours: 12h/)).toBeInTheDocument();
   });
 
@@ -127,6 +150,7 @@ describe("CustomizePage", () => {
           priorityTopicIds: ["t2"],
           depth: "deep-dive",
           explanationStyle: "detailed",
+          startingDifficultyTier: "advanced",
           estimatedHours: 9,
           updatedAt: "2026-01-15T00:00:00.000Z",
         }),
@@ -140,6 +164,7 @@ describe("CustomizePage", () => {
     expect(screen.getByLabelText("Depth")).toHaveValue("deep-dive");
     expect(screen.getByLabelText("Explanation style")).toHaveValue("detailed");
     expect(screen.getByText(/Estimated hours: 9h/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Starting difficulty")).toHaveValue("advanced");
   });
 
   it("deselecting a Topic recalculates and displays the new estimated hours (AC #1)", async () => {
@@ -153,6 +178,7 @@ describe("CustomizePage", () => {
             priorityTopicIds: [],
             depth: "standard",
             explanationStyle: "analogy-first",
+            startingDifficultyTier: null,
             estimatedHours: 6,
             updatedAt: "2026-01-15T00:00:00.000Z",
           }),
@@ -179,6 +205,7 @@ describe("CustomizePage", () => {
             priorityTopicIds: [],
             depth: "deep-dive",
             explanationStyle: "analogy-first",
+            startingDifficultyTier: null,
             estimatedHours: 18,
             updatedAt: "2026-01-15T00:00:00.000Z",
           }),
@@ -211,6 +238,7 @@ describe("CustomizePage", () => {
             priorityTopicIds: [],
             depth: "standard",
             explanationStyle: "analogy-first",
+            startingDifficultyTier: null,
             estimatedHours: 6,
             updatedAt: "2026-01-15T00:00:00.000Z",
           });
@@ -230,6 +258,28 @@ describe("CustomizePage", () => {
 
     await waitFor(() => expect(screen.getByLabelText("I already know this: Basics")).toBeChecked());
     expect(saveCallCount).toBe(2);
+  });
+
+  it("applies an incoming placement-check proposal as a reviewable, not-yet-saved state (Story 2.5, AC #2)", async () => {
+    const fetchMock = mockFetch();
+    vi.stubGlobal("fetch", fetchMock);
+    renderWithPlacementProposal(
+      { accessToken: "a-token" },
+      { proposedDeselectedTopicIds: ["t1"], proposedStartingDifficultyTier: "advanced" },
+    );
+
+    await waitFor(() => expect(screen.getByText("Basics")).toBeInTheDocument());
+    expect(screen.getByLabelText("I already know this: Basics")).toBeChecked();
+    expect(screen.getByLabelText("Starting difficulty")).toHaveValue("advanced");
+    expect(screen.getByText("Placement check results — review the topics below, then confirm.")).toBeInTheDocument();
+    const putCallsBeforeConfirm = fetchMock.mock.calls.filter((call) => (call[1] as { method?: string } | undefined)?.method === "PUT").length;
+    expect(putCallsBeforeConfirm).toBe(0);
+
+    await userEvent.setup().click(screen.getByRole("button", { name: "Confirm results" }));
+
+    await waitFor(() => expect(screen.queryByText("Placement check results — review the topics below, then confirm.")).not.toBeInTheDocument());
+    const putCallsAfterConfirm = fetchMock.mock.calls.filter((call) => (call[1] as { method?: string } | undefined)?.method === "PUT").length;
+    expect(putCallsAfterConfirm).toBe(1);
   });
 
   it("shows a distinguishable error rather than a blank page when the initial fetch fails", async () => {

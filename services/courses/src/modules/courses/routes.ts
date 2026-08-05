@@ -9,6 +9,7 @@ import {
   createModuleInputSchema,
   createTopicInputSchema,
   saveCourseCustomizationInputSchema,
+  scorePlacementCheckInputSchema,
 } from "@usavvy/shared-types";
 import type { Db } from "../../db/client.js";
 import {
@@ -19,7 +20,9 @@ import {
   createTopic,
   getCourse,
   getCourseCustomization,
+  getPlacementCheckQuestions,
   saveCourseCustomization,
+  scorePlacementCheck,
   searchCourses,
 } from "./service.js";
 
@@ -120,5 +123,21 @@ export function registerCoursesRoutes(app: FastifyInstance, deps: CoursesRouteDe
     const { id } = parseOrThrow(idParamsSchema, request.params);
     const body = parseOrThrow(saveCourseCustomizationInputSchema, request.body);
     reply.send(await saveCourseCustomization(deps.db, userId, id, body));
+  });
+
+  // Story 2.5: auth-only, matching GET/PUT .../customization's identical precedent.
+  app.get("/courses/:id/placement-check", async (request, reply) => {
+    requireTrustedUser(request);
+    const { id } = parseOrThrow(idParamsSchema, request.params);
+    reply.send(await getPlacementCheckQuestions(deps.db, id));
+  });
+
+  // Stateless — no persistence (AC #2's "review before confirming"; the caller applies
+  // this via PUT .../customization instead).
+  app.post("/courses/:id/placement-check/score", async (request, reply) => {
+    requireTrustedUser(request);
+    const { id } = parseOrThrow(idParamsSchema, request.params);
+    const body = parseOrThrow(scorePlacementCheckInputSchema, request.body);
+    reply.send(await scorePlacementCheck(deps.db, id, body.answers));
   });
 }

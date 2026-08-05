@@ -112,6 +112,11 @@ export const courseCustomizations = pgTable(
     priorityTopicIds: text("priority_topic_ids").array(),
     depth: text("depth").notNull().default("standard").$type<CourseCustomizationDepth>(),
     explanationStyle: text("explanation_style").notNull().default("concise").$type<ExplanationStyle>(),
+    // Story 2.5 (FR-C-5): null until a placement check is confirmed or the learner
+    // manually sets one — no DB-level default, unlike depth/explanationStyle above,
+    // since "unset" is itself a meaningful state here (falls back to the Course's own
+    // `level` at display time), not something with a sensible fixed default.
+    startingDifficultyTier: text("starting_difficulty_tier").$type<DifficultyTier>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
     version: integer("version").notNull().default(1),

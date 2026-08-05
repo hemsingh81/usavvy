@@ -86,4 +86,20 @@ export function registerCoursesProxyRoutes(app: FastifyInstance, deps: CoursesPr
     const result = await deps.forwardToCourses("PUT", `/courses/${id}/customization`, { body: request.body, headers: trustedHeaders(request) });
     reply.code(result.status).send(result.body);
   });
+
+  // Story 2.5: same auth-only gate as every other route here.
+  app.get("/courses/:id/placement-check", { preHandler: requireAuth }, async (request, reply) => {
+    const id = requireValidId((request.params as { id: string }).id);
+    const result = await deps.forwardToCourses("GET", `/courses/${id}/placement-check`, { headers: trustedHeaders(request) });
+    reply.code(result.status).send(result.body);
+  });
+
+  app.post("/courses/:id/placement-check/score", { preHandler: requireAuth }, async (request, reply) => {
+    const id = requireValidId((request.params as { id: string }).id);
+    const result = await deps.forwardToCourses("POST", `/courses/${id}/placement-check/score`, {
+      body: request.body,
+      headers: trustedHeaders(request),
+    });
+    reply.code(result.status).send(result.body);
+  });
 }

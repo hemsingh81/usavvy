@@ -1,0 +1,1 @@
+ALTER TABLE "course_customizations" ADD COLUMN "starting_difficulty_tier" text;

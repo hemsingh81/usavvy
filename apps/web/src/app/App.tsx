@@ -5,7 +5,7 @@ import { ColorThemeProvider } from "./ColorThemeProvider.js";
 import { NotificationsProvider } from "./useNotifications.js";
 import { AppHeader } from "./AppHeader.js";
 import { AuthProvider, LoginPage, SignUpPage, VerifyEmailPage } from "../modules/auth/index.js";
-import { CatalogPage, CourseDetailPage, CustomizePage } from "../modules/courses/index.js";
+import { CatalogPage, CourseDetailPage, CustomizePage, PlacementCheckPage } from "../modules/courses/index.js";
 import {
   AccountDeletionPage,
   ActivityHistoryPage,
@@ -67,6 +67,7 @@ export function App() {
               <Route path="/catalog" element={<CatalogPage />} />
               <Route path="/courses/:id" element={<CourseDetailPage />} />
               <Route path="/courses/:id/customize" element={<CustomizePage />} />
+              <Route path="/courses/:id/placement-check" element={<PlacementCheckPage />} />
               <Route path="*" element={<NotFoundPage />} />
             </Routes>
           </BrowserRouter>
