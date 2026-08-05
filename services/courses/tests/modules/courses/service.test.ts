@@ -1,10 +1,21 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import postgres from "postgres";
 import { eq } from "drizzle-orm";
+import { can } from "@usavvy/config";
 import { createDb, type Db } from "../../../src/db/client.js";
 import { concepts, conceptPrerequisites, courses, modules, topics } from "../../../src/db/schema.js";
 import { loadCoursesConfig } from "../../../src/config.js";
 import { archiveModule, createConcept, createCourse, createModule, createTopic, getCourse } from "../../../src/modules/courses/service.js";
+
+// Review finding (Blind Hunter): every write function checked can(role, "create", ...)
+// regardless of what it actually does — archiveModule is semantically a delete but never
+// checked the "delete" permission. Wraps the REAL can() (vi.fn(can), not a mock
+// replacement) so every other test's actual allow/deny behavior is unaffected; only used
+// to inspect which action string each operation passes.
+vi.mock("@usavvy/config", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@usavvy/config")>();
+  return { ...actual, can: vi.fn(actual.can) };
+});
 
 const config = loadCoursesConfig(process.env);
 const sql = postgres(config.databaseUrl);
@@ -48,6 +59,25 @@ async function seedCourse(title = "Test Course") {
   return course;
 }
 
+describe("RBAC action checked per operation (review finding)", () => {
+  it("createCourse checks the 'create' action", async () => {
+    vi.mocked(can).mockClear();
+    await seedCourse();
+    expect(can).toHaveBeenCalledWith("admin", "create", "courseHierarchy");
+  });
+
+  it("archiveModule checks the 'delete' action, not 'create'", async () => {
+    const course = await seedCourse();
+    const module_ = await createModule(db, "admin", course.id, { title: "x", position: 0 });
+    vi.mocked(can).mockClear();
+
+    await archiveModule(db, "admin", module_.id);
+
+    expect(can).toHaveBeenCalledWith("admin", "delete", "courseHierarchy");
+    expect(can).not.toHaveBeenCalledWith("admin", "create", "courseHierarchy");
+  });
+});
+
 describe("createCourse", () => {
   it("creates a course with the given title", async () => {
     const course = await seedCourse("Intro to Algebra");
@@ -90,6 +120,12 @@ describe("createTopic", () => {
     await expect(createTopic(db, "admin", "019fd200-0000-7000-8000-000000000000", { title: "x", position: 0 })).rejects.toMatchObject({
       code: "NOT_FOUND",
     });
+  });
+
+  it("rejects a non-admin role (403) (review finding: only createCourse/createModule/archiveModule had this test before)", async () => {
+    const course = await seedCourse();
+    const module_ = await createModule(db, "admin", course.id, { title: "Module 1", position: 0 });
+    await expect(createTopic(db, "student", module_.id, { title: "x", position: 0 })).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 });
 
@@ -164,6 +200,27 @@ describe("createConcept", () => {
     const result = await getCourse(db, course.id);
     expect(result.modules[0]?.topics[0]?.concepts).toEqual([]);
   });
+
+  it("rejects a non-admin role (403)", async () => {
+    const { topic } = await seedTopic();
+    await expect(createConcept(db, "student", topic.id, { title: "x", position: 0 })).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("dedupes a duplicate prerequisite id (review finding, confirmed independently by both Blind Hunter and Edge Case Hunter): the same id listed twice must not produce two prerequisite entries", async () => {
+    const { topic } = await seedTopic();
+    const first = await createConcept(db, "admin", topic.id, { title: "Basics", position: 0 });
+
+    const second = await createConcept(db, "admin", topic.id, {
+      title: "Advanced",
+      position: 1,
+      prerequisiteConceptIds: [first.id, first.id],
+    });
+
+    expect(second.prerequisites).toEqual([{ conceptId: first.id, archived: false }]);
+
+    const rows = await db.select().from(conceptPrerequisites).where(eq(conceptPrerequisites.conceptId, second.id));
+    expect(rows).toHaveLength(1);
+  });
 });
 
 describe("archiveModule", () => {
@@ -180,6 +237,37 @@ describe("archiveModule", () => {
     expect(archivedModule.archivedAt).not.toBeNull();
     expect(archivedModule.topics[0]!.archivedAt).not.toBeNull();
     expect(archivedModule.topics[0]!.concepts[0]!.archivedAt).not.toBeNull();
+  });
+
+  it("bumps updatedAt/version on every level touched by the cascade (review finding: the archive cascade previously left both at their initial values, unlike every other write in this codebase's Consistency Conventions)", async () => {
+    const course = await seedCourse();
+    const module_ = await createModule(db, "admin", course.id, { title: "Module 1", position: 0 });
+    const topic = await createTopic(db, "admin", module_.id, { title: "Topic 1", position: 0 });
+    await createConcept(db, "admin", topic.id, { title: "Concept 1", position: 0 });
+
+    await archiveModule(db, "admin", module_.id);
+
+    const [moduleRow] = await db.select().from(modules).where(eq(modules.id, module_.id));
+    const [topicRow] = await db.select().from(topics).where(eq(topics.id, topic.id));
+    expect(moduleRow!.version).toBe(2);
+    expect(moduleRow!.updatedAt.getTime()).toBeGreaterThan(moduleRow!.createdAt.getTime());
+    expect(topicRow!.version).toBe(2);
+    expect(topicRow!.updatedAt.getTime()).toBeGreaterThan(topicRow!.createdAt.getTime());
+  });
+
+  it("is idempotent — archiving an already-archived module a second time does not re-stamp archivedAt (review finding: Edge Case Hunter)", async () => {
+    const course = await seedCourse();
+    const module_ = await createModule(db, "admin", course.id, { title: "Module 1", position: 0 });
+
+    await archiveModule(db, "admin", module_.id);
+    const [firstArchive] = await db.select().from(modules).where(eq(modules.id, module_.id));
+
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await archiveModule(db, "admin", module_.id);
+    const [secondArchive] = await db.select().from(modules).where(eq(modules.id, module_.id));
+
+    expect(secondArchive!.archivedAt?.getTime()).toBe(firstArchive!.archivedAt?.getTime());
+    expect(secondArchive!.version).toBe(firstArchive!.version);
   });
 
   it("flags (does not silently drop) a prerequisite pointing into an archived subtree (AC #3)", async () => {
@@ -230,6 +318,48 @@ describe("getCourse", () => {
         },
       ],
     });
+  });
+
+  it("returns every Concept-level field on the RETRIEVAL path, not just at creation time (review finding: the original AC #4 test only asserted title/difficultyTier on read)", async () => {
+    const course = await seedCourse("Full Course 2");
+    const module_ = await createModule(db, "admin", course.id, { title: "Module 1", position: 0 });
+    const topic = await createTopic(db, "admin", module_.id, { title: "Topic 1", position: 0 });
+    const prerequisite = await createConcept(db, "admin", topic.id, { title: "Prereq", position: 0 });
+    await createConcept(db, "admin", topic.id, {
+      title: "Full Concept",
+      position: 1,
+      objectives: ["Objective A", "Objective B"],
+      sourceMaterialRefs: ["doc-1", "doc-2"],
+      boardAssetRefs: ["asset-1"],
+      checkpointQuestions: [{ question: "What is X?" }],
+      difficultyTier: "advanced",
+      prerequisiteConceptIds: [prerequisite.id],
+    });
+
+    const result = await getCourse(db, course.id);
+
+    const fullConcept = result.modules[0]!.topics[0]!.concepts.find((c) => c.title === "Full Concept")!;
+    expect(fullConcept).toMatchObject({
+      objectives: ["Objective A", "Objective B"],
+      sourceMaterialRefs: ["doc-1", "doc-2"],
+      boardAssetRefs: ["asset-1"],
+      checkpointQuestions: [{ question: "What is X?" }],
+      difficultyTier: "advanced",
+      prerequisites: [{ conceptId: prerequisite.id, archived: false }],
+      archivedAt: null,
+    });
+  });
+
+  it("orders siblings deterministically even when positions collide (review finding: Edge Case Hunter — no tiebreaker meant Postgres gave no ordering guarantee)", async () => {
+    const course = await seedCourse();
+    const first = await createModule(db, "admin", course.id, { title: "First", position: 0 });
+    const second = await createModule(db, "admin", course.id, { title: "Second", position: 0 });
+
+    const result = await getCourse(db, course.id);
+
+    // uuidv7 ids are time-ordered, so ordering by (position, id) as a tiebreaker is
+    // equivalent to insertion order here — proving the tiebreaker is actually applied.
+    expect(result.modules.map((m) => m.id)).toEqual([first.id, second.id]);
   });
 
   it("returns 404 for a non-existent course", async () => {

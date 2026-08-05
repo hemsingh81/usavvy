@@ -28,6 +28,19 @@ describe("POST /courses", () => {
     expect(forwardToCourses).toHaveBeenCalledWith("POST", "/courses", { body: { title: "x" }, headers: { "x-user-id": "u1", "x-user-role": "admin" } });
     await app.close();
   });
+
+  it("forwards a non-admin token's write attempt too (review finding: RBAC is enforced at the courses service layer, not re-implemented at the gateway — mirrors how core's own routes, not gateway's, own every authorization decision)", async () => {
+    const forwardToCourses = vi.fn().mockResolvedValue({ status: 403, body: { error: { code: "FORBIDDEN", message: "not permitted" } } });
+    const app = buildApp(createTestAppDeps({ forwardToCourses }));
+    await app.ready();
+    const token = app.jwt.sign({ sub: "u1", role: "student", typ: "access" });
+
+    const response = await app.inject({ method: "POST", url: "/courses", headers: { authorization: `Bearer ${token}` }, payload: { title: "x" } });
+
+    expect(response.statusCode).toBe(403);
+    expect(forwardToCourses).toHaveBeenCalledWith("POST", "/courses", { body: { title: "x" }, headers: { "x-user-id": "u1", "x-user-role": "student" } });
+    await app.close();
+  });
 });
 
 describe("POST /courses/:id/modules", () => {

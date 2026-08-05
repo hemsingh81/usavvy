@@ -112,3 +112,9 @@
 ## Deferred from: code review of story-1-11 (2026-08-05)
 
 - No CSS overflow guard (`word-break`) for a very long `label`/`sourceUrl` in the Activity History timeline entry row — cosmetic only, on a code path with zero real data to overflow yet (`getActivityHistory()` always returns `[]` today). Revisit once Epic 3/6/7 actually populates entries with real content lengths.
+
+## Deferred from: code review of story-2-1 (2026-08-06)
+
+- `archiveModule`'s existence check (`SELECT` for a 404) runs before opening the transaction rather than inside it — a TOCTOU window if a module is deleted between the check and the transaction. Not currently exploitable: no route can hard-delete a module, and archiving is now idempotent (a second archive attempt just no-ops), so the only race is two concurrent first-time archives, which both still succeed harmlessly. Revisit if a hard-delete path is ever added.
+- No self-reference or circular-prerequisite validation (Concept A listing itself, or A→B→A cycles) — not currently constructible: ids are server-generated and only known after insert, and no update/edit endpoint exists for an already-created Concept's prerequisites, so a cycle would require adding a prerequisite to an already-created concept, which this story's API has no route for. Must be added before any future story ships a "PATCH /concepts/:id/prerequisites"-style endpoint, since no cycle-detection code exists anywhere today.
+- `concept_prerequisites` has no DB-level unique constraint on `(concept_id, prerequisite_concept_id)` — the service layer now dedupes on create, but an out-of-band write (manual DB edit, a future migration bug, or a different code path that bypasses `createConcept`) could still produce a duplicate row. No table in this schema uses unique constraints for cross-column invariants beyond primary keys — a schema-wide convention change, not story-scoped.
