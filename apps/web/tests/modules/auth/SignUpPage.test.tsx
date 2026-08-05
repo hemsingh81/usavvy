@@ -29,6 +29,8 @@ function mockGoogleAuthThenMe(meOverrides: Record<string, unknown> = {}) {
             isMinor: null,
             parentalConsentStatus: null,
             onboardingComplete: false,
+            displayName: "e",
+            memberSince: "2026-01-01T00:00:00.000Z",
             ...meOverrides,
           }),
       } as unknown as Response);
