@@ -97,8 +97,10 @@ export const createCourseInputSchema = z.object({
   level: difficultyTierSchema.optional(),
   estimatedDurationHours: z.number().nonnegative().optional(),
   status: courseStatusSchema.optional(),
-  prerequisites: z.array(z.string()).optional(),
-  outcomes: z.array(z.string()).optional(),
+  // Review finding: a bare z.string() let an empty-string entry through, which rendered as
+  // an invisible, unlabeled bullet on the detail page.
+  prerequisites: z.array(z.string().min(1)).optional(),
+  outcomes: z.array(z.string().min(1)).optional(),
   sampleBoardAssetRef: z.string().optional(),
 });
 

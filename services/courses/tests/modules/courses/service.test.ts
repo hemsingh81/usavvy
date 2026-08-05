@@ -105,6 +105,18 @@ describe("createCourse", () => {
     });
   });
 
+  it("dedupes a duplicate prerequisite/outcome entry (review finding: duplicate strings collided on React key)", async () => {
+    const course = await createCourse(db, "admin", {
+      title: "Duplicate Detail Fields",
+      prerequisites: ["Basic arithmetic", "Basic arithmetic"],
+      outcomes: ["Solve linear equations", "Solve linear equations"],
+    });
+    createdCourseIds.push(course.id);
+
+    expect(course.prerequisites).toEqual(["Basic arithmetic"]);
+    expect(course.outcomes).toEqual(["Solve linear equations"]);
+  });
+
   it("rejects a non-admin role (403)", async () => {
     await expect(createCourse(db, "student", { title: "x" })).rejects.toMatchObject({ code: "FORBIDDEN", statusCode: 403 });
   });

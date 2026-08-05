@@ -81,8 +81,11 @@ export function CourseDetailPage() {
             <section>
               <h2>Prerequisites</h2>
               <ul>
-                {view.course.prerequisites.map((prerequisite) => (
-                  <li key={prerequisite}>{prerequisite}</li>
+                {view.course.prerequisites.map((prerequisite, index) => (
+                  // Review finding: a plain string as `key` collided when the same
+                  // prerequisite was listed twice; deduped at write time (createCourse) but
+                  // the index is used here too since a string value is never a real identity.
+                  <li key={index}>{prerequisite}</li>
                 ))}
               </ul>
             </section>
@@ -92,8 +95,8 @@ export function CourseDetailPage() {
             <section>
               <h2>Outcomes</h2>
               <ul>
-                {view.course.outcomes.map((outcome) => (
-                  <li key={outcome}>{outcome}</li>
+                {view.course.outcomes.map((outcome, index) => (
+                  <li key={index}>{outcome}</li>
                 ))}
               </ul>
             </section>

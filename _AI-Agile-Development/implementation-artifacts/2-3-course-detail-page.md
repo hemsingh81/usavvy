@@ -4,7 +4,7 @@ baseline_commit: 2e1abbe
 
 # Story 2.3: Course detail page
 
-Status: review
+Status: done
 
 *(Epic 2, FR-C-3. This is the first `apps/web` UI to consume `GET /courses/:id` — already built in Story 2.1 and already returning the full Module→Topic→Concept tree with everything the syllabus needs — so no new backend route is required. `Course` gains three new fields this story: `prerequisites`, `outcomes`, and a `sampleBoardAssetRef`, added incrementally to the same table exactly as Story 2.2 added `subject`/`level`/`estimatedDurationHours`/`status` — no AC before this one named them, so building them earlier would have been the "pre-build for a story that hasn't started" mistake every prior Epic 2 story's Dev Notes warned against.)*
 
@@ -125,7 +125,25 @@ Claude Sonnet 5
 - `apps/web/tests/modules/courses/api.test.ts` (modified)
 - `apps/web/tests/modules/courses/CourseDetailPage.test.tsx` (new)
 - `apps/web/tests/modules/courses/CatalogPage.test.tsx` (modified — card-link test)
+- `_AI-Agile-Development/implementation-artifacts/deferred-work.md` (modified — review-round deferred findings)
+
+## Senior Developer Review (AI)
+
+Three parallel adversarial reviewers (Blind Hunter, Edge Case Hunter, Acceptance Auditor) ran against the full diff (`2e1abbe..28c03d8`).
+
+**Acceptance Auditor:** all 4 ACs independently verified SATISFIED against real DB- and DOM-backed tests.
+
+**Confirmed and patched (both independently flagged by two reviewers):**
+1. **Empty-string entries in `prerequisites`/`outcomes` rendered as invisible, unlabeled bullets** — `createCourseInputSchema` accepted `""` as a legal array element with no way to visually distinguish it from a rendering glitch. Fixed by requiring `.min(1)` on every array element (`packages/shared-types/src/courseHierarchy.ts`). Regression test added and proven to fail before / pass after (`packages/shared-types/tests/courseHierarchy.test.ts`, "rejects an empty-string entry...").
+2. **A duplicate `prerequisites`/`outcomes` string collided on React's `key` prop** (`CourseDetailPage.tsx` used the string value itself as `key`) — nothing deduped these arrays on write, unlike `createConcept`'s established `[...new Set(...)]` precedent for `prerequisiteConceptIds`. Fixed `createCourse` to dedupe both arrays the same way. Regression test added and proven to fail before / pass after (`services/courses/tests/modules/courses/service.test.ts`, "dedupes a duplicate prerequisite/outcome entry..."). Additionally switched `CourseDetailPage.tsx`'s list rendering to index-based keys as defense-in-depth (a string value is never a real identity; not independently unit-testable via React Testing Library, since keys aren't DOM-observable).
+
+**Checked and ruled out (false positive):** Blind Hunter flagged a possible unhandled-crash risk for a malformed (non-UUID) course id reaching `getCourse`'s Postgres query. Verified live via curl (`GET /courses/not-a-real-id`) — `routes.ts`'s existing `idParamsSchema = z.object({ id: z.uuid() })` already rejects it with a clean 400 `VALIDATION_ERROR` before `getCourse` is ever called. No fix needed.
+
+**Deferred (documented in `deferred-work.md`, not blocking):** `sampleBoardAssetRef` has no URL-format validation (matches `Concept.boardAssetRefs`' identical existing convention — no ref-shaped field in this codebase validates its own format); `useParams`'s `id` being `undefined` has no visible fallback UI (latent, unreachable via the current route table); a zero-Module/zero-Topic course shows an empty list with no "nothing here yet" messaging; a 401 mid-session shows the same generic error as any other failure (pre-existing, app-wide gap, not introduced by this story).
+
+Post-patch: full monorepo regression (689 tests across 8 workspaces), `tsc --noEmit` and `eslint .` clean.
 
 ## Change Log
 
 - 2026-08-06: Implemented Course detail page (Tasks 1-4): shared contract extension, `services/courses` persistence for the 3 new fields (no new route needed), `apps/web` CourseDetailPage plus catalog card linking. Live-verified end-to-end. Status → review.
+- 2026-08-06: Code review round — fixed empty-string prerequisite/outcome entries and duplicate-string React-key collision (both proven via failing-then-passing regression tests), plus a defensive index-key hardening. Deferred 4 non-blocking findings; ruled out one false-positive (malformed id already cleanly rejected by existing route validation). Status → done.

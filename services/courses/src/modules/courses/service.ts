@@ -42,9 +42,11 @@ export async function createCourse(db: Db, role: Role, input: CreateCourseInput)
       // column's own DEFAULT 'draft' is defense-in-depth, not the source of truth).
       status: input.status ?? "draft",
       // Story 2.3: no separate course-editing endpoint exists — these are only ever set
-      // via this same create call, same as subject/level/status above.
-      prerequisites: input.prerequisites ?? null,
-      outcomes: input.outcomes ?? null,
+      // via this same create call, same as subject/level/status above. Review finding:
+      // deduped the same way createConcept already dedupes prerequisiteConceptIds — an
+      // exact-duplicate entry otherwise collided on the frontend's React key.
+      prerequisites: input.prerequisites ? [...new Set(input.prerequisites)] : null,
+      outcomes: input.outcomes ? [...new Set(input.outcomes)] : null,
       sampleBoardAssetRef: input.sampleBoardAssetRef ?? null,
     })
     .returning();

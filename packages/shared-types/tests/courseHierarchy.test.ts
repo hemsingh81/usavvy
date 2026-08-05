@@ -155,6 +155,11 @@ describe("create*InputSchema", () => {
     ).not.toThrow();
   });
 
+  it("createCourseInputSchema rejects an empty-string entry in prerequisites/outcomes (review finding: an empty string rendered as an invisible, unlabeled bullet)", () => {
+    expect(() => createCourseInputSchema.parse({ title: "x", prerequisites: [""] })).toThrow();
+    expect(() => createCourseInputSchema.parse({ title: "x", outcomes: [""] })).toThrow();
+  });
+
   it("createModuleInputSchema and createTopicInputSchema require a non-negative position", () => {
     expect(() => createModuleInputSchema.parse({ title: "Module 1", position: -1 })).toThrow();
     expect(() => createTopicInputSchema.parse({ title: "Topic 1", position: 0 })).not.toThrow();
