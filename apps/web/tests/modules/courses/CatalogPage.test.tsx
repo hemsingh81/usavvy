@@ -105,6 +105,27 @@ describe("CatalogPage", () => {
     );
   });
 
+  it("removing the search chip clears the applied search immediately, without waiting for the debounce (review finding)", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(await jsonResponse(COURSES));
+    vi.stubGlobal("fetch", fetchMock);
+    renderWithSession({ accessToken: "a-token" });
+    const user = userEvent.setup();
+    await waitFor(() => expect(screen.getByText("Intro to Algebra")).toBeInTheDocument());
+
+    await user.type(screen.getByPlaceholderText("Search courses…"), "algebra");
+    await waitFor(() => expect(screen.getByText('Search: "algebra"')).toBeInTheDocument());
+
+    await user.click(screen.getByRole("button", { name: 'Remove filter: Search: "algebra"' }));
+
+    // Asserted synchronously (no waitFor): a correct fix clears the chip and re-fetches in
+    // the same tick as the click. Clearing only the debounced input (the review-flagged bug)
+    // would leave the chip and the "q=" fetch param in place until the 300ms debounce timer
+    // fires — which hasn't happened yet at this point since real timers aren't advanced here.
+    expect(screen.queryByText('Search: "algebra"')).not.toBeInTheDocument();
+    const lastCall = fetchMock.mock.calls.at(-1) as [string];
+    expect(lastCall[0]).not.toContain("q=");
+  });
+
   it("shows the empty-state message and 'Clear filters' resets and re-fetches unfiltered (AC #5)", async () => {
     const fetchMock = vi.fn().mockImplementation((url: string) => {
       if (url.includes("subject=Nonexistent")) return jsonResponse([]);

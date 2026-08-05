@@ -346,7 +346,7 @@ interface SearchRow extends Record<string, unknown> {
 export async function searchCourses(db: Db, params: CatalogSearchParams): Promise<CourseSummary[]> {
   const conditions: SQL[] = [sql`c.status = 'published'`];
   if (params.subject !== undefined) {
-    conditions.push(sql`c.subject = ${params.subject}`);
+    conditions.push(sql`lower(c.subject) = lower(${params.subject})`);
   }
   if (params.level !== undefined) {
     conditions.push(sql`c.level = ${params.level}`);

@@ -90,7 +90,18 @@ export function CatalogPage() {
     ...(subject ? [{ key: "subject", label: `Subject: ${subject}`, clear: () => setSubject("") }] : []),
     ...(level ? [{ key: "level", label: `Level: ${level}`, clear: () => setLevel("") }] : []),
     ...(durationBucket ? [{ key: "duration", label: `Duration: ${durationBucket}`, clear: () => setDurationBucket("") }] : []),
-    ...(q ? [{ key: "q", label: `Search: "${q}"`, clear: () => setQInput("") }] : []),
+    ...(q
+      ? [
+          {
+            key: "q",
+            label: `Search: "${q}"`,
+            clear: () => {
+              setQInput("");
+              setQ("");
+            },
+          },
+        ]
+      : []),
   ];
 
   return (

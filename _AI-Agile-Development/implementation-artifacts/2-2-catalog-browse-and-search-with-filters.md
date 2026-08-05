@@ -4,7 +4,7 @@ baseline_commit: 124a1e4
 
 # Story 2.2: Catalog browse and search with filters
 
-Status: review
+Status: done
 
 *(Epic 2, FR-C-2. Fixed during Implementation Readiness review, per epics.md's own note: "cohort-availability" referenced Epic 7 data that doesn't exist for 5 more epics, and "rating" had no producing mechanism anywhere in the 117 FRs — neither is buildable as originally scoped. Cohort-availability is deferred to an Epic 7 follow-on story; rating is dropped from v1 scope entirely. This is the first story to add a real `apps/web` UI for Epic 2 (Story 2.1 was data/service-layer only) and the first to need Postgres full-text search anywhere in this codebase. Story 2.1's `Course` entity has no `subject`/`level`/`duration`/`status` fields yet — this story adds them via a new migration to the existing `courses` table, the same incremental-schema-evolution pattern every Epic 1 story already used on `learner_profiles` (Story 1.4 added preference columns, Story 1.9 added `colorTheme`, etc.) — not a gap in Story 2.1, which correctly didn't invent fields no AC asked for at the time.)*
 
@@ -136,8 +136,24 @@ Claude Sonnet 5
 - `apps/web/src/app/App.tsx` (modified — `/catalog` route)
 - `apps/web/src/shared/components.css` (modified — catalog card/chip/empty-state styles)
 - `apps/web/tests/modules/courses/api.test.ts` (new)
-- `apps/web/tests/modules/courses/CatalogPage.test.tsx` (new)
+- `apps/web/tests/modules/courses/CatalogPage.test.tsx` (new; extended in review round with the chip-immediate-clear regression test)
+- `_AI-Agile-Development/implementation-artifacts/deferred-work.md` (modified — review-round deferred findings)
+
+## Senior Developer Review (AI)
+
+Three parallel adversarial reviewers (Blind Hunter, Edge Case Hunter, Acceptance Auditor) ran against the full diff (`124a1e4..791abc7`).
+
+**Acceptance Auditor:** all 5 ACs independently verified SATISFIED against real DB- and DOM-backed tests, not just story-claimed completion notes.
+
+**Confirmed and patched:**
+1. **`searchCourses`'s `subject` filter was case-sensitive** (`services/courses/src/modules/courses/service.ts`) — `c.subject = ${params.subject}` rejected a differently-cased match (e.g. searching `"math"` against a course stored as `"Math"` returned `[]`), indistinguishable from a genuine no-match given the UI's free-text subject input. Fixed to `lower(c.subject) = lower(${params.subject})`. Regression test added and proven to fail before / pass after (`services/courses/tests/modules/courses/catalog.test.ts`, "narrows by subject case-insensitively").
+2. **Removing the search chip in `CatalogPage` didn't clear the applied search immediately** (`apps/web/src/modules/courses/CatalogPage.tsx`) — the chip's `clear` handler only reset `qInput` (the debounced input), leaving the applied `q` (and the still-filtered result set) in place for up to 300ms until the debounce timer fired, unlike every other filter chip which clears its state instantly. Fixed to clear both `qInput` and `q` synchronously. Regression test added and proven to fail before / pass after (`apps/web/tests/modules/courses/CatalogPage.test.tsx`, "removing the search chip clears the applied search immediately...").
+
+**Deferred (documented in `deferred-work.md`, not blocking):** a course with unset `estimatedDurationHours` is excluded from every `durationBucket` filter (consistent with how `subject`/`level` already treat unset facets, not a unique bug); no pagination/`LIMIT` on `searchCourses` at catalog scale; no runtime schema validation on `searchCourses`'s raw-SQL-to-response mapping (compile-time cast only, matching every other read path in this codebase).
+
+Post-patch: full monorepo regression (673 tests across 8 workspaces), `tsc --noEmit` and `eslint .` clean.
 
 ## Change Log
 
 - 2026-08-06: Implemented catalog browse/search (Tasks 1-5): shared contract, `services/courses` catalog fields + full-text search, gateway query-string forwarding, `apps/web` CatalogPage. Fixed a clock-skew bug in `archiveModule` discovered via full regression. Live-verified end-to-end. Status → review.
+- 2026-08-06: Code review round — fixed case-sensitive `subject` filter and search-chip immediate-clear bug (both proven via failing-then-passing regression tests). Deferred 3 non-blocking findings. Status → done.

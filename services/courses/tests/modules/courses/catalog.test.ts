@@ -66,6 +66,15 @@ describe("searchCourses", () => {
     expect(result.map((c) => c.title)).toEqual(["Math Course"]);
   });
 
+  it("narrows by subject case-insensitively (review finding: exact match rejected differently-cased input)", async () => {
+    await seedCourse({ title: "Math Course", subject: "Math" });
+    await seedCourse({ title: "Science Course", subject: "Science" });
+
+    const result = await searchCourses(db, { subject: "math" });
+
+    expect(result.map((c) => c.title)).toEqual(["Math Course"]);
+  });
+
   it("narrows by level alone", async () => {
     await seedCourse({ title: "Beginner Course", level: "beginner" });
     await seedCourse({ title: "Advanced Course", level: "advanced" });
