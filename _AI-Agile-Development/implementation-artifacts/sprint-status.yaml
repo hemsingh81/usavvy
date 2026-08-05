@@ -60,7 +60,7 @@ development_status:
   1-8-data-export: done
   1-9-predefined-color-theme-picker: done
   1-10-notification-center: done
-  1-11-activity-history: backlog
+  1-11-activity-history: ready-for-dev
   epic-1-retrospective: optional
 
   epic-2: backlog
