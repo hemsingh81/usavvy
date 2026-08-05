@@ -12,6 +12,7 @@ import { emailField } from "../auth/index.js";
 import { parseOrThrow } from "../auth/validation.js";
 import type { Db } from "../../db/client.js";
 import type { NotificationPort } from "../notification/index.js";
+import type { PubSubPort } from "../pubsub/index.js";
 import { calculateAge } from "./age.js";
 import {
   declareAge,
@@ -20,6 +21,7 @@ import {
   getPreferences,
   getPrivacySettings,
   recordParentalConsent,
+  requestAccountDeletion,
   saveOnboardingStep,
   savePreferences,
   savePrivacySettings,
@@ -29,6 +31,7 @@ import {
 export interface UsersRouteDeps {
   db: Db;
   notificationPort: NotificationPort;
+  pubSubPort: PubSubPort;
 }
 
 const MAX_AGE_YEARS = 120;
@@ -121,5 +124,10 @@ export function registerUsersRoutes(app: FastifyInstance, deps: UsersRouteDeps):
     const { userId } = requireTrustedUser(request);
     const body = parseOrThrow(privacySettingsUpdateInputSchema, request.body);
     reply.send(await savePrivacySettings(deps.db, userId, body));
+  });
+
+  app.post("/users/account-deletion", async (request, reply) => {
+    const { userId } = requireTrustedUser(request);
+    reply.send(await requestAccountDeletion(deps.db, deps.notificationPort, deps.pubSubPort, userId));
   });
 }

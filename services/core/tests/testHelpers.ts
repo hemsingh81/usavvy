@@ -3,6 +3,7 @@ import { createLogger } from "@usavvy/service-kernel";
 import type { BuildAppDeps } from "../src/app.js";
 import type { Db } from "../src/db/client.js";
 import type { NotificationPort } from "../src/modules/notification/index.js";
+import type { PubSubPort } from "../src/modules/pubsub/index.js";
 
 export const TEST_INTERNAL_SECRET = "test-internal-secret";
 
@@ -10,6 +11,12 @@ export function createMockNotificationPort(): NotificationPort {
   return {
     sendEmail: vi.fn().mockResolvedValue({ success: true }),
     sendInApp: vi.fn().mockResolvedValue({ success: true }),
+  };
+}
+
+export function createMockPubSubPort(): PubSubPort {
+  return {
+    publish: vi.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -26,6 +33,7 @@ export function createTestAppDeps(overrides: Partial<BuildAppDeps> = {}): BuildA
     checkStorage: vi.fn().mockResolvedValue(true),
     db: undefined as unknown as Db,
     notificationPort: createMockNotificationPort(),
+    pubSubPort: createMockPubSubPort(),
     jwtSecret: "test-secret",
     internalServiceSecret: TEST_INTERNAL_SECRET,
     googleClientId: undefined,

@@ -312,3 +312,29 @@ describe("PUT /users/privacy-settings", () => {
     await app.close();
   });
 });
+
+describe("POST /users/account-deletion", () => {
+  it("returns 401 with no token and never calls core", async () => {
+    const forwardToCore = vi.fn();
+    const app = buildApp(createTestAppDeps({ forwardToCore }));
+
+    const response = await app.inject({ method: "POST", url: "/users/account-deletion" });
+
+    expect(response.statusCode).toBe(401);
+    expect(forwardToCore).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("forwards trusted x-user-id/x-user-role headers derived from a valid token", async () => {
+    const forwardToCore = vi.fn().mockResolvedValue({ status: 200, body: { scheduledDeletionAt: "2026-09-04T00:00:00.000Z" } });
+    const app = buildApp(createTestAppDeps({ forwardToCore }));
+    await app.ready();
+    const token = app.jwt.sign({ sub: "u1", role: "student", typ: "access" });
+
+    const response = await app.inject({ method: "POST", url: "/users/account-deletion", headers: { authorization: `Bearer ${token}` } });
+
+    expect(response.statusCode).toBe(200);
+    expect(forwardToCore).toHaveBeenCalledWith("POST", "/users/account-deletion", { headers: { "x-user-id": "u1", "x-user-role": "student" } });
+    await app.close();
+  });
+});

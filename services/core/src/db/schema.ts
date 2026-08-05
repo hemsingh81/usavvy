@@ -22,6 +22,12 @@ export const users = pgTable("users", {
   // philosophy deriveAgeFields already uses, so a future fallback-rule change needs no
   // backfill migration.
   displayName: text("display_name"),
+  // Story 1.7 (FR-A-7): both null until a deletion is requested. Actual purge (the
+  // cross-service data removal, and the 30-day-later execution itself) is deferred —
+  // no JobQueuePort exists yet to schedule it, and no service exists yet to subscribe
+  // to the user.deletion_requested event this story publishes.
+  deletionRequestedAt: timestamp("deletion_requested_at", { withTimezone: true }),
+  scheduledDeletionAt: timestamp("scheduled_deletion_at", { withTimezone: true }),
   // Null until the account is verified (signup) or immediately set (Google OAuth, AC #2).
   emailVerifiedAt: timestamp("email_verified_at", { withTimezone: true }),
   // Single active refresh token per user (MVP scope — no multi-device session list).

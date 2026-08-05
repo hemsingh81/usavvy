@@ -5,6 +5,7 @@ import {
   DEFAULT_LEARNER_PREFERENCES,
   DEFAULT_PRIVACY_SETTINGS,
   ONBOARDING_STEPS,
+  type AccountDeletionResponse,
   type AgeDeclarationResponse,
   type LearnerPreferences,
   type LearnerPrivacySettings,
@@ -19,9 +20,12 @@ import {
 import type { Db } from "../../db/client.js";
 import { learnerProfiles, parentalConsentTokens, users } from "../../db/schema.js";
 import type { NotificationPort } from "../notification/index.js";
+import type { PubSubPort } from "../pubsub/index.js";
 import { normalizeEmail } from "../auth/index.js";
 import { generateRawToken, hashToken } from "../auth/tokens.js";
 import { calculateAge } from "./age.js";
+
+const ACCOUNT_DELETION_GRACE_PERIOD_MS = 30 * 24 * 60 * 60 * 1000;
 
 const CONSENT_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
 const MINOR_AGE_THRESHOLD = 18;
@@ -383,4 +387,54 @@ export async function savePrivacySettings(db: Db, userId: string, input: Privacy
     throw new AppError("INTERNAL_ERROR", "failed to save privacy settings", 500);
   }
   return toPrivacySettings(updated);
+}
+
+/**
+ * Story 1.7 (FR-A-7). Compare-and-swap exactly like declareAge's established one-time-
+ * action pattern (Story 1.2) — the WHERE clause is the real guarantee against two
+ * concurrent requests both succeeding, not a separate pre-check.
+ *
+ * Deliberately does NOT delete any data, anywhere — see the story's own Scope note.
+ * `core` only owns `users`/`learnerProfiles`; the uploads/notes/submissions/progress
+ * data the AC's "all uploads and personal data" phrase refers to belongs to services
+ * that don't exist yet (AD-14), and the actual 30-day-later purge needs a durable job
+ * scheduler (JobQueuePort, AD-15) that isn't wired anywhere in this codebase yet. This
+ * function's job ends at scheduling the deletion, notifying the learner, and publishing
+ * the domain event a future subscriber will act on.
+ */
+export async function requestAccountDeletion(
+  db: Db,
+  notificationPort: NotificationPort,
+  pubSubPort: PubSubPort,
+  userId: string,
+): Promise<AccountDeletionResponse> {
+  const [user] = await db.select().from(users).where(eq(users.id, userId));
+  if (!user) {
+    throw new AppError("NOT_FOUND", "user not found", 404);
+  }
+
+  const requestedAt = new Date();
+  const scheduledDeletionAt = new Date(requestedAt.getTime() + ACCOUNT_DELETION_GRACE_PERIOD_MS);
+
+  const updated = await db
+    .update(users)
+    .set({ deletionRequestedAt: requestedAt, scheduledDeletionAt, updatedAt: requestedAt, version: bumpVersion() })
+    .where(and(eq(users.id, userId), isNull(users.deletionRequestedAt)))
+    .returning({ id: users.id });
+  if (updated.length === 0) {
+    throw new AppError("ACCOUNT_DELETION_ALREADY_REQUESTED", "account deletion has already been requested", 409);
+  }
+
+  await notificationPort.sendEmail({
+    to: user.email,
+    subject: "Your Usavvy account deletion request",
+    body: `We've received your request to delete your Usavvy account. Your account and personal data will be removed within 30 days, on ${scheduledDeletionAt.toISOString()}. If this wasn't you, contact support immediately.`,
+  });
+
+  await pubSubPort.publish({
+    type: "user.deletion_requested",
+    payload: { userId, scheduledDeletionAt: scheduledDeletionAt.toISOString() },
+  });
+
+  return { scheduledDeletionAt: scheduledDeletionAt.toISOString() };
 }

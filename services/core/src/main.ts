@@ -3,6 +3,7 @@ import { createLogger, pingDb, pingStorage } from "@usavvy/service-kernel";
 import { loadCoreConfig } from "./config.js";
 import { buildApp } from "./app.js";
 import { createNotificationAdapter } from "./modules/notification/index.js";
+import { createPubSubAdapter } from "./modules/pubsub/index.js";
 import { createDb } from "./db/client.js";
 
 const config = loadCoreConfig(process.env);
@@ -16,12 +17,14 @@ export const db = createDb(sql);
 // Bound here, at boot, from config (AD-12) — Story 1.1 imports this instance rather
 // than constructing its own adapter.
 export const notificationPort = createNotificationAdapter(config.notificationAdapter, createLogger("notification"));
+export const pubSubPort = createPubSubAdapter(config.pubSubAdapter, createLogger("pubsub"));
 
 const app = buildApp({
   checkDb: () => pingDb(() => sql`select 1`, logger),
   checkStorage: () => pingStorage(config.storageEndpoint, logger),
   db,
   notificationPort,
+  pubSubPort,
   jwtSecret: config.jwtSecret,
   internalServiceSecret: config.internalServiceSecret,
   googleClientId: config.googleClientId,

@@ -7,12 +7,14 @@ import { baseServiceEnvSchema } from "@usavvy/config";
  * never let a module read process.env directly to make this choice itself.
  */
 const notificationAdapterSchema = z.enum(["mock"]);
+const pubSubAdapterSchema = z.enum(["mock"]);
 
 const coreEnvSchema = baseServiceEnvSchema.extend({
   PORT: z.coerce.number().int().positive().default(3001),
   DATABASE_URL: z.url().default("postgres://usavvy:usavvy@localhost:5433/usavvy_core"),
   STORAGE_ENDPOINT: z.url().default("http://localhost:8333"),
   NOTIFICATION_ADAPTER: notificationAdapterSchema.default("mock"),
+  PUBSUB_ADAPTER: pubSubAdapterSchema.default("mock"),
   // Dev-only default (AD-12's dev-default pattern) — unsafe for any non-local
   // deployment; must be overridden alongside gateway's own JWT_SECRET (same value,
   // symmetric secret, AD-7).
@@ -34,6 +36,7 @@ export interface CoreConfig {
   databaseUrl: string;
   storageEndpoint: string;
   notificationAdapter: z.infer<typeof notificationAdapterSchema>;
+  pubSubAdapter: z.infer<typeof pubSubAdapterSchema>;
   jwtSecret: string;
   internalServiceSecret: string;
   googleClientId: string | undefined;
@@ -46,6 +49,7 @@ export function loadCoreConfig(env: Record<string, string | undefined>): CoreCon
     databaseUrl: parsed.DATABASE_URL,
     storageEndpoint: parsed.STORAGE_ENDPOINT,
     notificationAdapter: parsed.NOTIFICATION_ADAPTER,
+    pubSubAdapter: parsed.PUBSUB_ADAPTER,
     jwtSecret: parsed.JWT_SECRET,
     internalServiceSecret: parsed.INTERNAL_SERVICE_SECRET,
     googleClientId: parsed.GOOGLE_CLIENT_ID,

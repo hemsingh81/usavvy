@@ -4,6 +4,7 @@ import type { HealthStatus } from "@usavvy/shared-types";
 import { AppError, registerErrorHandler, type Logger } from "@usavvy/service-kernel";
 import type { Db } from "./db/client.js";
 import type { NotificationPort } from "./modules/notification/index.js";
+import type { PubSubPort } from "./modules/pubsub/index.js";
 import { registerAuthRoutes } from "./modules/auth/index.js";
 import { registerUsersRoutes } from "./modules/users/index.js";
 
@@ -12,6 +13,7 @@ export interface BuildAppDeps {
   checkStorage: () => Promise<boolean>;
   db: Db;
   notificationPort: NotificationPort;
+  pubSubPort: PubSubPort;
   jwtSecret: string;
   internalServiceSecret: string;
   googleClientId: string | undefined;
@@ -61,7 +63,7 @@ export function buildApp(deps: BuildAppDeps) {
   });
 
   registerAuthRoutes(app, { db: deps.db, notificationPort: deps.notificationPort, googleClientId: deps.googleClientId });
-  registerUsersRoutes(app, { db: deps.db, notificationPort: deps.notificationPort });
+  registerUsersRoutes(app, { db: deps.db, notificationPort: deps.notificationPort, pubSubPort: deps.pubSubPort });
 
   return app;
 }

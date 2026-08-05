@@ -50,6 +50,13 @@
       "when": 1785933703611,
       "tag": "0006_furry_azazel",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1785937387401,
+      "tag": "0007_unusual_havok",
+      "breakpoints": true
     }
   ]
 }

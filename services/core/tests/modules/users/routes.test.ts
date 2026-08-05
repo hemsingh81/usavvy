@@ -632,3 +632,46 @@ describe("PUT /users/privacy-settings", () => {
     await app.close();
   });
 });
+
+describe("POST /users/account-deletion", () => {
+  it("requires authentication (401 with no trusted headers)", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+
+    const response = await app.inject({ method: "POST", url: "/users/account-deletion", headers: internalHeaders });
+
+    expect(response.statusCode).toBe(401);
+    await app.close();
+  });
+
+  it("returns 200 with a scheduledDeletionAt field on a valid request", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+    const email = uniqueEmail("account-deletion");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/users/account-deletion",
+      headers: { ...internalHeaders, "x-user-id": user!.id, "x-user-role": "student" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ scheduledDeletionAt: expect.any(String) });
+    await app.close();
+  });
+
+  it("returns 409 ACCOUNT_DELETION_ALREADY_REQUESTED through the real route on a second request", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+    const email = uniqueEmail("account-deletion-twice");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+    const headers = { ...internalHeaders, "x-user-id": user!.id, "x-user-role": "student" };
+
+    const first = await app.inject({ method: "POST", url: "/users/account-deletion", headers });
+    expect(first.statusCode).toBe(200);
+
+    const second = await app.inject({ method: "POST", url: "/users/account-deletion", headers });
+
+    expect(second.statusCode).toBe(409);
+    expect(second.json()).toMatchObject({ error: { code: "ACCOUNT_DELETION_ALREADY_REQUESTED" } });
+    await app.close();
+  });
+});

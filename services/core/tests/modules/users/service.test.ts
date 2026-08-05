@@ -4,13 +4,14 @@ import { eq } from "drizzle-orm";
 import { createDb, type Db } from "../../../src/db/client.js";
 import { learnerProfiles, parentalConsentTokens, users } from "../../../src/db/schema.js";
 import { loadCoreConfig } from "../../../src/config.js";
-import { createMockNotificationPort } from "../../testHelpers.js";
+import { createMockNotificationPort, createMockPubSubPort } from "../../testHelpers.js";
 import {
   declareAge,
   getMe,
   getOnboarding,
   getPrivacySettings,
   recordParentalConsent,
+  requestAccountDeletion,
   saveOnboardingStep,
   savePrivacySettings,
   updateDisplayName,
@@ -555,5 +556,86 @@ describe("savePrivacySettings", () => {
 
     const [profile] = await db.select().from(learnerProfiles).where(eq(learnerProfiles.userId, user!.id));
     expect(profile?.version).toBe(2);
+  });
+});
+
+describe("requestAccountDeletion", () => {
+  it("sets deletionRequestedAt/scheduledDeletionAt roughly 30 days out and returns the same ISO date", async () => {
+    const email = uniqueEmail("deletion-schedule");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+    const notificationPort = createMockNotificationPort();
+    const pubSubPort = createMockPubSubPort();
+
+    const result = await requestAccountDeletion(db, notificationPort, pubSubPort, user!.id);
+
+    const [updated] = await db.select().from(users).where(eq(users.id, user!.id));
+    expect(updated?.deletionRequestedAt).not.toBeNull();
+    expect(updated?.scheduledDeletionAt?.toISOString()).toBe(result.scheduledDeletionAt);
+    const daysOut = (updated!.scheduledDeletionAt!.getTime() - updated!.deletionRequestedAt!.getTime()) / (24 * 60 * 60 * 1000);
+    expect(daysOut).toBeCloseTo(30, 1);
+  });
+
+  it("sends exactly one confirmation email to the account's own address", async () => {
+    const email = uniqueEmail("deletion-email");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+    const notificationPort = createMockNotificationPort();
+
+    await requestAccountDeletion(db, notificationPort, createMockPubSubPort(), user!.id);
+
+    expect(notificationPort.sendEmail).toHaveBeenCalledTimes(1);
+    expect(notificationPort.sendEmail).toHaveBeenCalledWith(expect.objectContaining({ to: email }));
+  });
+
+  it("publishes exactly one user.deletion_requested event with the correct payload", async () => {
+    const email = uniqueEmail("deletion-event");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+    const pubSubPort = createMockPubSubPort();
+
+    const result = await requestAccountDeletion(db, createMockNotificationPort(), pubSubPort, user!.id);
+
+    expect(pubSubPort.publish).toHaveBeenCalledTimes(1);
+    expect(pubSubPort.publish).toHaveBeenCalledWith({
+      type: "user.deletion_requested",
+      payload: { userId: user!.id, scheduledDeletionAt: result.scheduledDeletionAt },
+    });
+  });
+
+  it("rejects a second request with ACCOUNT_DELETION_ALREADY_REQUESTED, sending no second email or event", async () => {
+    const email = uniqueEmail("deletion-twice");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+    const notificationPort = createMockNotificationPort();
+    const pubSubPort = createMockPubSubPort();
+    await requestAccountDeletion(db, notificationPort, pubSubPort, user!.id);
+
+    await expect(requestAccountDeletion(db, notificationPort, pubSubPort, user!.id)).rejects.toMatchObject({
+      code: "ACCOUNT_DELETION_ALREADY_REQUESTED",
+      statusCode: 409,
+    });
+    expect(notificationPort.sendEmail).toHaveBeenCalledTimes(1);
+    expect(pubSubPort.publish).toHaveBeenCalledTimes(1);
+  });
+
+  it("under two concurrent requests for the same account, exactly one succeeds", async () => {
+    const email = uniqueEmail("deletion-concurrent");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+    const notificationPort = createMockNotificationPort();
+    const pubSubPort = createMockPubSubPort();
+
+    const results = await Promise.allSettled([
+      requestAccountDeletion(db, notificationPort, pubSubPort, user!.id),
+      requestAccountDeletion(db, notificationPort, pubSubPort, user!.id),
+    ]);
+
+    const fulfilled = results.filter((r) => r.status === "fulfilled");
+    const rejected = results.filter((r) => r.status === "rejected");
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect((rejected[0] as PromiseRejectedResult).reason).toMatchObject({ code: "ACCOUNT_DELETION_ALREADY_REQUESTED" });
+  });
+
+  it("throws NOT_FOUND for a user id that doesn't exist", async () => {
+    await expect(
+      requestAccountDeletion(db, createMockNotificationPort(), createMockPubSubPort(), "00000000-0000-0000-0000-000000000000"),
+    ).rejects.toMatchObject({ code: "NOT_FOUND", statusCode: 404 });
   });
 });
