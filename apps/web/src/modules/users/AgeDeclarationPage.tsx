@@ -63,9 +63,18 @@ export function AgeDeclarationPage() {
       // entirely for every newly-adult-declared user).
       if (result.isMinor) {
         navigate("/waiting-for-consent");
-      } else {
+        return;
+      }
+      try {
         const me = await getMe(accessToken);
         navigate(resolvePostAuthDestination(me));
+      } catch {
+        // Review finding: declareAge already succeeded at this point — a getMe failure
+        // here (e.g. a token that expires in the gap between the two calls) must not
+        // strand the learner on this now-stale form with a misleading "something went
+        // wrong" error, which would also make a resubmit fail with AGE_ALREADY_DECLARED.
+        // Land somewhere safe instead; HomePage/the next /me call resolves the rest.
+        navigate("/");
       }
     } catch (error) {
       setServerError(error instanceof ApiError ? error.message : "something went wrong — please try again");

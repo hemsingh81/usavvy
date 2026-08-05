@@ -71,6 +71,14 @@ describe("onboardingStepInputSchema", () => {
     expect(() => onboardingStepInputSchema.parse({ step: "interests", value: [] })).toThrow();
   });
 
+  it("rejects an interests array with more than 20 entries (review finding: previously unbounded)", () => {
+    expect(() => onboardingStepInputSchema.parse({ step: "interests", value: Array.from({ length: 21 }, (_, i) => `interest-${i}`) })).toThrow();
+  });
+
+  it("rejects a single interest string longer than 100 characters", () => {
+    expect(() => onboardingStepInputSchema.parse({ step: "interests", value: ["a".repeat(101)] })).toThrow();
+  });
+
   it("accepts a valid availability step with all 7 weekdays", () => {
     expect(() =>
       onboardingStepInputSchema.parse({

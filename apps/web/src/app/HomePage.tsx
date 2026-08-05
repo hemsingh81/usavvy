@@ -16,14 +16,23 @@ export function HomePage({ apiUrl }: HomePageProps) {
 
   useEffect(() => {
     if (!session) return;
+    // Review finding: without this guard, a getMe response for a since-changed or
+    // since-cleared session (e.g. a fast logout) could land after the fact and set
+    // onboardingComplete for the wrong (or no longer current) session.
+    let cancelled = false;
     getMe(session.accessToken)
-      .then((me) => setOnboardingComplete(me.onboardingComplete))
+      .then((me) => {
+        if (!cancelled) setOnboardingComplete(me.onboardingComplete);
+      })
       .catch(() => {
         // A failed /me call here (e.g. an expired session) just means the CTA doesn't
         // show — this is a passive landing page's optional enrichment fetch, not a
         // user-initiated submit whose failure needs surfacing; the health check above
         // still renders regardless (AD-17 is satisfied by that, not by this fetch).
       });
+    return () => {
+      cancelled = true;
+    };
     // Only ever needs to re-run if the session itself changes.
   }, [session?.accessToken]);
 

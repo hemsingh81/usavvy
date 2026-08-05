@@ -234,6 +234,15 @@ function stepColumnUpdate(input: OnboardingStepInput): Partial<typeof learnerPro
  * so the advancement is safe under two genuinely concurrent step-saves for the same
  * profile, not just an application-level read-then-max() that a lost update could
  * silently regress (Story 1.2's own review found exactly this class of bug elsewhere).
+ *
+ * Review finding: nothing previously stopped a client from submitting e.g. "level"
+ * first on a fresh profile — currentStep would jump straight to 6 and completedAt would
+ * be set with every other field still null, defeating FR-A-3's entire purpose. A step
+ * may only be (re-)saved once the learner has actually reached it: stepIndex must be
+ * `<= currentStep` (already-passed steps stay freely editable; the one exactly at the
+ * frontier is allowed; anything beyond it is a skip-ahead attempt). Enforced in the same
+ * atomic UPDATE via the WHERE clause, not a separate read-then-check, so it can't be
+ * raced the same way the already-declared check in Story 1.2 originally could.
  */
 export async function saveOnboardingStep(db: Db, userId: string, input: OnboardingStepInput): Promise<LearnerProfileResponse> {
   await ensureLearnerProfile(db, userId);
@@ -249,11 +258,11 @@ export async function saveOnboardingStep(db: Db, userId: string, input: Onboardi
       updatedAt: new Date(),
       version: sql`${learnerProfiles.version} + 1`,
     })
-    .where(eq(learnerProfiles.userId, userId))
+    .where(and(eq(learnerProfiles.userId, userId), sql`${learnerProfiles.currentStep} >= ${stepIndex}`))
     .returning();
 
   if (!updated) {
-    throw new AppError("INTERNAL_ERROR", "failed to save onboarding step", 500);
+    throw new AppError("VALIDATION_ERROR", "onboarding steps must be completed in order", 400);
   }
   return toLearnerProfileResponse(updated);
 }

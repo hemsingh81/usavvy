@@ -45,7 +45,9 @@ function todayIso(): string {
 // knowing which step it belongs to, so validating them separately would be weaker.
 export const onboardingStepInputSchema = z.discriminatedUnion("step", [
   z.object({ step: z.literal("goal"), value: z.string().trim().min(1).max(500) }),
-  z.object({ step: z.literal("interests"), value: z.array(z.string().trim().min(1)).min(1) }),
+  // Bounded the same way every other step's value is (review finding: this was the one
+  // step with no upper limit at all).
+  z.object({ step: z.literal("interests"), value: z.array(z.string().trim().min(1).max(100)).min(1).max(20) }),
   z.object({ step: z.literal("availability"), value: availabilitySchema }),
   z.object({ step: z.literal("sessionLength"), value: z.number().int().min(10).max(180) }),
   // The one step whose value may be null (explicit skip) — omitting it entirely is

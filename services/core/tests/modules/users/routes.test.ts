@@ -281,6 +281,23 @@ describe("PUT /users/onboarding/step", () => {
     await app.close();
   });
 
+  it("rejects an attempt to skip ahead to a step not yet reached (review finding: onboarding could be marked complete with every field still null)", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+    const email = uniqueEmail("onboarding-skip-ahead-http");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+
+    const response = await app.inject({
+      method: "PUT",
+      url: "/users/onboarding/step",
+      headers: { ...internalHeaders, "x-user-id": user!.id, "x-user-role": "student" },
+      payload: { step: "level", value: "beginner" },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ error: { code: "VALIDATION_ERROR" } });
+    await app.close();
+  });
+
   it("rejects an unrecognized step key with a VALIDATION_ERROR envelope", async () => {
     const app = buildApp(createTestAppDeps({ db }));
     const email = uniqueEmail("onboarding-bad-step");

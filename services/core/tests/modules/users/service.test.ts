@@ -272,40 +272,64 @@ describe("saveOnboardingStep", () => {
     expect(result.completedAt).toBeNull();
   });
 
-  it("saves the interests step", async () => {
+  it("saves the interests step once the goal step has been reached", async () => {
     const email = uniqueEmail("onboarding-interests");
     const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+    await saveOnboardingStep(db, user!.id, { step: "goal", value: "x" });
 
     const result = await saveOnboardingStep(db, user!.id, { step: "interests", value: ["math", "physics"] });
 
     expect(result.interests).toEqual(["math", "physics"]);
   });
 
-  it("saves the availability step", async () => {
+  it("saves the availability step once the prior steps have been reached", async () => {
     const email = uniqueEmail("onboarding-availability");
     const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+    await saveOnboardingStep(db, user!.id, { step: "goal", value: "x" });
+    await saveOnboardingStep(db, user!.id, { step: "interests", value: ["math"] });
 
     const result = await saveOnboardingStep(db, user!.id, { step: "availability", value: VALID_AVAILABILITY });
 
     expect(result.availability).toEqual(VALID_AVAILABILITY);
   });
 
-  it("saves the sessionLength step", async () => {
+  it("saves the sessionLength step once the prior steps have been reached", async () => {
     const email = uniqueEmail("onboarding-session-length");
     const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+    await saveOnboardingStep(db, user!.id, { step: "goal", value: "x" });
+    await saveOnboardingStep(db, user!.id, { step: "interests", value: ["math"] });
+    await saveOnboardingStep(db, user!.id, { step: "availability", value: VALID_AVAILABILITY });
 
     const result = await saveOnboardingStep(db, user!.id, { step: "sessionLength", value: 45 });
 
     expect(result.sessionLengthMinutes).toBe(45);
   });
 
-  it("saves a provided targetDate", async () => {
+  it("saves a provided targetDate once the prior steps have been reached", async () => {
     const email = uniqueEmail("onboarding-target-date");
     const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+    await saveOnboardingStep(db, user!.id, { step: "goal", value: "x" });
+    await saveOnboardingStep(db, user!.id, { step: "interests", value: ["math"] });
+    await saveOnboardingStep(db, user!.id, { step: "availability", value: VALID_AVAILABILITY });
+    await saveOnboardingStep(db, user!.id, { step: "sessionLength", value: 30 });
 
     const result = await saveOnboardingStep(db, user!.id, { step: "targetDate", value: "2999-01-01" });
 
     expect(result.targetCompletionDate).toBe("2999-01-01");
+  });
+
+  it("rejects an attempt to skip ahead to a step not yet reached (review finding: onboarding could be marked complete with every field still null)", async () => {
+    const email = uniqueEmail("onboarding-skip-ahead");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+
+    await expect(saveOnboardingStep(db, user!.id, { step: "level", value: "beginner" })).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+      statusCode: 400,
+    });
+
+    const result = await getOnboarding(db, user!.id);
+    expect(result.completedAt).toBeNull();
+    expect(result.level).toBeNull();
   });
 
   it("saves an explicit null targetDate (skip) and still advances currentStep", async () => {
@@ -385,15 +409,18 @@ describe("saveOnboardingStep", () => {
   it("under two concurrent step-saves for the same profile, currentStep reflects the max of both — no lost update", async () => {
     const email = uniqueEmail("onboarding-concurrent");
     const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+    await saveOnboardingStep(db, user!.id, { step: "goal", value: "x" });
+    await saveOnboardingStep(db, user!.id, { step: "interests", value: ["math"] });
+    await saveOnboardingStep(db, user!.id, { step: "availability", value: VALID_AVAILABILITY }); // currentStep now 3
 
-    await Promise.all([
-      saveOnboardingStep(db, user!.id, { step: "interests", value: ["math"] }), // index 1 -> currentStep >= 2
-      saveOnboardingStep(db, user!.id, { step: "targetDate", value: null }), // index 4 -> currentStep >= 5
+    const results = await Promise.allSettled([
+      saveOnboardingStep(db, user!.id, { step: "availability", value: VALID_AVAILABILITY }), // index 2, re-save an already-passed step (2 <= 3)
+      saveOnboardingStep(db, user!.id, { step: "sessionLength", value: 30 }), // index 3, exactly the frontier (3 <= 3)
     ]);
+    expect(results.every((r) => r.status === "fulfilled")).toBe(true);
 
     const result = await getOnboarding(db, user!.id);
-    expect(result.currentStep).toBe(5);
-    expect(result.interests).toEqual(["math"]);
-    expect(result.targetCompletionDate).toBeNull();
+    expect(result.currentStep).toBe(4);
+    expect(result.sessionLengthMinutes).toBe(30);
   });
 });

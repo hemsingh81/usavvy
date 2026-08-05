@@ -92,6 +92,25 @@ describe("AgeDeclarationPage", () => {
     expect(getMe).toHaveBeenCalledWith("a-token");
   });
 
+  it("navigates home instead of showing an error when getMe fails after declareAge already succeeded (review finding: previously stranded the user on a stale form)", async () => {
+    const getMe = vi.fn().mockRejectedValue(new Error("expired token"));
+    renderWithSession({ accessToken: "a-token" }, getMe);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ isMinor: false, parentalConsentStatus: "not_required" }),
+      } as unknown as Response),
+    );
+    const user = userEvent.setup();
+
+    await user.type(screen.getByLabelText("Birthdate"), "1990-01-01");
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+
+    expect(await screen.findByText("home page")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("submits the minor branch with a parent email and navigates to the waiting screen", async () => {
     renderWithSession({ accessToken: "a-token" });
     const fetchMock = vi.fn().mockResolvedValue({

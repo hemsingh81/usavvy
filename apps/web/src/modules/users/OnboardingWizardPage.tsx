@@ -38,26 +38,33 @@ export function OnboardingWizardPage() {
   const navigate = useNavigate();
   const [view, setView] = useState<ViewState>({ kind: "loading" });
   const [profile, setProfile] = useState<LearnerProfileResponse>(EMPTY_PROFILE);
-  // Which step is currently displayed — seeded from the server's currentStep on load, then
-  // advances locally after each successful save (see handleStepSubmit's comment for why
-  // this is deliberately NOT re-synced to the server's currentStep on every response).
+  // Which step is currently displayed — seeded from the server's currentStep on load;
+  // see handleStepSubmit's comment for how it advances after each successful save.
   const [viewedStep, setViewedStep] = useState(0);
   const [serverError, setServerError] = useState<string | undefined>();
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     if (!session) return;
+    // Guards against a stale response landing after the session changed or this page
+    // was navigated away from before the request resolved.
+    let cancelled = false;
     const { apiUrl } = getWebConfig();
     createUsersApi(apiUrl)
       .getOnboarding(session.accessToken)
       .then((result) => {
+        if (cancelled) return;
         setProfile(result);
         setViewedStep(Math.min(result.currentStep, ONBOARDING_STEPS.length - 1));
         setView({ kind: "ready" });
       })
       .catch((error: unknown) => {
+        if (cancelled) return;
         setView({ kind: "error", message: error instanceof ApiError ? error.message : "something went wrong — please try again" });
       });
+    return () => {
+      cancelled = true;
+    };
     // Only ever runs once per mount — accessToken doesn't change for a given session.
   }, [session?.accessToken]);
 
@@ -96,6 +103,9 @@ export function OnboardingWizardPage() {
     if (submitting) return;
     setServerError(undefined);
     setSubmitting(true);
+    // Captured before the request resolves: whether the learner was reviewing/editing
+    // an already-passed step, or was right at the frontier (the next unanswered one).
+    const wasAtFrontier = viewedStep === profile.currentStep;
     try {
       const { apiUrl } = getWebConfig();
       const updated = await createUsersApi(apiUrl).saveOnboardingStep(accessToken, input);
@@ -104,11 +114,15 @@ export function OnboardingWizardPage() {
         navigate("/");
         return;
       }
-      // Advances by one from wherever the learner was viewing, not to the server's
-      // (forward-only, never-regressing) currentStep — editing an earlier step after
-      // resuming should move to the NEXT step in sequence, not jump ahead to however
-      // far this account has ever reached.
-      setViewedStep((current) => Math.min(current + 1, ONBOARDING_STEPS.length - 1));
+      // Review finding: always advancing by one from the locally-viewed step (instead
+      // of trusting the response's currentStep) contradicted this story's own explicit
+      // instruction and could strand a learner mid-review on another device/tab that
+      // had already progressed further. But always jumping straight to the server's
+      // currentStep has the opposite problem: re-saving an earlier step after Back
+      // would skip past steps still worth reviewing in sequence. Split the difference —
+      // at the frontier, trust the server (cross-device/tab progress wins); reviewing an
+      // earlier step, just advance one at a time (in-session review stays sequential).
+      setViewedStep(wasAtFrontier ? Math.min(updated.currentStep, ONBOARDING_STEPS.length - 1) : Math.min(viewedStep + 1, ONBOARDING_STEPS.length - 1));
     } catch (error) {
       setServerError(error instanceof ApiError ? error.message : "something went wrong — please try again");
     } finally {

@@ -15,8 +15,11 @@ export function resolvePostAuthDestination(me: MeResponse): string {
     return "/waiting-for-consent";
   }
   // Story 1.3: checked after (not instead of) the age/consent gates above — a minor
-  // still awaiting consent must never skip ahead to onboarding.
-  if (me.onboardingComplete === false) {
+  // still awaiting consent must never skip ahead to onboarding. Fails closed on `!==
+  // true` (review finding) rather than `=== false`, matching the minor-consent check
+  // above — an unexpected non-boolean value gates the learner rather than silently
+  // granting access.
+  if (me.onboardingComplete !== true) {
     return "/onboarding";
   }
   return "/";
