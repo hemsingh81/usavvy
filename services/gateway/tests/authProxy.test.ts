@@ -438,3 +438,94 @@ describe("GET /users/data-export/pdf", () => {
     await app.close();
   });
 });
+
+describe("GET /users/notifications", () => {
+  it("returns 401 with no token and never calls core", async () => {
+    const forwardToCore = vi.fn();
+    const app = buildApp(createTestAppDeps({ forwardToCore }));
+
+    const response = await app.inject({ method: "GET", url: "/users/notifications" });
+
+    expect(response.statusCode).toBe(401);
+    expect(forwardToCore).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("forwards trusted x-user-id/x-user-role headers derived from a valid token", async () => {
+    const forwardToCore = vi.fn().mockResolvedValue({ status: 200, body: [] });
+    const app = buildApp(createTestAppDeps({ forwardToCore }));
+    await app.ready();
+    const token = app.jwt.sign({ sub: "u1", role: "student", typ: "access" });
+
+    const response = await app.inject({ method: "GET", url: "/users/notifications", headers: { authorization: `Bearer ${token}` } });
+
+    expect(response.statusCode).toBe(200);
+    expect(forwardToCore).toHaveBeenCalledWith("GET", "/users/notifications", { headers: { "x-user-id": "u1", "x-user-role": "student" } });
+    await app.close();
+  });
+});
+
+describe("PUT /users/notifications/:id/read", () => {
+  it("returns 401 with no token and never calls core", async () => {
+    const forwardToCore = vi.fn();
+    const app = buildApp(createTestAppDeps({ forwardToCore }));
+
+    const response = await app.inject({ method: "PUT", url: "/users/notifications/n1/read" });
+
+    expect(response.statusCode).toBe(401);
+    expect(forwardToCore).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("interpolates the id param into the forwarded core path", async () => {
+    const forwardToCore = vi.fn().mockResolvedValue({ status: 200, body: { id: "n1" } });
+    const app = buildApp(createTestAppDeps({ forwardToCore }));
+    await app.ready();
+    const token = app.jwt.sign({ sub: "u1", role: "student", typ: "access" });
+
+    const response = await app.inject({ method: "PUT", url: "/users/notifications/n1/read", headers: { authorization: `Bearer ${token}` } });
+
+    expect(response.statusCode).toBe(200);
+    expect(forwardToCore).toHaveBeenCalledWith("PUT", "/users/notifications/n1/read", { headers: { "x-user-id": "u1", "x-user-role": "student" } });
+    await app.close();
+  });
+});
+
+describe("DELETE /users/notifications/:id", () => {
+  it("returns 401 with no token and never calls core", async () => {
+    const forwardToCore = vi.fn();
+    const app = buildApp(createTestAppDeps({ forwardToCore }));
+
+    const response = await app.inject({ method: "DELETE", url: "/users/notifications/n1" });
+
+    expect(response.statusCode).toBe(401);
+    expect(forwardToCore).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("interpolates the id param into the forwarded core path and mirrors a 204", async () => {
+    const forwardToCore = vi.fn().mockResolvedValue({ status: 204, body: undefined });
+    const app = buildApp(createTestAppDeps({ forwardToCore }));
+    await app.ready();
+    const token = app.jwt.sign({ sub: "u1", role: "student", typ: "access" });
+
+    const response = await app.inject({ method: "DELETE", url: "/users/notifications/n1", headers: { authorization: `Bearer ${token}` } });
+
+    expect(response.statusCode).toBe(204);
+    expect(forwardToCore).toHaveBeenCalledWith("DELETE", "/users/notifications/n1", { headers: { "x-user-id": "u1", "x-user-role": "student" } });
+    await app.close();
+  });
+
+  it("mirrors a 409 when core reports the notification is still in progress", async () => {
+    const forwardToCore = vi.fn().mockResolvedValue({ status: 409, body: { error: { code: "NOTIFICATION_STILL_IN_PROGRESS", message: "still in progress" } } });
+    const app = buildApp(createTestAppDeps({ forwardToCore }));
+    await app.ready();
+    const token = app.jwt.sign({ sub: "u1", role: "student", typ: "access" });
+
+    const response = await app.inject({ method: "DELETE", url: "/users/notifications/n1", headers: { authorization: `Bearer ${token}` } });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toEqual({ error: { code: "NOTIFICATION_STILL_IN_PROGRESS", message: "still in progress" } });
+    await app.close();
+  });
+});

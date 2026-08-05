@@ -78,6 +78,26 @@ export function registerAuthProxyRoutes(app: FastifyInstance, deps: AuthProxyDep
     reply.header("cache-control", "no-store").code(result.status).send(result.body);
   });
 
+  app.get("/users/notifications", { preHandler: requireAuth }, async (request, reply) => {
+    const result = await deps.forwardToCore("GET", "/users/notifications", { headers: trustedHeaders(request) });
+    reply.code(result.status).send(result.body);
+  });
+
+  // Story 1.10: the first path-param routes in this proxy — the id is interpolated
+  // directly into the forwarded path string; forwardToCore already takes an arbitrary
+  // path, so no change to it or coreClient.ts is needed.
+  app.put("/users/notifications/:id/read", { preHandler: requireAuth }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const result = await deps.forwardToCore("PUT", `/users/notifications/${id}/read`, { headers: trustedHeaders(request) });
+    reply.code(result.status).send(result.body);
+  });
+
+  app.delete("/users/notifications/:id", { preHandler: requireAuth }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const result = await deps.forwardToCore("DELETE", `/users/notifications/${id}`, { headers: trustedHeaders(request) });
+    reply.code(result.status).send(result.body);
+  });
+
   app.get("/users/data-export/pdf", { preHandler: requireAuth }, async (request, reply) => {
     const result = await deps.forwardBinaryToCore("GET", "/users/data-export/pdf", { headers: trustedHeaders(request) });
     reply.header("cache-control", "no-store");
