@@ -360,6 +360,7 @@ describe("GET /users/data-export/json", () => {
     const response = await app.inject({ method: "GET", url: "/users/data-export/json", headers: { authorization: `Bearer ${token}` } });
 
     expect(response.statusCode).toBe(200);
+    expect(response.headers["cache-control"]).toBe("no-store");
     expect(forwardToCore).toHaveBeenCalledWith("GET", "/users/data-export/json", { headers: { "x-user-id": "u1", "x-user-role": "student" } });
     await app.close();
   });
@@ -377,9 +378,15 @@ describe("GET /users/data-export/pdf", () => {
     await app.close();
   });
 
-  it("sets content-type: application/pdf on a successful proxied response", async () => {
+  it("sets content-type: application/pdf and cache-control: no-store on a successful proxied response", async () => {
     const pdfBytes = Buffer.from("%PDF-1.4");
-    const forwardBinaryToCore = vi.fn().mockResolvedValue({ status: 200, body: pdfBytes, contentType: "application/pdf" });
+    const forwardBinaryToCore = vi.fn().mockResolvedValue({
+      status: 200,
+      isBinary: true,
+      body: pdfBytes,
+      contentType: "application/pdf",
+      contentDisposition: 'attachment; filename="usavvy-data-export.pdf"',
+    });
     const app = buildApp(createTestAppDeps({ forwardBinaryToCore }));
     await app.ready();
     const token = app.jwt.sign({ sub: "u1", role: "student", typ: "access" });
@@ -388,15 +395,38 @@ describe("GET /users/data-export/pdf", () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.headers["content-type"]).toBe("application/pdf");
+    expect(response.headers["cache-control"]).toBe("no-store");
+    expect(response.headers["content-disposition"]).toBe('attachment; filename="usavvy-data-export.pdf"');
     expect(response.rawPayload.equals(pdfBytes)).toBe(true);
     expect(forwardBinaryToCore).toHaveBeenCalledWith("GET", "/users/data-export/pdf", { headers: { "x-user-id": "u1", "x-user-role": "student" } });
     await app.close();
   });
 
-  it("passes through a JSON error envelope (not as a PDF) when core returns a non-2xx response", async () => {
+  it("routes a genuine success even when content-type differs slightly from the exact literal (review finding: isBinary, not a strict content-type string match, drives the branch)", async () => {
+    const pdfBytes = Buffer.from("%PDF-1.4");
     const forwardBinaryToCore = vi
       .fn()
-      .mockResolvedValue({ status: 500, body: { error: { code: "INTERNAL_ERROR", message: "boom" } }, contentType: "application/json" });
+      .mockResolvedValue({ status: 200, isBinary: true, body: pdfBytes, contentType: "application/pdf; charset=binary", contentDisposition: undefined });
+    const app = buildApp(createTestAppDeps({ forwardBinaryToCore }));
+    await app.ready();
+    const token = app.jwt.sign({ sub: "u1", role: "student", typ: "access" });
+
+    const response = await app.inject({ method: "GET", url: "/users/data-export/pdf", headers: { authorization: `Bearer ${token}` } });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.rawPayload.equals(pdfBytes)).toBe(true);
+    expect(response.headers["content-disposition"]).toBe('attachment; filename="usavvy-data-export.pdf"');
+    await app.close();
+  });
+
+  it("passes through a JSON error envelope (not as a PDF) when core returns a non-2xx response", async () => {
+    const forwardBinaryToCore = vi.fn().mockResolvedValue({
+      status: 500,
+      isBinary: false,
+      body: { error: { code: "INTERNAL_ERROR", message: "boom" } },
+      contentType: "application/json",
+      contentDisposition: undefined,
+    });
     const app = buildApp(createTestAppDeps({ forwardBinaryToCore }));
     await app.ready();
     const token = app.jwt.sign({ sub: "u1", role: "student", typ: "access" });

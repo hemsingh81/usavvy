@@ -84,3 +84,13 @@
 - No session-expiry-specific handling in `AccountDeletionPage`'s submit handler — matches Story 1.4's identical already-deferred "no auto-refresh-on-expiry" gap.
 - Timezone display mismatch between the confirmation email (raw UTC) and the page (`toLocaleDateString()`) — matches the identical, already-deferred pattern from Stories 1.2/1.3/1.5.
 - Generated migration/snapshot files lack a trailing newline — matches the established dismissed pattern.
+
+## Deferred from: code review of story-1-8 (2026-08-05)
+
+- `pdfkit`'s default Helvetica font can't render characters outside Latin-1 — a learner whose `displayName`/`goal` contains CJK, Cyrillic, or most emoji gets blank/garbled glyphs in the PDF export with no error surfaced. Needs a bundled Unicode font (a new binary asset dependency), out of scope for this patch round.
+- The shared `PROXY_TIMEOUT_MS` (5s) now also covers `forwardBinary`'s DB read + PDF render + full binary transfer, not just small JSON payloads. Premature to tune given today's tiny export payload; revisit once a later epic's export section grows it.
+- The PDF is fully buffered in memory at three points (pdfkit's internal buffer, `Buffer.concat`, `arrayBuffer()`/`Buffer.from()` on the gateway) with no streaming path or size guard. Premature at today's scale.
+- `getMe`/`ensureLearnerProfile` in `generateDataExport` are two separate, non-transactional queries — a row removed in between would surface as a raw FK-violation error rather than a clean 404. Unreachable today (no account-deletion-execution feature exists yet), matching Story 1.3's identical FK-violation dismissal precedent.
+- Both new export `GET` routes trigger a DB write via `ensureLearnerProfile`'s upsert-on-first-access — a pre-existing pattern (`GET /users/onboarding` already does this), though this story doubles the blast radius (JSON + PDF each independently upsert).
+- If `DataExportPage` unmounts mid-download, the resolved blob is silently discarded with no feedback — matches every other page's identical mount-guard convention in this app.
+- An interest string containing a comma is no longer mistaken for an item boundary in the PDF (fixed), but interests are still flattened into one plain text line with no per-item structure — a minor cosmetic limitation.

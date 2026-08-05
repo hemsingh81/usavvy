@@ -458,7 +458,12 @@ export async function requestAccountDeletion(
  * Story 1.8 (FR-A-8). A thin composition of existing pieces — `getMe` for the account
  * section (no field-mapping logic duplicated), and the three existing row-to-response
  * mappers (Stories 1.3/1.4/1.6) applied to a single `ensureLearnerProfile` read, not
- * three separate queries.
+ * three separate `learnerProfiles` reads for those three sections specifically.
+ * Review finding: `getMe` itself still does its own separate `learnerProfiles` read
+ * (for `onboardingComplete`, which this function discards) and `ensureLearnerProfile`
+ * may do a further read on top of its upsert attempt — so the true total is more than
+ * two round trips; only the three-section duplication this function was written to
+ * avoid is what's actually eliminated.
  */
 export async function generateDataExport(db: Db, userId: string, role: Role): Promise<DataExport> {
   const me = await getMe(db, userId, role);

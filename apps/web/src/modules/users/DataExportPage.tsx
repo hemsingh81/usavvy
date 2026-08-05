@@ -35,6 +35,11 @@ export function DataExportPage() {
   const { accessToken } = session;
 
   function handleDownload(format: Format): void {
+    // Belt-and-suspenders alongside the button's own `disabled` prop below — React
+    // commits this synchronous setDownloading before the event loop can dispatch a
+    // second click, so the `disabled` attribute is what actually prevents re-entrancy
+    // in practice; this guard costs nothing and covers it too if that ever changes.
+    if (downloading[format]) return;
     setErrors((current) => ({ ...current, [format]: undefined }));
     setDownloading((current) => ({ ...current, [format]: true }));
     const { apiUrl } = getWebConfig();
@@ -43,11 +48,17 @@ export function DataExportPage() {
       .then((blob) => {
         if (!isMountedRef.current) return;
         const url = URL.createObjectURL(blob);
+        // Review finding: an un-appended, un-cleaned-up anchor and an immediate
+        // synchronous revokeObjectURL are both known-fragile across browsers — some
+        // haven't necessarily finished reading the blob URL by the time it's revoked
+        // in the same tick. Appending to the DOM and deferring the revoke avoids both.
         const link = document.createElement("a");
         link.href = url;
         link.download = filename;
+        document.body.appendChild(link);
         link.click();
-        URL.revokeObjectURL(url);
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 0);
       })
       .catch((error: unknown) => {
         if (!isMountedRef.current) return;

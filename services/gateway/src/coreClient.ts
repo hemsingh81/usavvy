@@ -17,11 +17,17 @@ export interface BinaryProxyOptions {
 
 export interface BinaryProxyResult {
   status: number;
-  // A successful (2xx) response's body is the raw binary payload; a non-2xx response's
-  // body is the parsed JSON error envelope instead — contentType distinguishes the two,
-  // matching every other route's JSON error path (Story 1.8).
+  // Review finding: branching on `contentType === "application/pdf"` (a strict string
+  // match) meant a genuinely successful response whose header differed even slightly
+  // (e.g. a charset parameter) would silently fall into the "error" path — sent with a
+  // 200 status but as a raw, header-less body. `isBinary` is derived directly from the
+  // upstream response's own ok/not-ok status, the actual signal that matters — a
+  // successful response's body is the raw binary payload; a non-2xx response's body is
+  // the parsed JSON error envelope instead, matching every other route's JSON error path.
+  isBinary: boolean;
   body: Buffer | unknown;
   contentType: string | undefined;
+  contentDisposition: string | undefined;
 }
 
 export interface CoreClient {
@@ -84,16 +90,24 @@ export function createCoreClient(coreServiceUrl: string, logger: Logger, interna
           // core's error responses are always JSON, even for this route — only the
           // success path is binary.
           const body: unknown = await response.json().catch(() => undefined);
-          return { status: response.status, body, contentType: "application/json" };
+          return { status: response.status, isBinary: false, body, contentType: "application/json", contentDisposition: undefined };
         }
         const arrayBuffer = await response.arrayBuffer();
-        return { status: response.status, body: Buffer.from(arrayBuffer), contentType: response.headers.get("content-type") ?? undefined };
+        return {
+          status: response.status,
+          isBinary: true,
+          body: Buffer.from(arrayBuffer),
+          contentType: response.headers.get("content-type") ?? undefined,
+          contentDisposition: response.headers.get("content-disposition") ?? undefined,
+        };
       } catch (error) {
         logger.error("binary proxy to core failed", { path, reason: error instanceof Error ? error.message : String(error) });
         return {
           status: 503,
+          isBinary: false,
           body: { error: { code: "CORE_UNREACHABLE", message: "unable to reach core service" } },
           contentType: "application/json",
+          contentDisposition: undefined,
         };
       }
     },

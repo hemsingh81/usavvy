@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { DataExportPage } from "../../../src/modules/users/DataExportPage.js";
@@ -77,6 +77,30 @@ describe("DataExportPage", () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/users/data-export/pdf"), expect.anything()));
     await waitFor(() => expect(createObjectURL).toHaveBeenCalled());
+  });
+
+  it("the button is disabled while its download is in flight, and a click while disabled fires no second request (review finding: rapid re-entrancy)", async () => {
+    let resolveResponse!: (value: Response) => void;
+    const fetchMock = vi.fn().mockImplementation(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveResponse = resolve;
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("URL", { ...URL, createObjectURL: vi.fn().mockReturnValue("blob:mock-url"), revokeObjectURL: vi.fn() });
+    renderWithSession({ accessToken: "a-token" });
+    const button = screen.getByRole("button", { name: /download as json/i });
+
+    fireEvent.click(button);
+
+    await waitFor(() => expect(button).toBeDisabled());
+    // A disabled button dispatches no click handler at all — the guard inside
+    // handleDownload backstops this same invariant if it's ever bypassed.
+    fireEvent.click(button);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    resolveResponse({ ok: true, blob: () => Promise.resolve(new Blob(['{"account":{}}'])) } as unknown as Response);
   });
 
   it("shows an inline error without removing the other button when a download fails", async () => {

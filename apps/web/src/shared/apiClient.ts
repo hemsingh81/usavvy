@@ -16,6 +16,18 @@ interface Schema<T> {
   parse: (value: unknown) => T;
 }
 
+// Review finding: apiRequest and apiRequestBlob previously duplicated this exact
+// try/catch → parse-error-envelope → throw block verbatim. Shared here since both now
+// need it identically.
+async function throwForErrorResponse(response: Response): Promise<never> {
+  const json: unknown = await response.json().catch(() => undefined);
+  const parsedError = errorEnvelopeSchema.safeParse(json);
+  if (parsedError.success) {
+    throw new ApiError(parsedError.data.error.code, parsedError.data.error.message);
+  }
+  throw new ApiError("UNKNOWN_ERROR", "an unexpected error occurred");
+}
+
 /**
  * Thin typed fetch wrapper for gateway routes — shared by every feature module
  * (auth, users, ...) rather than each redefining it. Mirrors the same pattern
@@ -42,14 +54,10 @@ export async function apiRequest<T>(
     throw new ApiError("NETWORK_ERROR", "unable to reach the server");
   }
 
-  const json: unknown = await response.json().catch(() => undefined);
   if (!response.ok) {
-    const parsedError = errorEnvelopeSchema.safeParse(json);
-    if (parsedError.success) {
-      throw new ApiError(parsedError.data.error.code, parsedError.data.error.message);
-    }
-    throw new ApiError("UNKNOWN_ERROR", "an unexpected error occurred");
+    return throwForErrorResponse(response);
   }
+  const json: unknown = await response.json().catch(() => undefined);
   return schema.parse(json);
 }
 
@@ -70,12 +78,7 @@ export async function apiRequestBlob(apiUrl: string, path: string, accessToken: 
   }
 
   if (!response.ok) {
-    const json: unknown = await response.json().catch(() => undefined);
-    const parsedError = errorEnvelopeSchema.safeParse(json);
-    if (parsedError.success) {
-      throw new ApiError(parsedError.data.error.code, parsedError.data.error.message);
-    }
-    throw new ApiError("UNKNOWN_ERROR", "an unexpected error occurred");
+    return throwForErrorResponse(response);
   }
   return response.blob();
 }

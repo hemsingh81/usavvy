@@ -70,18 +70,26 @@ export function registerAuthProxyRoutes(app: FastifyInstance, deps: AuthProxyDep
     reply.code(result.status).send(result.body);
   });
 
+  // Story 1.8 review finding: this is the "download my personal data" endpoint
+  // (identity fields, onboarding answers, preferences, privacy settings) — no-store
+  // keeps it out of the browser's disk cache and any intermediary cache.
   app.get("/users/data-export/json", { preHandler: requireAuth }, async (request, reply) => {
     const result = await deps.forwardToCore("GET", "/users/data-export/json", { headers: trustedHeaders(request) });
-    reply.code(result.status).send(result.body);
+    reply.header("cache-control", "no-store").code(result.status).send(result.body);
   });
 
   app.get("/users/data-export/pdf", { preHandler: requireAuth }, async (request, reply) => {
     const result = await deps.forwardBinaryToCore("GET", "/users/data-export/pdf", { headers: trustedHeaders(request) });
-    if (result.contentType === "application/pdf") {
+    reply.header("cache-control", "no-store");
+    // Review finding: branching on `result.isBinary` (derived from the upstream
+    // response's own status) rather than a strict content-type string match — a
+    // genuinely successful response must never fall into the JSON-error path just
+    // because its content-type header wasn't byte-for-byte "application/pdf".
+    if (result.isBinary) {
       reply
         .code(result.status)
-        .type("application/pdf")
-        .header("content-disposition", 'attachment; filename="usavvy-data-export.pdf"')
+        .type(result.contentType ?? "application/pdf")
+        .header("content-disposition", result.contentDisposition ?? 'attachment; filename="usavvy-data-export.pdf"')
         .send(result.body);
       return;
     }
