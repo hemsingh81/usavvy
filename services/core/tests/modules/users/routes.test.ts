@@ -3,7 +3,7 @@ import postgres from "postgres";
 import { eq } from "drizzle-orm";
 import { buildApp } from "../../../src/app.js";
 import { createDb } from "../../../src/db/client.js";
-import { learnerProfiles, users } from "../../../src/db/schema.js";
+import { learnerProfiles, notifications, users } from "../../../src/db/schema.js";
 import { loadCoreConfig } from "../../../src/config.js";
 import { createTestAppDeps, TEST_INTERNAL_SECRET } from "../../testHelpers.js";
 
@@ -18,7 +18,10 @@ afterEach(async () => {
     const email = createdEmails.pop();
     if (!email) continue;
     const [user] = await db.select().from(users).where(eq(users.email, email));
-    if (user) await db.delete(learnerProfiles).where(eq(learnerProfiles.userId, user.id));
+    if (user) {
+      await db.delete(learnerProfiles).where(eq(learnerProfiles.userId, user.id));
+      await db.delete(notifications).where(eq(notifications.userId, user.id));
+    }
     await db.delete(users).where(eq(users.email, email));
   }
 });
@@ -694,6 +697,26 @@ describe("POST /users/account-deletion", () => {
     await app.close();
   });
 
+  it("also creates an in-progress Notification (Story 1.10)", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+    const email = uniqueEmail("account-deletion-notification");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+
+    await app.inject({
+      method: "POST",
+      url: "/users/account-deletion",
+      headers: { ...internalHeaders, "x-user-id": user!.id, "x-user-role": "student" },
+    });
+
+    const listResponse = await app.inject({
+      method: "GET",
+      url: "/users/notifications",
+      headers: { ...internalHeaders, "x-user-id": user!.id, "x-user-role": "student" },
+    });
+    expect(listResponse.json()).toMatchObject([{ sourceProcessType: "account_deletion", sourceProcessStatus: "in_progress" }]);
+    await app.close();
+  });
+
   it("returns 409 ACCOUNT_DELETION_ALREADY_REQUESTED through the real route on a second request", async () => {
     const app = buildApp(createTestAppDeps({ db }));
     const email = uniqueEmail("account-deletion-twice");
@@ -764,6 +787,140 @@ describe("GET /users/data-export/pdf", () => {
     expect(response.statusCode).toBe(200);
     expect(response.headers["content-type"]).toBe("application/pdf");
     expect(response.rawPayload.subarray(0, 5).toString("ascii")).toBe("%PDF-");
+    await app.close();
+  });
+});
+
+describe("GET /users/notifications", () => {
+  it("requires authentication (401 with no trusted headers)", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+
+    const response = await app.inject({ method: "GET", url: "/users/notifications", headers: internalHeaders });
+
+    expect(response.statusCode).toBe(401);
+    await app.close();
+  });
+
+  it("returns an empty array when the learner has no notifications", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+    const email = uniqueEmail("notifications-empty");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/users/notifications",
+      headers: { ...internalHeaders, "x-user-id": user!.id, "x-user-role": "student" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual([]);
+    await app.close();
+  });
+});
+
+describe("PUT /users/notifications/:id/read", () => {
+  it("requires authentication (401 with no trusted headers)", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+
+    const response = await app.inject({ method: "PUT", url: "/users/notifications/some-id/read", headers: internalHeaders });
+
+    expect(response.statusCode).toBe(401);
+    await app.close();
+  });
+
+  it("returns 404 for another user's notification id (ownership check through the real route)", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+    const email = uniqueEmail("notifications-read-owner");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+    const otherEmail = uniqueEmail("notifications-read-other");
+    const [otherUser] = await db.insert(users).values({ email: otherEmail, emailVerifiedAt: new Date() }).returning();
+    await app.inject({
+      method: "POST",
+      url: "/users/account-deletion",
+      headers: { ...internalHeaders, "x-user-id": otherUser!.id, "x-user-role": "student" },
+    });
+    const otherList = await app.inject({
+      method: "GET",
+      url: "/users/notifications",
+      headers: { ...internalHeaders, "x-user-id": otherUser!.id, "x-user-role": "student" },
+    });
+    const otherNotificationId = (otherList.json() as { id: string }[])[0]!.id;
+
+    const response = await app.inject({
+      method: "PUT",
+      url: `/users/notifications/${otherNotificationId}/read`,
+      headers: { ...internalHeaders, "x-user-id": user!.id, "x-user-role": "student" },
+    });
+
+    expect(response.statusCode).toBe(404);
+    await app.close();
+  });
+});
+
+describe("DELETE /users/notifications/:id", () => {
+  it("requires authentication (401 with no trusted headers)", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+
+    const response = await app.inject({ method: "DELETE", url: "/users/notifications/some-id", headers: internalHeaders });
+
+    expect(response.statusCode).toBe(401);
+    await app.close();
+  });
+
+  it("returns 409 when the referenced source process is still in progress", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+    const email = uniqueEmail("notifications-clear-in-progress");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+    const headers = { ...internalHeaders, "x-user-id": user!.id, "x-user-role": "student" };
+    await app.inject({ method: "POST", url: "/users/account-deletion", headers });
+    const list = await app.inject({ method: "GET", url: "/users/notifications", headers });
+    const notificationId = (list.json() as { id: string }[])[0]!.id;
+
+    const response = await app.inject({ method: "DELETE", url: `/users/notifications/${notificationId}`, headers });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toMatchObject({ error: { code: "NOTIFICATION_STILL_IN_PROGRESS" } });
+    await app.close();
+  });
+
+  it("returns 204 and removes a clearable notification", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+    const email = uniqueEmail("notifications-clear-ok");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+    await db.insert(notifications).values({ userId: user!.id, type: "info", message: "clear me" });
+    const headers = { ...internalHeaders, "x-user-id": user!.id, "x-user-role": "student" };
+    const list = await app.inject({ method: "GET", url: "/users/notifications", headers });
+    const notificationId = (list.json() as { id: string }[])[0]!.id;
+
+    const response = await app.inject({ method: "DELETE", url: `/users/notifications/${notificationId}`, headers });
+
+    expect(response.statusCode).toBe(204);
+    const after = await app.inject({ method: "GET", url: "/users/notifications", headers });
+    expect(after.json()).toEqual([]);
+    await app.close();
+  });
+
+  it("returns 404 for another user's notification id (ownership check through the real route)", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+    const email = uniqueEmail("notifications-clear-owner");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+    const otherEmail = uniqueEmail("notifications-clear-other");
+    const [otherUser] = await db.insert(users).values({ email: otherEmail, emailVerifiedAt: new Date() }).returning();
+    await db.insert(notifications).values({ userId: otherUser!.id, type: "info", message: "not yours" });
+    const otherList = await app.inject({
+      method: "GET",
+      url: "/users/notifications",
+      headers: { ...internalHeaders, "x-user-id": otherUser!.id, "x-user-role": "student" },
+    });
+    const otherNotificationId = (otherList.json() as { id: string }[])[0]!.id;
+
+    const response = await app.inject({
+      method: "DELETE",
+      url: `/users/notifications/${otherNotificationId}`,
+      headers: { ...internalHeaders, "x-user-id": user!.id, "x-user-role": "student" },
+    });
+
+    expect(response.statusCode).toBe(404);
     await app.close();
   });
 });

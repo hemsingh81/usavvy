@@ -1,4 +1,4 @@
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { AppError, type Logger } from "@usavvy/service-kernel";
 import { can, type Role } from "@usavvy/config";
 import {
@@ -12,6 +12,8 @@ import {
   type LearnerPrivacySettings,
   type LearnerProfileResponse,
   type MeResponse,
+  type NotificationResponse,
+  type NotificationSourceProcessStatus,
   type OnboardingStepInput,
   type ParentalConsentStatus,
   type PreferencesUpdateInput,
@@ -19,7 +21,7 @@ import {
   type UpdateDisplayNameInput,
 } from "@usavvy/shared-types";
 import type { Db } from "../../db/client.js";
-import { learnerProfiles, parentalConsentTokens, users } from "../../db/schema.js";
+import { learnerProfiles, notifications, parentalConsentTokens, users } from "../../db/schema.js";
 import type { NotificationPort } from "../notification/index.js";
 import type { PubSubPort } from "../pubsub/index.js";
 import { normalizeEmail } from "../auth/index.js";
@@ -434,7 +436,7 @@ export async function requestAccountDeletion(
   // account permanently stuck (the CAS guard above would reject every future retry with
   // ACCOUNT_DELETION_ALREADY_REQUESTED, with no way to recover). Logged, not silently
   // swallowed (AD-17), but best-effort rather than blocking the already-correct response.
-  const [emailResult, publishResult] = await Promise.allSettled([
+  const [emailResult, publishResult, notificationResult] = await Promise.allSettled([
     notificationPort.sendEmail({
       to: user.email,
       subject: "Your Usavvy account deletion request",
@@ -444,12 +446,24 @@ export async function requestAccountDeletion(
       type: "user.deletion_requested",
       payload: { userId, scheduledDeletionAt: scheduledDeletionAt.toISOString() },
     }),
+    // Story 1.10 (FR-A-10): the one real, already-shipped "in progress, resolves later"
+    // process in this codebase — see that story's own Dev Notes on why no other epic's
+    // example event (reminder/ingestion/grading) is buildable yet.
+    createNotification(db, notificationPort, logger, userId, {
+      type: "account_deletion_requested",
+      message: "Your account deletion is scheduled",
+      sourceProcessType: "account_deletion",
+      sourceProcessStatus: "in_progress",
+    }),
   ]);
   if (emailResult.status === "rejected") {
     logger.error("account-deletion confirmation email failed", { userId, reason: String(emailResult.reason) });
   }
   if (publishResult.status === "rejected") {
     logger.error("account-deletion domain event publish failed", { userId, reason: String(publishResult.reason) });
+  }
+  if (notificationResult.status === "rejected") {
+    logger.error("account-deletion notification creation failed", { userId, reason: String(notificationResult.reason) });
   }
 
   return { scheduledDeletionAt: scheduledDeletionAt.toISOString() };
@@ -482,4 +496,91 @@ export async function generateDataExport(db: Db, userId: string, role: Role): Pr
     preferences: toLearnerPreferences(profileRow),
     privacySettings: toPrivacySettings(profileRow),
   };
+}
+
+type NotificationRow = typeof notifications.$inferSelect;
+
+function toNotificationResponse(row: NotificationRow): NotificationResponse {
+  return {
+    id: row.id,
+    type: row.type,
+    message: row.message,
+    sourceProcessType: row.sourceProcessType,
+    sourceProcessStatus: row.sourceProcessStatus,
+    readAt: row.readAt?.toISOString() ?? null,
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
+/**
+ * Story 1.10 (FR-A-10). AD-1/AD-13: the persisted row is the source of truth for the
+ * Notification Center; NotificationPort's in-app channel is a best-effort side channel
+ * (mock adapter today, per Story 1.0) that must never block or roll back the row above —
+ * same Promise.allSettled/logged-not-swallowed shape as requestAccountDeletion's own
+ * email/publish calls.
+ */
+export async function createNotification(
+  db: Db,
+  notificationPort: NotificationPort,
+  logger: Logger,
+  userId: string,
+  input: { type: string; message: string; sourceProcessType?: string; sourceProcessStatus?: NotificationSourceProcessStatus },
+): Promise<NotificationResponse> {
+  const [row] = await db
+    .insert(notifications)
+    .values({
+      userId,
+      type: input.type,
+      message: input.message,
+      sourceProcessType: input.sourceProcessType ?? null,
+      sourceProcessStatus: input.sourceProcessStatus ?? null,
+    })
+    .returning();
+  if (!row) {
+    throw new AppError("INTERNAL_ERROR", "failed to create notification", 500);
+  }
+
+  try {
+    await notificationPort.sendInApp({ userId, message: input.message });
+  } catch (error) {
+    logger.error("in-app notification delivery failed", { userId, notificationId: row.id, reason: String(error) });
+  }
+
+  return toNotificationResponse(row);
+}
+
+export async function listNotifications(db: Db, userId: string): Promise<NotificationResponse[]> {
+  const rows = await db.select().from(notifications).where(eq(notifications.userId, userId)).orderBy(desc(notifications.createdAt));
+  return rows.map(toNotificationResponse);
+}
+
+/**
+ * The AND user_id = userId in this same WHERE (not a separate ownership pre-check) is
+ * load-bearing: another learner's notification id returns NOT_FOUND rather than leaking
+ * whether that id exists at all.
+ */
+export async function markNotificationRead(db: Db, userId: string, notificationId: string): Promise<NotificationResponse> {
+  const [row] = await db
+    .update(notifications)
+    .set({ readAt: new Date() })
+    .where(and(eq(notifications.id, notificationId), eq(notifications.userId, userId)))
+    .returning();
+  if (!row) {
+    throw new AppError("NOT_FOUND", "notification not found", 404);
+  }
+  return toNotificationResponse(row);
+}
+
+export async function clearNotification(db: Db, userId: string, notificationId: string): Promise<void> {
+  const [row] = await db
+    .select()
+    .from(notifications)
+    .where(and(eq(notifications.id, notificationId), eq(notifications.userId, userId)));
+  if (!row) {
+    throw new AppError("NOT_FOUND", "notification not found", 404);
+  }
+  if (row.sourceProcessStatus === "in_progress") {
+    throw new AppError("NOTIFICATION_STILL_IN_PROGRESS", "this notification can't be cleared until its process resolves", 409);
+  }
+  await db.delete(notifications).where(and(eq(notifications.id, notificationId), eq(notifications.userId, userId)));
 }

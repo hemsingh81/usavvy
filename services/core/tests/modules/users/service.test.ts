@@ -3,7 +3,7 @@ import postgres from "postgres";
 import { eq } from "drizzle-orm";
 import { createLogger } from "@usavvy/service-kernel";
 import { createDb, type Db } from "../../../src/db/client.js";
-import { learnerProfiles, parentalConsentTokens, users } from "../../../src/db/schema.js";
+import { learnerProfiles, notifications, parentalConsentTokens, users } from "../../../src/db/schema.js";
 import { loadCoreConfig } from "../../../src/config.js";
 import { createMockNotificationPort, createMockPubSubPort } from "../../testHelpers.js";
 import {
@@ -38,6 +38,7 @@ afterEach(async () => {
     if (user) {
       await db.delete(parentalConsentTokens).where(eq(parentalConsentTokens.userId, user.id));
       await db.delete(learnerProfiles).where(eq(learnerProfiles.userId, user.id));
+      await db.delete(notifications).where(eq(notifications.userId, user.id));
       await db.delete(users).where(eq(users.id, user.id));
     }
   }

@@ -123,3 +123,21 @@ export const learnerProfiles = pgTable("learner_profiles", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   version: integer("version").notNull().default(1),
 });
+
+// Story 1.10 (FR-A-10): owned by `auth/users` per AD-14/AD-18 — the Notification Center
+// is a read-projection over this table, not a second source of truth. sourceProcessType/
+// sourceProcessStatus are both nullable together: a notification with no source process
+// (plain informational message) is always clearable; one that has a process carries its
+// current status alongside it so "is this resolved" is a lookup, not a guess (AD-18).
+export const notifications = pgTable("notifications", {
+  id: uuid("id").primaryKey().default(uuidv7Default),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id),
+  type: text("type").notNull(),
+  message: text("message").notNull(),
+  sourceProcessType: text("source_process_type"),
+  sourceProcessStatus: text("source_process_status").$type<"in_progress" | "resolved">(),
+  readAt: timestamp("read_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});

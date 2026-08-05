@@ -16,12 +16,15 @@ import type { PubSubPort } from "../pubsub/index.js";
 import { calculateAge } from "./age.js";
 import { generateDataExportPdf } from "./dataExportPdf.js";
 import {
+  clearNotification,
   declareAge,
   generateDataExport,
   getMe,
   getOnboarding,
   getPreferences,
   getPrivacySettings,
+  listNotifications,
+  markNotificationRead,
   recordParentalConsent,
   requestAccountDeletion,
   saveOnboardingStep,
@@ -56,6 +59,7 @@ const birthdateField = z.iso
 
 const ageDeclarationSchema = z.object({ birthdate: birthdateField, parentEmail: emailField.optional() });
 const parentalConsentSchema = z.object({ token: z.string().min(1) });
+const notificationIdParamsSchema = z.object({ id: z.string().min(1) });
 
 // Trusted headers set only by gateway's JWT-verify preHandler (AD-7) — core never
 // re-verifies the JWT itself. A request missing them didn't come through gateway
@@ -147,5 +151,25 @@ export function registerUsersRoutes(app: FastifyInstance, deps: UsersRouteDeps):
     const data = await generateDataExport(deps.db, userId, role);
     const buffer = await generateDataExportPdf(data);
     reply.type("application/pdf").header("content-disposition", 'attachment; filename="usavvy-data-export.pdf"').send(buffer);
+  });
+
+  app.get("/users/notifications", async (request, reply) => {
+    const { userId } = requireTrustedUser(request);
+    reply.send(await listNotifications(deps.db, userId));
+  });
+
+  // Story 1.10: the first routes in this codebase with a path parameter — validated
+  // explicitly rather than trusting request.params blindly.
+  app.put("/users/notifications/:id/read", async (request, reply) => {
+    const { userId } = requireTrustedUser(request);
+    const { id } = parseOrThrow(notificationIdParamsSchema, request.params);
+    reply.send(await markNotificationRead(deps.db, userId, id));
+  });
+
+  app.delete("/users/notifications/:id", async (request, reply) => {
+    const { userId } = requireTrustedUser(request);
+    const { id } = parseOrThrow(notificationIdParamsSchema, request.params);
+    await clearNotification(deps.db, userId, id);
+    reply.code(204).send();
   });
 }

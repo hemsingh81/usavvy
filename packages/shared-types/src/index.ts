@@ -50,3 +50,10 @@ export {
 } from "./privacy.js";
 export { accountDeletionResponseSchema, type AccountDeletionResponse } from "./accountDeletion.js";
 export { dataExportSchema, type DataExport } from "./dataExport.js";
+export {
+  notificationSourceProcessStatusSchema,
+  type NotificationSourceProcessStatus,
+  notificationResponseSchema,
+  type NotificationResponse,
+  notificationListResponseSchema,
+} from "./notification.js";
