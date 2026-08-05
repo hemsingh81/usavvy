@@ -2,6 +2,8 @@ import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { HomePage } from "./HomePage.js";
 import { getWebConfig } from "./config.js";
 import { ColorThemeProvider } from "./ColorThemeProvider.js";
+import { NotificationsProvider } from "./useNotifications.js";
+import { AppHeader } from "./AppHeader.js";
 import { AuthProvider, LoginPage, SignUpPage, VerifyEmailPage } from "../modules/auth/index.js";
 import {
   AccountDeletionPage,
@@ -43,23 +45,26 @@ export function App() {
   return (
     <AuthProvider apiUrl={apiUrl}>
       <ColorThemeProvider>
-        <BrowserRouter>
-          <Routes>
-            <Route path="/" element={<HomePage apiUrl={apiUrl} />} />
-            <Route path="/signup" element={<SignUpPage />} />
-            <Route path="/login" element={<LoginPage />} />
-            <Route path="/verify-email" element={<VerifyEmailPage />} />
-            <Route path="/age-declaration" element={<AgeDeclarationPage />} />
-            <Route path="/waiting-for-consent" element={<WaitingForConsentPage />} />
-            <Route path="/parental-consent" element={<ParentalConsentPage />} />
-            <Route path="/onboarding" element={<OnboardingWizardPage />} />
-            <Route path="/preferences" element={<PreferencesPage />} />
-            <Route path="/profile" element={<ProfilePage />} />
-            <Route path="/account-deletion" element={<AccountDeletionPage />} />
-            <Route path="/data-export" element={<DataExportPage />} />
-            <Route path="*" element={<NotFoundPage />} />
-          </Routes>
-        </BrowserRouter>
+        <NotificationsProvider>
+          <BrowserRouter>
+            <AppHeader />
+            <Routes>
+              <Route path="/" element={<HomePage apiUrl={apiUrl} />} />
+              <Route path="/signup" element={<SignUpPage />} />
+              <Route path="/login" element={<LoginPage />} />
+              <Route path="/verify-email" element={<VerifyEmailPage />} />
+              <Route path="/age-declaration" element={<AgeDeclarationPage />} />
+              <Route path="/waiting-for-consent" element={<WaitingForConsentPage />} />
+              <Route path="/parental-consent" element={<ParentalConsentPage />} />
+              <Route path="/onboarding" element={<OnboardingWizardPage />} />
+              <Route path="/preferences" element={<PreferencesPage />} />
+              <Route path="/profile" element={<ProfilePage />} />
+              <Route path="/account-deletion" element={<AccountDeletionPage />} />
+              <Route path="/data-export" element={<DataExportPage />} />
+              <Route path="*" element={<NotFoundPage />} />
+            </Routes>
+          </BrowserRouter>
+        </NotificationsProvider>
       </ColorThemeProvider>
     </AuthProvider>
   );

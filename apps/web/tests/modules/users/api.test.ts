@@ -166,4 +166,77 @@ describe("createUsersApi", () => {
       expect.objectContaining({ method: "PUT", body: JSON.stringify({ voiceEnabled: false }) }),
     );
   });
+
+  it("getNotifications sends the access token and no body, returns the parsed list", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve([
+          { id: "n1", type: "info", message: "hi", sourceProcessType: null, sourceProcessStatus: null, readAt: null, createdAt: "2026-01-15T00:00:00.000Z" },
+        ]),
+    } as unknown as Response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const api = createUsersApi("http://localhost:3000");
+    const result = await api.getNotifications("a-token");
+
+    expect(result).toHaveLength(1);
+    const [, callOptions] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(callOptions.method).toBe("GET");
+    expect(callOptions.headers).toEqual(expect.objectContaining({ authorization: "Bearer a-token" }));
+  });
+
+  it("markNotificationRead PUTs to the id-specific path with no body, returns the updated notification", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          id: "n1",
+          type: "info",
+          message: "hi",
+          sourceProcessType: null,
+          sourceProcessStatus: null,
+          readAt: "2026-01-16T00:00:00.000Z",
+          createdAt: "2026-01-15T00:00:00.000Z",
+        }),
+    } as unknown as Response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const api = createUsersApi("http://localhost:3000");
+    const result = await api.markNotificationRead("a-token", "n1");
+
+    expect(result.readAt).toBe("2026-01-16T00:00:00.000Z");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:3000/users/notifications/n1/read",
+      expect.objectContaining({ method: "PUT" }),
+    );
+  });
+
+  it("clearNotification DELETEs to the id-specific path and resolves with no value on a 204", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve(undefined) } as unknown as Response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const api = createUsersApi("http://localhost:3000");
+    const result = await api.clearNotification("a-token", "n1");
+
+    expect(result).toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:3000/users/notifications/n1",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+  });
+
+  it("clearNotification maps a 409 (still in progress) error envelope to an ApiError", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        json: () => Promise.resolve({ error: { code: "NOTIFICATION_STILL_IN_PROGRESS", message: "still in progress" } }),
+      } as unknown as Response),
+    );
+
+    const api = createUsersApi("http://localhost:3000");
+
+    await expect(api.clearNotification("a-token", "n1")).rejects.toMatchObject({ code: "NOTIFICATION_STILL_IN_PROGRESS" });
+  });
 });

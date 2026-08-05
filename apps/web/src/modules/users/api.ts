@@ -5,6 +5,8 @@ import {
   learnerPrivacySettingsSchema,
   learnerProfileResponseSchema,
   meResponseSchema,
+  notificationListResponseSchema,
+  notificationResponseSchema,
   parentalConsentResponseSchema,
   type AccountDeletionResponse,
   type AgeDeclarationResponse,
@@ -12,6 +14,7 @@ import {
   type LearnerPrivacySettings,
   type LearnerProfileResponse,
   type MeResponse,
+  type NotificationResponse,
   type OnboardingStepInput,
   type ParentalConsentResponse,
   type PreferencesUpdateInput,
@@ -19,6 +22,11 @@ import {
   type UpdateDisplayNameInput,
 } from "@usavvy/shared-types";
 import { apiRequest } from "../../shared/apiClient.js";
+
+// apiRequest requires a schema for every call; DELETE /users/notifications/:id returns
+// a 204 with no body, so there's nothing to validate — no need to pull in zod here just
+// to express "nothing", since apiClient.ts's Schema<T> interface only needs a `.parse`.
+const voidSchema = { parse: (): void => undefined };
 
 /** Thin typed fetch wrapper for gateway's /users/* routes. */
 export function createUsersApi(apiUrl: string) {
@@ -43,6 +51,12 @@ export function createUsersApi(apiUrl: string) {
       apiRequest(apiUrl, "/users/privacy-settings", learnerPrivacySettingsSchema, { method: "PUT", body: input, accessToken }),
     requestAccountDeletion: (accessToken: string): Promise<AccountDeletionResponse> =>
       apiRequest(apiUrl, "/users/account-deletion", accountDeletionResponseSchema, { method: "POST", accessToken }),
+    getNotifications: (accessToken: string): Promise<NotificationResponse[]> =>
+      apiRequest(apiUrl, "/users/notifications", notificationListResponseSchema, { method: "GET", accessToken }),
+    markNotificationRead: (accessToken: string, id: string): Promise<NotificationResponse> =>
+      apiRequest(apiUrl, `/users/notifications/${id}/read`, notificationResponseSchema, { method: "PUT", accessToken }),
+    clearNotification: (accessToken: string, id: string): Promise<void> =>
+      apiRequest(apiUrl, `/users/notifications/${id}`, voidSchema, { method: "DELETE", accessToken }),
   };
 }
 

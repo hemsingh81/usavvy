@@ -4,7 +4,7 @@ baseline_commit: 1f8d246
 
 # Story 1.10: Notification Center
 
-Status: ready-for-dev
+Status: review
 
 *(Epic 1, FR-A-10. Architecture's own AD-18 ("Notification Center and Activity History are read-projections, not new sources of truth") settles the biggest design question up front: the Notification Center persists its own `Notification` record — owned by `core`'s `auth/users` area alongside `User`/`LearnerProfile` (per AD-14's ownership table) — created via `NotificationPort`'s existing in-app channel, alongside the email channel Story 1.1 already built. This is genuinely new ground in three ways this story's Dev Notes call out explicitly: (1) it's the first entity in this codebase referenced by a mutable "is this resolved yet" status that gates a user action (clearing), (2) it's the first route in this codebase with a path parameter (`/users/notifications/:id/...`), and (3) no "app chrome" (a persistent header/nav visible across pages) exists yet anywhere in `apps/web` — every page today renders its own bare `<main>` — so a minimal one is now unavoidable for the bell icon to have anywhere to live.)*
 
@@ -48,21 +48,21 @@ so that I know what needs my attention without losing track of things still in p
   - [x] Added three routes to `services/gateway/src/authProxy.ts` following the exact existing `requireAuth` + `forwardToCore` + `trustedHeaders` shape: `GET /users/notifications`, `PUT /users/notifications/:id/read`, `DELETE /users/notifications/:id`. No change needed to `forwardToCore`/`coreClient.ts`
   - [x] Extended `services/gateway/tests/authProxy.test.ts` — 7 new tests, all green
 
-- [ ] **Task 4: `apps/web` — bell icon, notification panel, and the app chrome it needs to live in** (AC: #1-4)
-  - [ ] **No persistent header/nav exists anywhere in `apps/web` today** (verified — every page is its own bare `<main>`, confirmed by reading `HomePage.tsx`/`PreferencesPage.tsx`/every other page). A bell icon literally has nowhere to render without one. Add a minimal new `apps/web/src/app/AppHeader.tsx` — not a full nav/branding header, just enough chrome to host the bell — rendered once in `App.tsx`, above `<Routes>`, only when a session exists (matches AC's own framing: notifications are a logged-in concept). This is the same "a story must leave the system working end-to-end, not just satisfy its literal AC text" reasoning Story 1.9 already applied to its own missing `body` base-CSS-rule gap — building the bare-minimum chrome needed for the bell to exist is in scope; a full site-wide nav/branding redesign is explicitly not (see Scope note)
-  - [ ] New `apps/web/src/app/useNotifications.tsx` (a hook + thin provider, mirroring `ColorThemeProvider`'s already-established shape in this same `app/` folder): fetches `GET /users/notifications` once when a session exists (same mount-effect + `cancelled` guard convention as every other page's load effect), exposes `notifications`, `unreadCount` (derived: `readAt === null`), `markRead(id)`, `clear(id)` — both calling the new `createUsersApi` methods below and updating local state from the response (`markRead`) or by filtering the cleared id out (`clear`), matching this codebase's existing "update local state from the server response, don't just assume the request shape" convention
-  - [ ] Extend `apps/web/src/modules/users/api.ts`'s `createUsersApi`: `getNotifications`, `markNotificationRead(accessToken, id)` (`PUT`), `clearNotification(accessToken, id)` (`DELETE`, no response body — resolves `void` on a `204`)
-  - [ ] `AppHeader.tsx`: a bell `<button>` showing an `accent`-colored dot (`DESIGN.md`'s `notification-center.unread-dot` token) when `unreadCount > 0`, toggling a panel on click. The panel (`background: surface` per the same token) lists notifications newest-first (already sorted by the backend); each row is a `<button>` that calls `markRead(id)` on click (AC #2 — reading and clearing are independent actions, so this is separate from the clear control); each row also has a clear control that's a working button calling `clear(id)` when `sourceProcessStatus !== "in_progress"`, and a `disabled` button with a `title="still in progress"` tooltip (native `title` attribute — no existing tooltip component in this codebase to reuse) with a small locked-clear icon styled via `DESIGN.md`'s `in-progress-lock-icon: on-surface-variant` token when it is
-  - [ ] Wire `AppHeader` into `App.tsx`: rendered as a sibling immediately inside `AuthProvider`/`ColorThemeProvider`, above `<BrowserRouter>` — like `ColorThemeProvider`, it needs `useAuth()`'s session and should persist across route changes, not remount per-page
-  - [ ] New `.usavvy-notification-*` classes in `apps/web/src/shared/components.css` per the tokens above
+- [x] **Task 4: `apps/web` — bell icon, notification panel, and the app chrome it needs to live in** (AC: #1-4)
+  - [x] **No persistent header/nav exists anywhere in `apps/web` today** (verified — every page is its own bare `<main>`, confirmed by reading `HomePage.tsx`/`PreferencesPage.tsx`/every other page). A bell icon literally has nowhere to render without one. Add a minimal new `apps/web/src/app/AppHeader.tsx` — not a full nav/branding header, just enough chrome to host the bell — rendered once in `App.tsx`, above `<Routes>`, only when a session exists (matches AC's own framing: notifications are a logged-in concept). This is the same "a story must leave the system working end-to-end, not just satisfy its literal AC text" reasoning Story 1.9 already applied to its own missing `body` base-CSS-rule gap — building the bare-minimum chrome needed for the bell to exist is in scope; a full site-wide nav/branding redesign is explicitly not (see Scope note)
+  - [x] New `apps/web/src/app/useNotifications.tsx` (a hook + thin provider, mirroring `ColorThemeProvider`'s already-established shape in this same `app/` folder): fetches `GET /users/notifications` once when a session exists (same mount-effect + `cancelled` guard convention as every other page's load effect), exposes `notifications`, `unreadCount` (derived: `readAt === null`), `markRead(id)`, `clear(id)` — both calling the new `createUsersApi` methods below and updating local state from the response (`markRead`) or by filtering the cleared id out (`clear`), matching this codebase's existing "update local state from the server response, don't just assume the request shape" convention
+  - [x] Extend `apps/web/src/modules/users/api.ts`'s `createUsersApi`: `getNotifications`, `markNotificationRead(accessToken, id)` (`PUT`), `clearNotification(accessToken, id)` (`DELETE`, no response body — resolves `void` on a `204`)
+  - [x] `AppHeader.tsx`: a bell `<button>` showing an `accent`-colored dot (`DESIGN.md`'s `notification-center.unread-dot` token) when `unreadCount > 0`, toggling a panel on click. The panel (`background: surface` per the same token) lists notifications newest-first (already sorted by the backend); each row is a `<button>` that calls `markRead(id)` on click (AC #2 — reading and clearing are independent actions, so this is separate from the clear control); each row also has a clear control that's a working button calling `clear(id)` when `sourceProcessStatus !== "in_progress"`, and a `disabled` button with a `title="still in progress"` tooltip (native `title` attribute — no existing tooltip component in this codebase to reuse) with a small locked-clear icon styled via `DESIGN.md`'s `in-progress-lock-icon: on-surface-variant` token when it is
+  - [x] Wire `AppHeader` into `App.tsx`: rendered as a sibling immediately inside `AuthProvider`/`ColorThemeProvider`, above `<BrowserRouter>` — like `ColorThemeProvider`, it needs `useAuth()`'s session and should persist across route changes, not remount per-page
+  - [x] New `.usavvy-notification-*` classes in `apps/web/src/shared/components.css` per the tokens above
 
-- [ ] **Task 5: Tests mirroring `src/` 1:1** (AD-8)
-  - [ ] `packages/shared-types/tests/notification.test.ts` — see Task 1
-  - [ ] `services/core/tests/modules/users/notifications.test.ts` (new) + `routes.test.ts` (extend) — see Task 2
-  - [ ] `services/gateway/tests/authProxy.test.ts` (or equivalent — extend) — see Task 3
-  - [ ] `apps/web/tests/app/useNotifications.test.tsx` (new) — fetches and exposes notifications once a session exists; `unreadCount` derives correctly from `readAt`; `markRead`/`clear` call the right API methods and update local state from the response; a mount-time fetch failure doesn't crash the app (same non-critical-enrichment pattern as `ColorThemeProvider`'s own already-reviewed identical gap — apply the same "only seed once, guard the session-null case" fixes proactively here from the start, not as a follow-up review round)
-  - [ ] `apps/web/tests/app/AppHeader.test.tsx` (new) — hidden with no session; shows the unread dot only when `unreadCount > 0`; clicking the bell opens the panel listing notifications newest-first; clicking a notification row marks it read (dot updates/disappears once nothing is unread); clicking clear on a resolved notification removes it from the list; clear is disabled with the "still in progress" title on an in-progress notification
-  - [ ] `apps/web/tests/modules/users/api.test.ts` (extend) — the three new client methods hit the right method/path and parse/ignore the response correctly
+- [x] **Task 5: Tests mirroring `src/` 1:1** (AD-8)
+  - [x] `packages/shared-types/tests/notification.test.ts` — see Task 1
+  - [x] `services/core/tests/modules/users/notifications.test.ts` (new) + `routes.test.ts` (extend) — see Task 2
+  - [x] `services/gateway/tests/authProxy.test.ts` (or equivalent — extend) — see Task 3
+  - [x] `apps/web/tests/app/useNotifications.test.tsx` (new) — 9 tests, all green. Resets to empty on logout (proactively fixed from the start, matching `ColorThemeProvider`'s own already-reviewed gap); a slower-resolving stale session's fetch doesn't clobber a newer session's list
+  - [x] `apps/web/tests/app/AppHeader.test.tsx` (new) — 7 tests, all green
+  - [x] `apps/web/tests/modules/users/api.test.ts` (extend) — 4 new tests, all green
 
 ## Dev Notes
 
@@ -102,6 +102,12 @@ The AC's own examples — "a reminder, a completed ingestion, a graded assignmen
 - [Source: `_AI-Agile-Development/implementation-artifacts/1-7-account-deletion.md` and `services/core/src/modules/users/service.ts`'s `requestAccountDeletion` — the exact `Promise.allSettled`/best-effort/logged-not-swallowed pattern this story's `createNotification` call site reuses]
 - [Source: `_AI-Agile-Development/implementation-artifacts/1-9-predefined-color-theme-picker.md` — `ColorThemeProvider`'s shape and its own two review-round bugs (logout reset, stale-fetch race), both proactively addressed here from the start]
 
+## Change Log
+
+- 2026-08-05: Checkpoint 1 (Tasks 1-2, shared contract + core) — `notificationSourceProcessStatusSchema`/`notificationResponseSchema`/`notificationListResponseSchema` added to `packages/shared-types`; new `notifications` table (migration `0009_tranquil_dazzler.sql`) owned by `auth/users` per AD-14/AD-18; `createNotification`/`listNotifications`/`markNotificationRead`/`clearNotification` service functions; `requestAccountDeletion` extended to also create an in-progress notification as this story's one real trigger. First path-param routes in this codebase (`PUT`/`DELETE /users/notifications/:id`). 96 shared-types tests, 193 core tests green at this checkpoint.
+- 2026-08-05: Checkpoint 2 (Task 3, gateway) — three routes proxied through `authProxy.ts` (`GET /users/notifications`, `PUT .../:id/read`, `DELETE .../:id`), the first path-param routes this proxy has needed; no change to `forwardToCore`/`coreClient.ts` was required. 61 gateway tests green.
+- 2026-08-05: Task 4-5 (frontend + tests) + full regression — no persistent header/nav existed anywhere in `apps/web` before this story (every page rendered its own bare `<main>`); added a deliberately minimal `AppHeader` (just the bell icon, not a full nav redesign) plus `NotificationsProvider`/`useNotifications`, both wired into `App.tsx` alongside `ColorThemeProvider`. Proactively applied `ColorThemeProvider`'s own Story 1.9 review-round fix (reset to empty on logout) from the start rather than shipping the same bug twice; on inspection, `useNotifications` doesn't have the *other* Story 1.9 bug's structural precondition (`markRead`/`clear` mutate local state directly from their own PUT/DELETE response rather than independently re-fetching the whole list, so there's no second concurrent GET for a stale one to race against) — documented this reasoning in Completion Notes rather than adding an unnecessary guard. Full monorepo regression clean: 533 tests (14 config, 96 shared-types, 12 service-kernel, 157 apps/web, 61 gateway, 193 core), `tsc --noEmit`/`eslint .` clean in every workspace. Live-verified end-to-end directly against `core`: creating an account-deletion request produces an in-progress notification; marking it read succeeds independent of its process status; clearing it while in-progress returns `409 NOTIFICATION_STILL_IN_PROGRESS`; after manually flipping it to `resolved` (simulating the not-yet-built purge event), clearing succeeds with `204` and the list reflects the removal. Status → `review`.
+
 ## Dev Agent Record
 
 ### Agent Model Used
@@ -112,4 +118,37 @@ Claude Sonnet 5
 
 ### Completion Notes List
 
+- **Task 2 (core):** `Notification` lives in the same `modules/users/service.ts`/`routes.ts` files as every other `auth/users`-owned entity, per AD-14 — no new `modules/notifications/` folder. The ownership check on `markNotificationRead`/`clearNotification` is baked into the same `WHERE id = ... AND user_id = ...` clause as the mutation itself (not a separate pre-check query) so another learner's notification id returns a plain `NOT_FOUND` rather than leaking whether that id exists.
+- **Why account deletion is the one real trigger:** the AC's own example events (reminder/ingestion/grading) don't exist as real code in this repo yet — every one belongs to an epic that hasn't shipped. `requestAccountDeletion` is the one already-real "request now, resolves later" process in this codebase (Story 1.7). No event anywhere resolves one yet (no purge subscriber exists — an already-accepted Story 1.7 gap), so the "resolved → clearable" path is proven via a directly-inserted test fixture and, live, by manually flipping the column (simulating the not-yet-built purge event) — the same honesty-over-simulation approach already established for other not-fully-wired lifecycles in this codebase.
+- **Task 4 (frontend):** `useNotifications` deliberately does *not* carry `ColorThemeProvider`'s "only seed once" stale-fetch guard, after actually reasoning through whether the analogous race exists here. It doesn't: `markRead`/`clear` mutate local state directly from their own request's response rather than independently re-fetching the whole list, so there is no second, independently-triggered GET in flight for a slow one to race against — the existing `cancelled`-on-session-change guard is sufficient. (An earlier draft added an unnecessary `current === undefined ? result : current` guard copied directly from `ColorThemeProvider` without checking whether it applied — it did not, and it actively broke re-population of a new user's list after a logout/login cycle, since `[]` from the logout reset is not `undefined`. Caught by writing the regression test *before* trusting the copied pattern, per this project's own "prove it, don't just assert it" convention — reverted the guard rather than keep it.)
+- **`AppHeader` is deliberately minimal** — just the bell icon and its panel, not a full site-wide nav/branding header. See Dev Notes' Scope note.
+
 ### File List
+
+**Task 1 (shared contract):**
+- `packages/shared-types/src/notification.ts` (new)
+- `packages/shared-types/src/index.ts` (updated — barrel)
+- `packages/shared-types/tests/notification.test.ts` (new)
+
+**Task 2 (core):**
+- `services/core/src/db/schema.ts` (updated — `notifications` table)
+- `services/core/src/modules/users/service.ts` (updated — `createNotification`/`listNotifications`/`markNotificationRead`/`clearNotification`, extended `requestAccountDeletion`)
+- `services/core/src/modules/users/routes.ts` (updated — 3 new routes)
+- `services/core/drizzle/0009_tranquil_dazzler.sql` (new), `services/core/drizzle/meta/0009_snapshot.json` (new), `services/core/drizzle/meta/_journal.json` (updated)
+- `services/core/tests/modules/users/notifications.test.ts` (new), `routes.test.ts` (updated), `service.test.ts` (updated — cleanup fix)
+
+**Task 3 (gateway):**
+- `services/gateway/src/authProxy.ts` (updated — 3 new routes)
+- `services/gateway/tests/authProxy.test.ts` (updated)
+
+**Task 4 (apps/web):**
+- `apps/web/src/app/AppHeader.tsx` (new)
+- `apps/web/src/app/useNotifications.tsx` (new)
+- `apps/web/src/app/App.tsx` (updated — wiring)
+- `apps/web/src/modules/users/api.ts` (updated — 3 new client methods)
+- `apps/web/src/shared/components.css` (updated — `.usavvy-notification-*`/`.usavvy-app-header` classes)
+
+**Task 5 (tests):**
+- `apps/web/tests/app/AppHeader.test.tsx` (new)
+- `apps/web/tests/app/useNotifications.test.tsx` (new)
+- `apps/web/tests/modules/users/api.test.ts` (updated)
