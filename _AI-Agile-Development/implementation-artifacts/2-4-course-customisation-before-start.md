@@ -4,7 +4,7 @@ baseline_commit: 3965212
 
 # Story 2.4: Course customisation before start
 
-Status: review
+Status: done
 
 *(Epic 2, FR-C-4. This story owns wiring "Customise before starting" for real — Story 2.3's own Dev Notes explicitly deferred that button to this story. "Start course" remains disabled; it depends on Epic 3/4 infrastructure that doesn't exist yet and is not this story's job. "Regenerated plan"/"estimated hours" here means the recalculated Topic-selection scope and its resulting hour estimate — NOT a real dated session-by-session schedule; that is Epic 4's `PlannedSession` ("Generate dated session schedule respecting prerequisites"), still `backlog`.)*
 
@@ -149,7 +149,25 @@ Claude Sonnet 5
 - `apps/web/tests/modules/courses/api.test.ts` (modified)
 - `apps/web/tests/modules/courses/CustomizePage.test.tsx` (new)
 - `apps/web/tests/modules/courses/CourseDetailPage.test.tsx` (modified)
+- `_AI-Agile-Development/implementation-artifacts/deferred-work.md` (modified — review-round deferred findings)
+
+## Senior Developer Review (AI)
+
+Three parallel adversarial reviewers (Blind Hunter, Edge Case Hunter, Acceptance Auditor) ran against the full diff (`c8e08cf..3380a2b`).
+
+**Acceptance Auditor:** all 4 ACs independently verified SATISFIED — "one of the more thoroughly verified stories," with real Postgres-backed integration tests exercising the actual dependency graph and UI tests asserting on rendered DOM/fetch-call counts.
+
+**Confirmed and patched (all three found independently or cross-confirmed):**
+1. **An archived Topic remained selectable and diluted the equal-per-Topic hours weighting** (Blind Hunter + Edge Case Hunter, independently) — `getCourseTopicGraph`'s Topic query had no `archivedAt` filter, so an archived Topic still passed id-validation and still counted in the denominator. Fixed by excluding `archivedAt IS NOT NULL` Topics from the graph entirely. Regression test added and proven to fail before / pass after (`customization.test.ts`, "excludes an archived Topic...").
+2. **An already force-confirmed conflict re-blocked every later save that touched the deselected set at all** (Edge Case Hunter) — the guard recomputed conflicts over the *entire* effective set whenever it changed, re-surfacing an already-accepted conflict just because an unrelated Topic was also deselected. Fixed to only block on conflicts that are NEW relative to what's already saved (diffing against the previously-saved deselected set's own conflicts). Regression test added and proven to fail before / pass after (`customization.test.ts`, "does not re-block an already-force-confirmed conflict..."), plus a companion test confirming a genuinely new conflict introduced alongside an old one still blocks correctly.
+3. **`GET /courses/:id/customization` for a Course that doesn't exist returned the same 404 as "no customization saved yet," with a misleading message** (Blind Hunter) — `getCourseCustomization` checked for a saved row before checking the Course existed, unlike `saveCourseCustomization`'s identical-shaped function which checks course existence first. Fixed by reordering to call `getCourseTopicGraph` (which 404s "course not found") before the row lookup. Regression test added and proven to fail before / pass after.
+4. **Minor hardening:** `computeEstimatedHours`'s `selectedTopicCount` gained a `Math.max(0, ...)` clamp — not currently reachable (dedup + membership validation already prevent it), but the other two guards in that function are explicit and this one wasn't.
+
+**Deferred (documented in `deferred-work.md`, not blocking):** dependency-conflict detection is single-hop, not transitive across multi-Topic chains; no CAS/partial-column-update on concurrent saves from two tabs; a Topic can be both deselected and marked priority simultaneously with no rejection.
+
+Post-patch: full monorepo regression (741 tests across 8 workspaces; one `services/core` auth test flaked once under full-suite load, confirmed unrelated to this diff and passing cleanly in isolation and on re-run), `tsc --noEmit` and `eslint .` clean.
 
 ## Change Log
 
 - 2026-08-06: Implemented Course customisation before start (Tasks 1-5): shared contract, `services/courses` customization persistence + derived dependency-conflict detection + hour recalculation, gateway proxy, `apps/web` CustomizePage plus wiring Story 2.3's disabled button. Fixed a conflict-recheck design gap found during implementation (value-based, not presence-based). Live-verified end-to-end. Status → review.
+- 2026-08-06: Code review round — fixed archived-topic pollution of the graph, incorrect re-blocking of already-confirmed conflicts, and a misleading 404 for a nonexistent course (all three proven via failing-then-passing regression tests), plus a defensive hours-clamp. Deferred 3 non-blocking findings. Status → done.

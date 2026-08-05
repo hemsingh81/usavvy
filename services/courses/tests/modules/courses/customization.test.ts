@@ -5,6 +5,7 @@ import { createDb, type Db } from "../../../src/db/client.js";
 import { concepts, conceptPrerequisites, courseCustomizations, courses, modules, topics } from "../../../src/db/schema.js";
 import { loadCoursesConfig } from "../../../src/config.js";
 import {
+  archiveModule,
   createConcept,
   createCourse,
   createModule,
@@ -138,6 +139,32 @@ describe("saveCourseCustomization", () => {
     expect(result).toMatchObject({ deselectedTopicIds: [topicA.id], depth: "overview" });
   });
 
+  it("does not re-block an already-force-confirmed conflict when the learner ALSO deselects a second, unrelated Topic with no conflict of its own (review finding)", async () => {
+    const { course, topicA } = await seedCourseWithTwoDependentTopics();
+    const module_ = await createModule(db, "admin", course.id, { title: "Module 2", position: 1 });
+    const topicX = await createTopic(db, "admin", module_.id, { title: "Independent", position: 0 });
+    await createConcept(db, "admin", topicX.id, { title: "Concept X", position: 0 });
+    await saveCourseCustomization(db, "user1", course.id, { deselectedTopicIds: [topicA.id], force: true });
+
+    const result = await saveCourseCustomization(db, "user1", course.id, { deselectedTopicIds: [topicA.id, topicX.id] });
+
+    expect(result.deselectedTopicIds.sort()).toEqual([topicA.id, topicX.id].sort());
+  });
+
+  it("still blocks a genuinely NEW conflict introduced alongside an already-confirmed one", async () => {
+    const { course, topicA, topicB } = await seedCourseWithTwoDependentTopics();
+    const module_ = await createModule(db, "admin", course.id, { title: "Module 2", position: 1 });
+    const topicX = await createTopic(db, "admin", module_.id, { title: "Dependent on B", position: 0 });
+    const conceptB = [...(await db.select({ id: concepts.id }).from(concepts).where(eq(concepts.topicId, topicB.id)))][0];
+    await createConcept(db, "admin", topicX.id, { title: "Concept X", position: 0, prerequisiteConceptIds: conceptB ? [conceptB.id] : [] });
+    await saveCourseCustomization(db, "user1", course.id, { deselectedTopicIds: [topicA.id], force: true });
+
+    await expect(saveCourseCustomization(db, "user1", course.id, { deselectedTopicIds: [topicA.id, topicB.id] })).rejects.toMatchObject({
+      code: "DEPENDENCY_CONFLICT",
+      details: [{ topicId: topicB.id, requiredByTopicId: topicX.id }],
+    });
+  });
+
   it("preserves untouched fields on a partial update", async () => {
     const { course, topicA } = await seedCourseWithTwoDependentTopics();
     await saveCourseCustomization(db, "user1", course.id, {
@@ -163,6 +190,24 @@ describe("saveCourseCustomization", () => {
     void topicA;
   });
 
+  it("excludes an archived Topic from the hours-weighting and rejects it as an invalid selection (review finding)", async () => {
+    const { course, topicA, topicB } = await seedCourseWithTwoDependentTopics(12);
+    const module_ = await createModule(db, "admin", course.id, { title: "Module 2", position: 1 });
+    const topicC = await createTopic(db, "admin", module_.id, { title: "Extra", position: 0 });
+    await archiveModule(db, "admin", module_.id);
+
+    // 2 live topics (A, B) — archived Topic C must not count toward the denominator.
+    const result = await saveCourseCustomization(db, "user1", course.id, {});
+    expect(result.estimatedHours).toBe(12); // 12h / 2 live topics * 2 selected * 1.0
+
+    await expect(saveCourseCustomization(db, "user1", course.id, { deselectedTopicIds: [topicC.id] })).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+      message: expect.stringContaining(topicC.id),
+    });
+    void topicA;
+    void topicB;
+  });
+
   it("rejects a topic id that does not belong to the Course, naming it", async () => {
     const { course } = await seedCourseWithTwoDependentTopics();
 
@@ -184,6 +229,13 @@ describe("saveCourseCustomization", () => {
 });
 
 describe("getCourseCustomization", () => {
+  it("throws NOT_FOUND 'course not found' for a Course that doesn't exist, rather than silently returning null (review finding)", async () => {
+    await expect(getCourseCustomization(db, "user1", "019fd200-0000-7000-8000-000000000000")).rejects.toMatchObject({
+      code: "NOT_FOUND",
+      message: "course not found",
+    });
+  });
+
   it("returns null when the learner has never saved a customization for this Course (AC #4)", async () => {
     const { course } = await seedCourseWithTwoDependentTopics();
 

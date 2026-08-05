@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql, type SQL } from "drizzle-orm";
 import { AppError } from "@usavvy/service-kernel";
 import { can, type Role } from "@usavvy/config";
 import type {
@@ -447,8 +447,19 @@ async function getCourseTopicGraph(db: Db, courseId: string): Promise<CourseTopi
 
   const moduleRows = await db.select({ id: modules.id }).from(modules).where(eq(modules.courseId, courseId));
   const moduleIds = moduleRows.map((m) => m.id);
+  // Review finding: an archived Topic (or one under an archived Module — archiveModule's
+  // cascade sets the same archivedAt on both) must not remain selectable/deselectable, and
+  // must not dilute the equal per-Topic hours weighting below.
+  // Review finding: an archived Topic (or one under an archived Module — archiveModule's
+  // cascade sets the same archivedAt on both) must not remain selectable/deselectable, and
+  // must not dilute the equal per-Topic hours weighting below.
   const topicRows =
-    moduleIds.length > 0 ? await db.select({ id: topics.id, title: topics.title }).from(topics).where(inArray(topics.moduleId, moduleIds)) : [];
+    moduleIds.length > 0
+      ? await db
+          .select({ id: topics.id, title: topics.title })
+          .from(topics)
+          .where(and(inArray(topics.moduleId, moduleIds), isNull(topics.archivedAt)))
+      : [];
   const topicIds = new Set(topicRows.map((t) => t.id));
   const topicTitleById = new Map(topicRows.map((t) => [t.id, t.title]));
 
@@ -528,7 +539,10 @@ function computeEstimatedHours(graph: CourseTopicGraph, deselectedTopicIds: stri
   if (totalTopicCount === 0) {
     return graph.courseEstimatedDurationHours;
   }
-  const selectedTopicCount = totalTopicCount - deselectedTopicIds.length;
+  // Review finding: clamp defensively — dedup + membership validation keep this unreachable
+  // today (deselectedTopicIds can never exceed the live topic count), but nothing should
+  // ever compute a negative "remaining hours".
+  const selectedTopicCount = Math.max(0, totalTopicCount - deselectedTopicIds.length);
   const hoursPerTopic = graph.courseEstimatedDurationHours / totalTopicCount;
   return Math.round(hoursPerTopic * selectedTopicCount * DEPTH_MULTIPLIER[depth] * 10) / 10;
 }
@@ -556,8 +570,15 @@ function toCourseCustomizationResponse(
   };
 }
 
-/** AC #4: null (mapped to 404 by the route) when the learner has never saved one yet. */
+/**
+ * AC #4: null (mapped to 404 "no customization saved yet" by the route) when the learner
+ * has never saved one for this Course. Review finding: this must be distinguished from a
+ * Course that doesn't exist at all — `getCourseTopicGraph` is called FIRST (throwing its
+ * own 404 "course not found") so both failure modes are never conflated into the same
+ * misleading message, matching saveCourseCustomization's identical ordering.
+ */
 export async function getCourseCustomization(db: Db, userId: string, courseId: string): Promise<CourseCustomizationResponse | null> {
+  const graph = await getCourseTopicGraph(db, courseId);
   const [row] = await db
     .select()
     .from(courseCustomizations)
@@ -565,7 +586,6 @@ export async function getCourseCustomization(db: Db, userId: string, courseId: s
   if (!row) {
     return null;
   }
-  const graph = await getCourseTopicGraph(db, courseId);
   return toCourseCustomizationResponse(courseId, row, graph);
 }
 
@@ -606,7 +626,18 @@ export async function saveCourseCustomization(
   const nextDeselected = new Set(effectiveDeselected);
   const deselectionChanged =
     previousDeselected.size !== nextDeselected.size || [...previousDeselected].some((topicId) => !nextDeselected.has(topicId));
-  const conflicts = deselectionChanged ? computeDependencyConflicts(graph, effectiveDeselected) : [];
+  // Review finding: comparing the full set's conflicts against "changed at all" re-blocked
+  // an ALREADY force-confirmed conflict whenever the learner touched the deselected set
+  // again for any reason (e.g. deselecting one more, unrelated Topic) — every such edit
+  // demanded a fresh "Save anyway" for a warning already agreed to. Only conflicts that are
+  // NEW relative to what's already saved should ever block.
+  function conflictKey(conflict: DependencyConflict): string {
+    return `${conflict.topicId}:${conflict.requiredByTopicId}`;
+  }
+  const previouslyAcceptedConflictKeys = new Set(computeDependencyConflicts(graph, [...previousDeselected]).map(conflictKey));
+  const conflicts = deselectionChanged
+    ? computeDependencyConflicts(graph, effectiveDeselected).filter((conflict) => !previouslyAcceptedConflictKeys.has(conflictKey(conflict)))
+    : [];
   if (conflicts.length > 0 && input.force !== true) {
     throw new AppError("DEPENDENCY_CONFLICT", "deselecting this would leave a dependent topic without its prerequisite", 409, conflicts);
   }
