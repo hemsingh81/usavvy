@@ -58,3 +58,25 @@ export {
   notificationListResponseSchema,
 } from "./notification.js";
 export { activityHistoryEntrySchema, type ActivityHistoryEntry, activityHistoryResponseSchema } from "./activityHistory.js";
+export {
+  difficultyTierSchema,
+  type DifficultyTier,
+  checkpointQuestionSchema,
+  type CheckpointQuestion,
+  conceptResponseSchema,
+  type ConceptResponse,
+  topicResponseSchema,
+  type TopicResponse,
+  moduleResponseSchema,
+  type ModuleResponse,
+  courseResponseSchema,
+  type CourseResponse,
+  createCourseInputSchema,
+  type CreateCourseInput,
+  createModuleInputSchema,
+  type CreateModuleInput,
+  createTopicInputSchema,
+  type CreateTopicInput,
+  createConceptInputSchema,
+  type CreateConceptInput,
+} from "./courseHierarchy.js";
