@@ -1,5 +1,5 @@
 ---
-baseline_commit: e46eb69
+baseline_commit: efe88a6
 ---
 
 # Story 1.3: Onboarding Wizard
