@@ -3,7 +3,7 @@ import postgres from "postgres";
 import { eq } from "drizzle-orm";
 import { buildApp } from "../../../src/app.js";
 import { createDb } from "../../../src/db/client.js";
-import { concepts, conceptPrerequisites, courseCustomizations, courses, modules, topics } from "../../../src/db/schema.js";
+import { concepts, conceptPrerequisites, courseCustomizations, courses, learnerCoursePins, modules, topics } from "../../../src/db/schema.js";
 import { loadCoursesConfig } from "../../../src/config.js";
 import { createTestAppDeps, TEST_INTERNAL_SECRET } from "../../testHelpers.js";
 
@@ -18,6 +18,8 @@ afterEach(async () => {
   while (createdCourseIds.length > 0) {
     const courseId = createdCourseIds.pop();
     if (!courseId) continue;
+    await db.delete(learnerCoursePins).where(eq(learnerCoursePins.pinnedCourseId, courseId));
+    await db.delete(learnerCoursePins).where(eq(learnerCoursePins.versionGroupId, courseId));
     await db.delete(courseCustomizations).where(eq(courseCustomizations.courseId, courseId));
     const moduleRows = await db.select().from(modules).where(eq(modules.courseId, courseId));
     for (const moduleRow of moduleRows) {
@@ -289,6 +291,109 @@ describe("GET /courses/:id/placement-check and POST /courses/:id/placement-check
 
     const customizationResponse = await app.inject({ method: "GET", url: `/courses/${course.id}/customization`, headers: adminHeaders });
     expect(customizationResponse.statusCode).toBe(404);
+    await app.close();
+  });
+});
+
+describe("Story 2.6: versioning, pinning, and GET /courses/:id resolution", () => {
+  it("requires the internal secret and trusted user headers on all three new routes", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+    const id = "019fd200-0000-7000-8000-000000000000";
+
+    const versions = await app.inject({ method: "POST", url: `/courses/${id}/versions`, payload: { title: "x" } });
+    const start = await app.inject({ method: "POST", url: `/courses/${id}/start` });
+    const update = await app.inject({ method: "POST", url: `/courses/${id}/update-to-latest` });
+
+    expect(versions.statusCode).toBe(401);
+    expect(start.statusCode).toBe(401);
+    expect(update.statusCode).toBe(401);
+    await app.close();
+  });
+
+  it("GET /courses/:id transparently resolves to the caller's pinned version, and flags when a newer one exists", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+    const v1Response = await app.inject({ method: "POST", url: "/courses", headers: adminHeaders, payload: { title: "Pin Route Course" } });
+    const v1 = v1Response.json() as { id: string };
+    createdCourseIds.push(v1.id);
+
+    await app.inject({ method: "POST", url: `/courses/${v1.id}/start`, headers: adminHeaders });
+
+    const v2Response = await app.inject({ method: "POST", url: `/courses/${v1.id}/versions`, headers: adminHeaders, payload: { title: "v2" } });
+    const v2 = v2Response.json() as { id: string };
+    createdCourseIds.push(v2.id);
+
+    const getResponse = await app.inject({ method: "GET", url: `/courses/${v2.id}`, headers: adminHeaders });
+
+    expect(getResponse.statusCode).toBe(200);
+    expect(getResponse.json()).toMatchObject({ id: v1.id, isPinnedToOlderVersion: true, latestVersionId: v2.id });
+    await app.close();
+  });
+
+  it("update-to-latest moves the pin and reports flagged Topics through the real route", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+    const v1Response = await app.inject({ method: "POST", url: "/courses", headers: adminHeaders, payload: { title: "Update Route Course" } });
+    const v1 = v1Response.json() as { id: string };
+    createdCourseIds.push(v1.id);
+    const moduleResponse = await app.inject({
+      method: "POST",
+      url: `/courses/${v1.id}/modules`,
+      headers: adminHeaders,
+      payload: { title: "Module 1", position: 0 },
+    });
+    const module_ = moduleResponse.json() as { id: string };
+    const topicResponse = await app.inject({
+      method: "POST",
+      url: `/modules/${module_.id}/topics`,
+      headers: adminHeaders,
+      payload: { title: "Old Topic", position: 0 },
+    });
+    const topic = topicResponse.json() as { id: string };
+    await app.inject({ method: "POST", url: `/courses/${v1.id}/start`, headers: adminHeaders });
+    await app.inject({
+      method: "PUT",
+      url: `/courses/${v1.id}/customization`,
+      headers: adminHeaders,
+      payload: { deselectedTopicIds: [topic.id] },
+    });
+
+    const v2Response = await app.inject({ method: "POST", url: `/courses/${v1.id}/versions`, headers: adminHeaders, payload: { title: "v2" } });
+    const v2 = v2Response.json() as { id: string };
+    createdCourseIds.push(v2.id);
+    const v2ModuleResponse = await app.inject({
+      method: "POST",
+      url: `/courses/${v2.id}/modules`,
+      headers: adminHeaders,
+      payload: { title: "Module 1", position: 0 },
+    });
+    const v2Module = v2ModuleResponse.json() as { id: string };
+    await app.inject({
+      method: "POST",
+      url: `/modules/${v2Module.id}/topics`,
+      headers: adminHeaders,
+      payload: { title: "A Different Topic", position: 0 },
+    });
+
+    const updateResponse = await app.inject({ method: "POST", url: `/courses/${v1.id}/update-to-latest`, headers: adminHeaders });
+
+    expect(updateResponse.statusCode).toBe(200);
+    expect(updateResponse.json()).toEqual({ pinnedCourseId: v2.id, flaggedTopicTitles: ["Old Topic"] });
+    await app.close();
+  });
+
+  it("rejects a non-admin role creating a version (403)", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+    const v1Response = await app.inject({ method: "POST", url: "/courses", headers: adminHeaders, payload: { title: "RBAC Version Course" } });
+    const v1 = v1Response.json() as { id: string };
+    createdCourseIds.push(v1.id);
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/courses/${v1.id}/versions`,
+      headers: { ...internalHeaders, "x-user-id": "u1", "x-user-role": "student" },
+      payload: { title: "v2" },
+    });
+
+    expect(response.statusCode).toBe(403);
     await app.close();
   });
 });

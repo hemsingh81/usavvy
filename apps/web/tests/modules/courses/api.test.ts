@@ -51,6 +51,8 @@ describe("createCoursesApi", () => {
       prerequisites: ["Basic arithmetic"],
       outcomes: ["Solve linear equations"],
       sampleBoardAssetRef: null,
+      isPinnedToOlderVersion: false,
+      latestVersionId: null,
       modules: [],
       createdAt: "2026-01-15T00:00:00.000Z",
       updatedAt: "2026-01-15T00:00:00.000Z",

@@ -4,6 +4,8 @@ import {
   courseResponseSchema,
   placementCheckProposalSchema,
   placementCheckQuestionsResponseSchema,
+  startCourseResponseSchema,
+  updateToLatestVersionResponseSchema,
   type CatalogSearchParams,
   type CourseCustomizationResponse,
   type CourseResponse,
@@ -12,6 +14,8 @@ import {
   type PlacementCheckProposal,
   type PlacementCheckQuestion,
   type SaveCourseCustomizationInput,
+  type StartCourseResponse,
+  type UpdateToLatestVersionResponse,
 } from "@usavvy/shared-types";
 import { apiRequest, ApiError } from "../../shared/apiClient.js";
 
@@ -59,6 +63,11 @@ export function createCoursesApi(apiUrl: string) {
         body: { answers },
         accessToken,
       }),
+    // Story 2.6: AC #1's minimal "access recorded" call — not a real learning session.
+    startCourse: (accessToken: string, courseId: string): Promise<StartCourseResponse> =>
+      apiRequest(apiUrl, `/courses/${courseId}/start`, startCourseResponseSchema, { method: "POST", accessToken }),
+    updateToLatestVersion: (accessToken: string, courseId: string): Promise<UpdateToLatestVersionResponse> =>
+      apiRequest(apiUrl, `/courses/${courseId}/update-to-latest`, updateToLatestVersionResponseSchema, { method: "POST", accessToken }),
   };
 }
 

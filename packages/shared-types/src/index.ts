@@ -112,3 +112,9 @@ export {
   placementCheckProposalSchema,
   type PlacementCheckProposal,
 } from "./placementCheck.js";
+export {
+  startCourseResponseSchema,
+  type StartCourseResponse,
+  updateToLatestVersionResponseSchema,
+  type UpdateToLatestVersionResponse,
+} from "./courseVersioning.js";

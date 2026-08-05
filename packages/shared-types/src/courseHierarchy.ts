@@ -83,6 +83,11 @@ export const courseResponseSchema = z.object({
   prerequisites: z.array(z.string()),
   outcomes: z.array(z.string()),
   sampleBoardAssetRef: z.string().nullable(),
+  // Story 2.6 (FR-C-6): computed by resolveCourseForLearner per request, not stored —
+  // whether the returned tree is the learner's pinned (older) version, and where the
+  // group's latest version lives if a newer one exists (AC #2/#3).
+  isPinnedToOlderVersion: z.boolean(),
+  latestVersionId: z.string().nullable(),
   modules: z.array(moduleResponseSchema),
   createdAt: z.string(),
   updatedAt: z.string(),

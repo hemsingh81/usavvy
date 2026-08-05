@@ -20,10 +20,12 @@ import type {
   PlacementCheckProposal,
   PlacementCheckQuestion,
   SaveCourseCustomizationInput,
+  StartCourseResponse,
   TopicResponse,
+  UpdateToLatestVersionResponse,
 } from "@usavvy/shared-types";
 import type { Db } from "../../db/client.js";
-import { concepts, conceptPrerequisites, courseCustomizations, courses, modules, topics } from "../../db/schema.js";
+import { concepts, conceptPrerequisites, courseCustomizations, courses, learnerCoursePins, modules, topics } from "../../db/schema.js";
 
 // Review finding: every write function previously checked can(role, "create", ...)
 // regardless of what it actually does — archiveModule is semantically a delete but never
@@ -72,6 +74,10 @@ export async function createCourse(db: Db, role: Role, input: CreateCourseInput)
     prerequisites: row.prerequisites ?? [],
     outcomes: row.outcomes ?? [],
     sampleBoardAssetRef: row.sampleBoardAssetRef,
+    // Story 2.6: createCourse has no learner context to resolve a pin against — only
+    // resolveCourseForLearner (wrapping getCourse) computes real values for these.
+    isPinnedToOlderVersion: false,
+    latestVersionId: null,
     modules: [],
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
@@ -333,6 +339,10 @@ export async function getCourse(db: Db, courseId: string): Promise<CourseRespons
     prerequisites: course.prerequisites ?? [],
     outcomes: course.outcomes ?? [],
     sampleBoardAssetRef: course.sampleBoardAssetRef,
+    // Story 2.6: getCourse returns exactly the requested version, no learner context —
+    // resolveCourseForLearner overrides these with real values afterward.
+    isPinnedToOlderVersion: false,
+    latestVersionId: null,
     modules: moduleResponses,
     createdAt: course.createdAt.toISOString(),
     updatedAt: course.updatedAt.toISOString(),
@@ -365,7 +375,20 @@ interface SearchRow extends Record<string, unknown> {
  * title, with `id` as a deterministic tiebreaker (Story 2.1's own review-round lesson).
  */
 export async function searchCourses(db: Db, params: CatalogSearchParams): Promise<CourseSummary[]> {
-  const conditions: SQL[] = [sql`c.status = 'published'`];
+  // Story 2.6 (FR-C-6): a version history must never multiply catalog listings — only the
+  // highest-versionNumber published row within each version group (COALESCE(version_group_id,
+  // id) is the group key — see that story's Dev Notes on why NULL means "root of its own
+  // group") is ever returned.
+  const conditions: SQL[] = [
+    sql`c.status = 'published'`,
+    sql`c.id = (
+      SELECT c2.id FROM courses c2
+      WHERE COALESCE(c2.version_group_id, c2.id) = COALESCE(c.version_group_id, c.id)
+        AND c2.status = 'published'
+      ORDER BY c2.version_number DESC, c2.id DESC
+      LIMIT 1
+    )`,
+  ];
   if (params.subject !== undefined) {
     conditions.push(sql`lower(c.subject) = lower(${params.subject})`);
   }
@@ -794,4 +817,206 @@ export async function scorePlacementCheck(db: Db, courseId: string, answers: Pla
     proposedDeselectedTopicIds,
     proposedStartingDifficultyTier: difficultyTierFromMasteryRatio(masteryRatio),
   };
+}
+
+/** The group key is the root version's own id — NULL versionGroupId means "I am the root". */
+function groupKeyOf(course: { id: string; versionGroupId: string | null }): string {
+  return course.versionGroupId ?? course.id;
+}
+
+async function getCourseRowOrThrow(db: Db, courseId: string) {
+  const [course] = await db.select().from(courses).where(eq(courses.id, courseId));
+  if (!course) {
+    throw new AppError("NOT_FOUND", "course not found", 404);
+  }
+  return course;
+}
+
+async function getLatestVersionInGroup(db: Db, groupKey: string) {
+  const rows = await db
+    .select()
+    .from(courses)
+    .where(sql`coalesce(${courses.versionGroupId}, ${courses.id}) = ${groupKey}`)
+    .orderBy(sql`${courses.versionNumber} DESC`, sql`${courses.id} DESC`)
+    .limit(1);
+  const [latest] = rows;
+  if (!latest) {
+    throw new AppError("INTERNAL_ERROR", "version group has no versions", 500);
+  }
+  return latest;
+}
+
+/**
+ * Story 2.6 (FR-C-6). "Publishing a new version" is a whole new courses row sharing the
+ * source's group key — no in-place content editing exists (see that story's Dev Notes).
+ * The new version's own Modules/Topics/Concepts are built afterward via the existing
+ * createModule/createTopic/createConcept, pointed at this new id.
+ */
+export async function createCourseVersion(db: Db, role: Role, sourceCourseId: string, input: CreateCourseInput): Promise<CourseResponse> {
+  requireCourseHierarchyWriteAccess(role, "create");
+  const source = await getCourseRowOrThrow(db, sourceCourseId);
+  const groupKey = groupKeyOf(source);
+  const latest = await getLatestVersionInGroup(db, groupKey);
+
+  const [row] = await db
+    .insert(courses)
+    .values({
+      title: input.title,
+      description: input.description ?? null,
+      subject: input.subject ?? null,
+      level: input.level ?? null,
+      estimatedDurationHours: input.estimatedDurationHours ?? null,
+      status: input.status ?? "draft",
+      prerequisites: input.prerequisites ? [...new Set(input.prerequisites)] : null,
+      outcomes: input.outcomes ? [...new Set(input.outcomes)] : null,
+      sampleBoardAssetRef: input.sampleBoardAssetRef ?? null,
+      versionGroupId: groupKey,
+      versionNumber: latest.versionNumber + 1,
+    })
+    .returning();
+  if (!row) {
+    throw new AppError("INTERNAL_ERROR", "failed to create course version", 500);
+  }
+  return {
+    id: row.id,
+    title: row.title,
+    description: row.description,
+    subject: row.subject,
+    level: row.level,
+    estimatedDurationHours: row.estimatedDurationHours,
+    status: row.status,
+    prerequisites: row.prerequisites ?? [],
+    outcomes: row.outcomes ?? [],
+    sampleBoardAssetRef: row.sampleBoardAssetRef,
+    isPinnedToOlderVersion: false,
+    latestVersionId: null,
+    modules: [],
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+/**
+ * AC #1: "access... first recorded" — idempotent, and explicitly NOT a real Epic 3/4
+ * learning session (see Dev Notes). A second start is a no-op, not an error.
+ */
+export async function startCourse(db: Db, userId: string, courseId: string): Promise<StartCourseResponse> {
+  const course = await getCourseRowOrThrow(db, courseId);
+  const groupKey = groupKeyOf(course);
+
+  const [existing] = await db
+    .select()
+    .from(learnerCoursePins)
+    .where(and(eq(learnerCoursePins.userId, userId), eq(learnerCoursePins.versionGroupId, groupKey)));
+  if (existing) {
+    return { pinnedCourseId: existing.pinnedCourseId, startedAt: existing.createdAt.toISOString() };
+  }
+
+  const [row] = await db.insert(learnerCoursePins).values({ userId, versionGroupId: groupKey, pinnedCourseId: courseId }).returning();
+  if (!row) {
+    throw new AppError("INTERNAL_ERROR", "failed to record course access", 500);
+  }
+  return { pinnedCourseId: row.pinnedCourseId, startedAt: row.createdAt.toISOString() };
+}
+
+/**
+ * AC #2/#3: the `GET /courses/:id` resolution path — transparently returns the learner's
+ * pinned version regardless of which version id was requested, with `isPinnedToOlderVersion`
+ * only true when a pin exists AND it isn't already the group's latest (AC #3's literal
+ * framing is about a learner already PINNED to an older version, not general old-version
+ * browsing by someone who's never started).
+ */
+export async function resolveCourseForLearner(db: Db, userId: string, requestedCourseId: string): Promise<CourseResponse> {
+  const requested = await getCourseRowOrThrow(db, requestedCourseId);
+  const groupKey = groupKeyOf(requested);
+
+  const [pin] = await db
+    .select()
+    .from(learnerCoursePins)
+    .where(and(eq(learnerCoursePins.userId, userId), eq(learnerCoursePins.versionGroupId, groupKey)));
+  const latest = await getLatestVersionInGroup(db, groupKey);
+  const effectiveCourseId = pin?.pinnedCourseId ?? requestedCourseId;
+
+  const course = await getCourse(db, effectiveCourseId);
+  return {
+    ...course,
+    isPinnedToOlderVersion: pin !== undefined && effectiveCourseId !== latest.id,
+    latestVersionId: effectiveCourseId !== latest.id ? latest.id : null,
+  };
+}
+
+/**
+ * AC #4: moves the learner's pin to the group's latest version, then reconciles their
+ * existing customisation (Story 2.4) by Topic TITLE (the only stable signal across
+ * versions — see Dev Notes on why id-matching can never work here). A title match carries
+ * the reference forward under the new version's own Topic id; no match means the Topic was
+ * removed or renamed — dropped from the persisted set (an id foreign to the new version
+ * would fail every future save's own validation) and named in `flaggedTopicTitles` instead
+ * of being silently lost.
+ */
+export async function updateCourseVersionPin(db: Db, userId: string, courseId: string): Promise<UpdateToLatestVersionResponse> {
+  const requested = await getCourseRowOrThrow(db, courseId);
+  const groupKey = groupKeyOf(requested);
+  const latest = await getLatestVersionInGroup(db, groupKey);
+
+  const [existingPin] = await db
+    .select()
+    .from(learnerCoursePins)
+    .where(and(eq(learnerCoursePins.userId, userId), eq(learnerCoursePins.versionGroupId, groupKey)));
+  const oldPinnedCourseId = existingPin?.pinnedCourseId ?? courseId;
+
+  await db
+    .insert(learnerCoursePins)
+    .values({ userId, versionGroupId: groupKey, pinnedCourseId: latest.id })
+    .onConflictDoUpdate({
+      target: [learnerCoursePins.userId, learnerCoursePins.versionGroupId],
+      set: { pinnedCourseId: latest.id, updatedAt: sql`now()` },
+    });
+
+  const [oldCustomization] = await db
+    .select()
+    .from(courseCustomizations)
+    .where(and(eq(courseCustomizations.userId, userId), eq(courseCustomizations.courseId, oldPinnedCourseId)));
+  if (!oldCustomization) {
+    return { pinnedCourseId: latest.id, flaggedTopicTitles: [] };
+  }
+
+  const oldGraph = await getCourseTopicGraph(db, oldPinnedCourseId);
+  const newGraph = await getCourseTopicGraph(db, latest.id);
+  const newTopicIdByTitle = new Map<string, string>();
+  for (const [topicId, title] of newGraph.topicTitleById) {
+    newTopicIdByTitle.set(title, topicId);
+  }
+
+  const flaggedTopicTitles = new Set<string>();
+  function remap(oldTopicIds: string[] | null): string[] {
+    const remapped: string[] = [];
+    for (const oldTopicId of oldTopicIds ?? []) {
+      const title = oldGraph.topicTitleById.get(oldTopicId);
+      const newTopicId = title ? newTopicIdByTitle.get(title) : undefined;
+      if (newTopicId) {
+        remapped.push(newTopicId);
+      } else if (title) {
+        flaggedTopicTitles.add(title);
+      }
+    }
+    return remapped;
+  }
+
+  const remappedDeselected = remap(oldCustomization.deselectedTopicIds);
+  const remappedPriority = remap(oldCustomization.priorityTopicIds);
+
+  // force: true — this is a system-driven migration, not a fresh learner-initiated
+  // deselection; re-running AC #3 (Story 2.4)'s dependency-conflict prompt here would be a
+  // confusing second layer of review on top of this story's own flaggedTopicTitles notice.
+  await saveCourseCustomization(db, userId, latest.id, {
+    deselectedTopicIds: remappedDeselected,
+    priorityTopicIds: remappedPriority,
+    depth: oldCustomization.depth,
+    explanationStyle: oldCustomization.explanationStyle,
+    ...(oldCustomization.startingDifficultyTier ? { startingDifficultyTier: oldCustomization.startingDifficultyTier } : {}),
+    force: true,
+  });
+
+  return { pinnedCourseId: latest.id, flaggedTopicTitles: [...flaggedTopicTitles] };
 }

@@ -16,14 +16,17 @@ import {
   archiveModule,
   createConcept,
   createCourse,
+  createCourseVersion,
   createModule,
   createTopic,
-  getCourse,
   getCourseCustomization,
   getPlacementCheckQuestions,
+  resolveCourseForLearner,
   saveCourseCustomization,
   scorePlacementCheck,
   searchCourses,
+  startCourse,
+  updateCourseVersionPin,
 } from "./service.js";
 
 export interface CoursesRouteDeps {
@@ -99,10 +102,13 @@ export function registerCoursesRoutes(app: FastifyInstance, deps: CoursesRouteDe
     reply.code(204).send();
   });
 
+  // Story 2.6: transparently resolves to the requesting learner's pinned version (if any)
+  // regardless of which version id was requested — getCourse itself is unchanged and still
+  // used internally by resolveCourseForLearner.
   app.get("/courses/:id", async (request, reply) => {
-    requireTrustedUser(request);
+    const { userId } = requireTrustedUser(request);
     const { id } = parseOrThrow(idParamsSchema, request.params);
-    reply.send(await getCourse(deps.db, id));
+    reply.send(await resolveCourseForLearner(deps.db, userId, id));
   });
 
   // Story 2.4: the learner's own personal data (their choices about their own course) —
@@ -139,5 +145,28 @@ export function registerCoursesRoutes(app: FastifyInstance, deps: CoursesRouteDe
     const { id } = parseOrThrow(idParamsSchema, request.params);
     const body = parseOrThrow(scorePlacementCheckInputSchema, request.body);
     reply.send(await scorePlacementCheck(deps.db, id, body.answers));
+  });
+
+  // Story 2.6: "publishing a new version" — same RBAC as createCourse (a whole new courses
+  // row, not an in-place edit; see that story's Dev Notes).
+  app.post("/courses/:id/versions", async (request, reply) => {
+    const { role } = requireTrustedUser(request);
+    const { id } = parseOrThrow(idParamsSchema, request.params);
+    const body = parseOrThrow(createCourseInputSchema, request.body);
+    reply.send(await createCourseVersion(deps.db, role, id, body));
+  });
+
+  // AC #1: auth-only, idempotent "access recorded" — not a real Epic 3/4 learning session.
+  app.post("/courses/:id/start", async (request, reply) => {
+    const { userId } = requireTrustedUser(request);
+    const { id } = parseOrThrow(idParamsSchema, request.params);
+    reply.send(await startCourse(deps.db, userId, id));
+  });
+
+  // AC #4: learner-initiated only — never automatic (AC #3).
+  app.post("/courses/:id/update-to-latest", async (request, reply) => {
+    const { userId } = requireTrustedUser(request);
+    const { id } = parseOrThrow(idParamsSchema, request.params);
+    reply.send(await updateCourseVersionPin(deps.db, userId, id));
   });
 }

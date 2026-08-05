@@ -9,16 +9,20 @@ import { createCoursesApi } from "./api.js";
 type ViewState = { kind: "loading" } | { kind: "ready"; course: CourseResponse } | { kind: "error"; message: string };
 
 /**
- * Story 2.3 (FR-C-3). Reachable via a CatalogPage card link or a direct URL — no
- * persistent nav bar wires it up yet, the same already-accepted gap every prior
- * page-adding story in this codebase left open. "Start course"/"Customise before
- * starting" render disabled: neither destination exists yet (Story 2.4 owns
- * customisation; Epic 3/4 own actually starting a course).
+ * Story 2.3 (FR-C-3), extended by Story 2.6 (FR-C-6). Reachable via a CatalogPage card
+ * link or a direct URL — no persistent nav bar wires it up yet, the same already-accepted
+ * gap every prior page-adding story in this codebase left open. "Start course" only
+ * records access (AC #1) — it is explicitly NOT a real Epic 3/4 learning session, which
+ * doesn't exist yet.
  */
 export function CourseDetailPage() {
   const { session } = useAuth();
   const { id } = useParams<{ id: string }>();
   const [view, setView] = useState<ViewState>({ kind: "loading" });
+  const [startedAt, setStartedAt] = useState<string | null>(null);
+  const [updateNoticeDismissed, setUpdateNoticeDismissed] = useState(false);
+  const [flaggedTopicTitles, setFlaggedTopicTitles] = useState<string[] | null>(null);
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     if (!session || !id) return;
@@ -40,6 +44,35 @@ export function CourseDetailPage() {
     };
   }, [session?.accessToken, id]);
 
+  async function handleStart(): Promise<void> {
+    if (!session || !id) return;
+    setBusy(true);
+    try {
+      const { apiUrl } = getWebConfig();
+      const result = await createCoursesApi(apiUrl).startCourse(session.accessToken, id);
+      setStartedAt(result.startedAt);
+    } catch (error) {
+      setView({ kind: "error", message: error instanceof ApiError ? error.message : "something went wrong — please try again" });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleUpdateToLatest(): Promise<void> {
+    if (!session || !id) return;
+    setBusy(true);
+    try {
+      const { apiUrl } = getWebConfig();
+      const result = await createCoursesApi(apiUrl).updateToLatestVersion(session.accessToken, id);
+      setUpdateNoticeDismissed(true);
+      setFlaggedTopicTitles(result.flaggedTopicTitles);
+    } catch (error) {
+      setView({ kind: "error", message: error instanceof ApiError ? error.message : "something went wrong — please try again" });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (!session) {
     return <Navigate to="/login" replace />;
   }
@@ -56,6 +89,25 @@ export function CourseDetailPage() {
 
       {view.kind === "ready" ? (
         <>
+          {view.course.isPinnedToOlderVersion && !updateNoticeDismissed ? (
+            <div className="usavvy-banner-info" role="status">
+              <p>A newer version of this course is available.</p>
+              <button type="button" onClick={() => void handleUpdateToLatest()} disabled={busy}>
+                Update
+              </button>
+              <button type="button" onClick={() => setUpdateNoticeDismissed(true)} disabled={busy}>
+                Dismiss
+              </button>
+            </div>
+          ) : null}
+
+          {flaggedTopicTitles && flaggedTopicTitles.length > 0 ? (
+            <div className="usavvy-banner-info" role="status">
+              <p>These topics changed since you customised this course and need your review: {flaggedTopicTitles.join(", ")}.</p>
+              <Link to={`/courses/${id}/customize`}>review your customisation</Link>
+            </div>
+          ) : null}
+
           <h1>{view.course.title}</h1>
           {view.course.description ? <p>{view.course.description}</p> : null}
 
@@ -112,10 +164,13 @@ export function CourseDetailPage() {
           </section>
 
           <div className="usavvy-course-detail-ctas">
-            <button type="button" className="usavvy-button-primary" disabled>
-              Start course
-            </button>
-            {/* Story 2.4: wires this up for real — Epic 3/4 still own "Start course". */}
+            {startedAt ? (
+              <p role="status">You started this course.</p>
+            ) : (
+              <button type="button" className="usavvy-button-primary" onClick={() => void handleStart()} disabled={busy}>
+                Start course
+              </button>
+            )}
             <Link to={`/courses/${id}/customize`} className="usavvy-button-secondary">
               Customise before starting
             </Link>

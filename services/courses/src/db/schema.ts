@@ -1,4 +1,4 @@
-import { integer, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { integer, jsonb, pgTable, text, timestamp, uniqueIndex, uuid, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import type { CheckpointQuestion, CourseCustomizationDepth, CourseStatus, DifficultyTier, ExplanationStyle } from "@usavvy/shared-types";
 
@@ -26,6 +26,14 @@ export const courses = pgTable("courses", {
   prerequisites: text("prerequisites").array(),
   outcomes: text("outcomes").array(),
   sampleBoardAssetRef: text("sample_board_asset_ref"),
+  // Story 2.6 (FR-C-6): a new content version is a whole new row (see that story's Dev
+  // Notes — no in-place content editing exists). `versionNumber` is deliberately NOT named
+  // `version` — that column below is the pre-existing, unrelated optimistic-concurrency
+  // bump counter (Consistency Conventions). NULL `versionGroupId` means "this row is the
+  // root of its own version group" (its own `id` is the group key) — avoids an awkward
+  // self-referential insert for a Course's very first version.
+  versionGroupId: uuid("version_group_id").references((): AnyPgColumn => courses.id),
+  versionNumber: integer("version_number").notNull().default(1),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   version: integer("version").notNull().default(1),
@@ -122,4 +130,23 @@ export const courseCustomizations = pgTable(
     version: integer("version").notNull().default(1),
   },
   (table) => [uniqueIndex("course_customizations_user_course_idx").on(table.userId, table.courseId)],
+);
+
+// Story 2.6 (FR-C-6). AC #1: one pin per learner per version group (versionGroupId is
+// always a ROOT course id, never null — see the courses table's own versionGroupId note).
+export const learnerCoursePins = pgTable(
+  "learner_course_pins",
+  {
+    id: uuid("id").primaryKey().default(uuidv7Default),
+    userId: text("user_id").notNull(),
+    versionGroupId: uuid("version_group_id")
+      .notNull()
+      .references(() => courses.id),
+    pinnedCourseId: uuid("pinned_course_id")
+      .notNull()
+      .references(() => courses.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("learner_course_pins_user_group_idx").on(table.userId, table.versionGroupId)],
 );

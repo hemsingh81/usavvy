@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { CourseDetailPage } from "../../../src/modules/courses/CourseDetailPage.js";
 
@@ -25,6 +26,15 @@ function jsonResponse(body: unknown) {
   return Promise.resolve({ ok: true, json: () => Promise.resolve(body) } as unknown as Response);
 }
 
+function mockFetch(course: unknown, overrides: { start?: unknown; updateToLatest?: unknown } = {}) {
+  return vi.fn().mockImplementation((url: string) => {
+    if (url.endsWith("/start")) return jsonResponse(overrides.start ?? { pinnedCourseId: "c1", startedAt: "2026-01-15T00:00:00.000Z" });
+    if (url.endsWith("/update-to-latest")) return jsonResponse(overrides.updateToLatest ?? { pinnedCourseId: "c2", flaggedTopicTitles: [] });
+    if (url.endsWith("/courses/c1")) return jsonResponse(course);
+    throw new Error(`unexpected fetch: ${url}`);
+  });
+}
+
 const FULL_COURSE = {
   id: "c1",
   title: "Intro to Algebra",
@@ -36,6 +46,8 @@ const FULL_COURSE = {
   prerequisites: ["Basic arithmetic"],
   outcomes: ["Solve linear equations"],
   sampleBoardAssetRef: "https://example.com/sample.mp4",
+  isPinnedToOlderVersion: false,
+  latestVersionId: null,
   modules: [
     {
       id: "m1",
@@ -97,13 +109,78 @@ describe("CourseDetailPage", () => {
     expect(screen.getByText("Module 1")).toBeInTheDocument();
   });
 
-  it("shows 'Start course' disabled and 'Customise before starting' as a real link to the customize screen (AC #4; Story 2.4 wires up the latter)", async () => {
+  it("shows 'Start course' and 'Customise before starting' as a real link to the customize screen (AC #4; Story 2.4 wires up the latter)", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(await jsonResponse(FULL_COURSE)));
     renderWithSession({ accessToken: "a-token" });
 
     await waitFor(() => expect(screen.getByText("Intro to Algebra")).toBeInTheDocument());
-    expect(screen.getByRole("button", { name: "Start course" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Start course" })).toBeEnabled();
     expect(screen.getByRole("link", { name: "Customise before starting" })).toHaveAttribute("href", "/courses/c1/customize");
+  });
+
+  it("clicking 'Start course' records access and shows a plain confirmation, not a real learning session (Story 2.6, AC #1)", async () => {
+    vi.stubGlobal("fetch", mockFetch(FULL_COURSE));
+    renderWithSession({ accessToken: "a-token" });
+    const user = userEvent.setup();
+    await waitFor(() => expect(screen.getByText("Intro to Algebra")).toBeInTheDocument());
+
+    await user.click(screen.getByRole("button", { name: "Start course" }));
+
+    await waitFor(() => expect(screen.getByText(/You started this course/)).toBeInTheDocument());
+  });
+
+  it("shows a dismissible update notice only when pinned to an older version (Story 2.6, AC #3)", async () => {
+    vi.stubGlobal("fetch", mockFetch({ ...FULL_COURSE, isPinnedToOlderVersion: true, latestVersionId: "c2" }));
+    renderWithSession({ accessToken: "a-token" });
+    const user = userEvent.setup();
+    await waitFor(() => expect(screen.getByText("Intro to Algebra")).toBeInTheDocument());
+
+    expect(screen.getByText("A newer version of this course is available.")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Dismiss" }));
+
+    expect(screen.queryByText("A newer version of this course is available.")).not.toBeInTheDocument();
+  });
+
+  it("does not show the update notice when already on the latest version", async () => {
+    vi.stubGlobal("fetch", mockFetch(FULL_COURSE));
+    renderWithSession({ accessToken: "a-token" });
+
+    await waitFor(() => expect(screen.getByText("Intro to Algebra")).toBeInTheDocument());
+    expect(screen.queryByText("A newer version of this course is available.")).not.toBeInTheDocument();
+  });
+
+  it("clicking 'Update' surfaces flagged Topics when the response names any (Story 2.6, AC #4)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      mockFetch(
+        { ...FULL_COURSE, isPinnedToOlderVersion: true, latestVersionId: "c2" },
+        { updateToLatest: { pinnedCourseId: "c2", flaggedTopicTitles: ["Old Topic"] } },
+      ),
+    );
+    renderWithSession({ accessToken: "a-token" });
+    const user = userEvent.setup();
+    await waitFor(() => expect(screen.getByText("A newer version of this course is available.")).toBeInTheDocument());
+
+    await user.click(screen.getByRole("button", { name: "Update" }));
+
+    await waitFor(() => expect(screen.getByText(/Old Topic/)).toBeInTheDocument());
+    expect(screen.getByRole("link", { name: /review your customisation/i })).toHaveAttribute("href", "/courses/c1/customize");
+  });
+
+  it("shows nothing extra after 'Update' when the response names no flagged Topics", async () => {
+    vi.stubGlobal(
+      "fetch",
+      mockFetch({ ...FULL_COURSE, isPinnedToOlderVersion: true, latestVersionId: "c2" }, { updateToLatest: { pinnedCourseId: "c2", flaggedTopicTitles: [] } }),
+    );
+    renderWithSession({ accessToken: "a-token" });
+    const user = userEvent.setup();
+    await waitFor(() => expect(screen.getByText("A newer version of this course is available.")).toBeInTheDocument());
+
+    await user.click(screen.getByRole("button", { name: "Update" }));
+
+    await waitFor(() => expect(screen.queryByText("A newer version of this course is available.")).not.toBeInTheDocument());
+    expect(screen.queryByRole("link", { name: /review your customisation/i })).not.toBeInTheDocument();
   });
 
   it("shows a distinguishable error rather than a blank page when the fetch fails", async () => {

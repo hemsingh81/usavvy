@@ -53,6 +53,8 @@ const COURSE = {
   prerequisites: [],
   outcomes: [],
   sampleBoardAssetRef: null,
+  isPinnedToOlderVersion: false,
+  latestVersionId: null,
   modules: [
     {
       id: "m1",

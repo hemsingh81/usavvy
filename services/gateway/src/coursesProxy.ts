@@ -102,4 +102,24 @@ export function registerCoursesProxyRoutes(app: FastifyInstance, deps: CoursesPr
     });
     reply.code(result.status).send(result.body);
   });
+
+  // Story 2.6: same auth-only gate as every other route here; RBAC (for /versions) is left
+  // to the service it forwards to, matching this file's own established convention.
+  app.post("/courses/:id/versions", { preHandler: requireAuth }, async (request, reply) => {
+    const id = requireValidId((request.params as { id: string }).id);
+    const result = await deps.forwardToCourses("POST", `/courses/${id}/versions`, { body: request.body, headers: trustedHeaders(request) });
+    reply.code(result.status).send(result.body);
+  });
+
+  app.post("/courses/:id/start", { preHandler: requireAuth }, async (request, reply) => {
+    const id = requireValidId((request.params as { id: string }).id);
+    const result = await deps.forwardToCourses("POST", `/courses/${id}/start`, { headers: trustedHeaders(request) });
+    reply.code(result.status).send(result.body);
+  });
+
+  app.post("/courses/:id/update-to-latest", { preHandler: requireAuth }, async (request, reply) => {
+    const id = requireValidId((request.params as { id: string }).id);
+    const result = await deps.forwardToCourses("POST", `/courses/${id}/update-to-latest`, { headers: trustedHeaders(request) });
+    reply.code(result.status).send(result.body);
+  });
 }
