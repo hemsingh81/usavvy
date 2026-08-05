@@ -401,3 +401,15 @@
   flex-direction: column;
   gap: var(--spacing-1);
 }
+
+/* Story 2.3 (FR-C-3): same "no DESIGN.md token yet" convention as the catalog card
+   above — DESIGN.md predates Epic 2's UI stories. */
+.usavvy-course-syllabus {
+  padding-left: var(--spacing-5, 20px);
+}
+
+.usavvy-course-detail-ctas {
+  display: flex;
+  gap: var(--spacing-3);
+  margin-top: var(--spacing-4);
+}

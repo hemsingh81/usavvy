@@ -84,6 +84,27 @@ describe("createCourse", () => {
     expect(course).toMatchObject({ title: "Intro to Algebra", description: null, modules: [] });
   });
 
+  it("defaults prerequisites/outcomes to [] and sampleBoardAssetRef to null when omitted", async () => {
+    const course = await seedCourse("No Detail Fields");
+    expect(course).toMatchObject({ prerequisites: [], outcomes: [], sampleBoardAssetRef: null });
+  });
+
+  it("persists the Story 2.3 detail-page fields (prerequisites/outcomes/sampleBoardAssetRef)", async () => {
+    const course = await createCourse(db, "admin", {
+      title: "Detailed Course",
+      prerequisites: ["Basic arithmetic"],
+      outcomes: ["Solve linear equations"],
+      sampleBoardAssetRef: "https://example.com/sample.mp4",
+    });
+    createdCourseIds.push(course.id);
+
+    expect(course).toMatchObject({
+      prerequisites: ["Basic arithmetic"],
+      outcomes: ["Solve linear equations"],
+      sampleBoardAssetRef: "https://example.com/sample.mp4",
+    });
+  });
+
   it("rejects a non-admin role (403)", async () => {
     await expect(createCourse(db, "student", { title: "x" })).rejects.toMatchObject({ code: "FORBIDDEN", statusCode: 403 });
   });
@@ -348,6 +369,27 @@ describe("getCourse", () => {
       prerequisites: [{ conceptId: prerequisite.id, archived: false }],
       archivedAt: null,
     });
+  });
+
+  it("returns the Story 2.3 detail-page fields on read (present and absent cases)", async () => {
+    const withFields = await createCourse(db, "admin", {
+      title: "With Detail Fields",
+      prerequisites: ["Basic arithmetic"],
+      outcomes: ["Solve linear equations"],
+      sampleBoardAssetRef: "https://example.com/sample.mp4",
+    });
+    createdCourseIds.push(withFields.id);
+    const withoutFields = await seedCourse("Without Detail Fields");
+
+    const withResult = await getCourse(db, withFields.id);
+    const withoutResult = await getCourse(db, withoutFields.id);
+
+    expect(withResult).toMatchObject({
+      prerequisites: ["Basic arithmetic"],
+      outcomes: ["Solve linear equations"],
+      sampleBoardAssetRef: "https://example.com/sample.mp4",
+    });
+    expect(withoutResult).toMatchObject({ prerequisites: [], outcomes: [], sampleBoardAssetRef: null });
   });
 
   it("orders siblings deterministically even when positions collide (review finding: Edge Case Hunter — no tiebreaker meant Postgres gave no ordering guarantee)", async () => {

@@ -38,4 +38,30 @@ describe("createCoursesApi", () => {
 
     expect(result).toEqual(courses);
   });
+
+  it("getCourse fetches GET /courses/:id and returns the parsed course (Story 2.3)", async () => {
+    const course = {
+      id: "c1",
+      title: "Intro to Algebra",
+      description: null,
+      subject: "Math",
+      level: "beginner",
+      estimatedDurationHours: 10,
+      status: "published",
+      prerequisites: ["Basic arithmetic"],
+      outcomes: ["Solve linear equations"],
+      sampleBoardAssetRef: null,
+      modules: [],
+      createdAt: "2026-01-15T00:00:00.000Z",
+      updatedAt: "2026-01-15T00:00:00.000Z",
+    };
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve(course) } as unknown as Response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const api = createCoursesApi("http://localhost:3000");
+    const result = await api.getCourse("a-token", "c1");
+
+    expect(fetchMock).toHaveBeenCalledWith("http://localhost:3000/courses/c1", expect.objectContaining({ method: "GET" }));
+    expect(result).toEqual(course);
+  });
 });

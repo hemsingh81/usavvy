@@ -21,6 +21,11 @@ export const courses = pgTable("courses", {
   // "doesn't." DB-level default is defense-in-depth for direct-DB-fixture rows in tests;
   // the service layer's own default is the actual source of truth (Story 1.4's convention).
   status: text("status").notNull().default("draft").$type<CourseStatus>(),
+  // Story 2.3 (FR-C-3): detail-page fields, opaque strings — same convention as
+  // concepts.objectives/sourceMaterialRefs/boardAssetRefs below.
+  prerequisites: text("prerequisites").array(),
+  outcomes: text("outcomes").array(),
+  sampleBoardAssetRef: text("sample_board_asset_ref"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   version: integer("version").notNull().default(1),

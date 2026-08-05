@@ -77,6 +77,12 @@ export const courseResponseSchema = z.object({
   level: difficultyTierSchema.nullable(),
   estimatedDurationHours: z.number().nullable(),
   status: courseStatusSchema,
+  // Story 2.3 (FR-C-3): opaque strings, same convention as Concept's own
+  // objectives/sourceMaterialRefs/boardAssetRefs — no inter-course dependency graph, no
+  // StoragePort-backed asset (see that story's Dev Notes for why).
+  prerequisites: z.array(z.string()),
+  outcomes: z.array(z.string()),
+  sampleBoardAssetRef: z.string().nullable(),
   modules: z.array(moduleResponseSchema),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -91,6 +97,9 @@ export const createCourseInputSchema = z.object({
   level: difficultyTierSchema.optional(),
   estimatedDurationHours: z.number().nonnegative().optional(),
   status: courseStatusSchema.optional(),
+  prerequisites: z.array(z.string()).optional(),
+  outcomes: z.array(z.string()).optional(),
+  sampleBoardAssetRef: z.string().optional(),
 });
 
 export type CreateCourseInput = z.infer<typeof createCourseInputSchema>;

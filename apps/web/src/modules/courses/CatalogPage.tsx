@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Navigate } from "react-router-dom";
+import { Link, Navigate } from "react-router-dom";
 import type { CatalogSearchParams, CourseSummary, DifficultyTier, DurationBucket } from "@usavvy/shared-types";
 import { ApiError } from "../../shared/apiClient.js";
 import { getWebConfig } from "../../app/config.js";
@@ -174,7 +174,9 @@ export function CatalogPage() {
         <ul className="usavvy-catalog-list">
           {view.courses.map((course) => (
             <li key={course.id} className="usavvy-catalog-card">
-              <h2>{course.title}</h2>
+              <h2>
+                <Link to={`/courses/${course.id}`}>{course.title}</Link>
+              </h2>
               {course.subject ? <span>{course.subject}</span> : null}
               {course.level ? <span>{course.level}</span> : null}
               {course.estimatedDurationHours !== null ? <span>{course.estimatedDurationHours}h</span> : null}

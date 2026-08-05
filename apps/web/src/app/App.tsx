@@ -5,7 +5,7 @@ import { ColorThemeProvider } from "./ColorThemeProvider.js";
 import { NotificationsProvider } from "./useNotifications.js";
 import { AppHeader } from "./AppHeader.js";
 import { AuthProvider, LoginPage, SignUpPage, VerifyEmailPage } from "../modules/auth/index.js";
-import { CatalogPage } from "../modules/courses/index.js";
+import { CatalogPage, CourseDetailPage } from "../modules/courses/index.js";
 import {
   AccountDeletionPage,
   ActivityHistoryPage,
@@ -65,6 +65,7 @@ export function App() {
               <Route path="/data-export" element={<DataExportPage />} />
               <Route path="/activity-history" element={<ActivityHistoryPage />} />
               <Route path="/catalog" element={<CatalogPage />} />
+              <Route path="/courses/:id" element={<CourseDetailPage />} />
               <Route path="*" element={<NotFoundPage />} />
             </Routes>
           </BrowserRouter>

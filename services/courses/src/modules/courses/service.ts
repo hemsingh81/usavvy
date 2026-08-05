@@ -41,6 +41,11 @@ export async function createCourse(db: Db, role: Role, input: CreateCourseInput)
       // directly at creation time. Defaults to "draft" at the service layer (the DB
       // column's own DEFAULT 'draft' is defense-in-depth, not the source of truth).
       status: input.status ?? "draft",
+      // Story 2.3: no separate course-editing endpoint exists — these are only ever set
+      // via this same create call, same as subject/level/status above.
+      prerequisites: input.prerequisites ?? null,
+      outcomes: input.outcomes ?? null,
+      sampleBoardAssetRef: input.sampleBoardAssetRef ?? null,
     })
     .returning();
   if (!row) {
@@ -54,6 +59,9 @@ export async function createCourse(db: Db, role: Role, input: CreateCourseInput)
     level: row.level,
     estimatedDurationHours: row.estimatedDurationHours,
     status: row.status,
+    prerequisites: row.prerequisites ?? [],
+    outcomes: row.outcomes ?? [],
+    sampleBoardAssetRef: row.sampleBoardAssetRef,
     modules: [],
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
@@ -312,6 +320,9 @@ export async function getCourse(db: Db, courseId: string): Promise<CourseRespons
     level: course.level,
     estimatedDurationHours: course.estimatedDurationHours,
     status: course.status,
+    prerequisites: course.prerequisites ?? [],
+    outcomes: course.outcomes ?? [],
+    sampleBoardAssetRef: course.sampleBoardAssetRef,
     modules: moduleResponses,
     createdAt: course.createdAt.toISOString(),
     updatedAt: course.updatedAt.toISOString(),

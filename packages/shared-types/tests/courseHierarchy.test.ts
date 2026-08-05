@@ -54,6 +54,9 @@ const VALID_COURSE = {
   level: "beginner",
   estimatedDurationHours: 10,
   status: "published",
+  prerequisites: ["Basic arithmetic"],
+  outcomes: ["Solve linear equations"],
+  sampleBoardAssetRef: "https://example.com/sample.mp4",
   modules: [VALID_MODULE],
   createdAt: "2026-01-15T00:00:00.000Z",
   updatedAt: "2026-01-15T00:00:00.000Z",
@@ -107,6 +110,19 @@ describe("topicResponseSchema / moduleResponseSchema / courseResponseSchema", ()
     const rest = Object.fromEntries(Object.entries(VALID_COURSE).filter(([k]) => k !== "modules"));
     expect(() => courseResponseSchema.parse(rest)).toThrow();
   });
+
+  it("accepts a course with empty prerequisites/outcomes and a null sampleBoardAssetRef (Story 2.3)", () => {
+    expect(() =>
+      courseResponseSchema.parse({ ...VALID_COURSE, prerequisites: [], outcomes: [], sampleBoardAssetRef: null }),
+    ).not.toThrow();
+  });
+
+  it("rejects a course missing prerequisites/outcomes/sampleBoardAssetRef (Story 2.3)", () => {
+    const rest = Object.fromEntries(
+      Object.entries(VALID_COURSE).filter(([k]) => !["prerequisites", "outcomes", "sampleBoardAssetRef"].includes(k)),
+    );
+    expect(() => courseResponseSchema.parse(rest)).toThrow();
+  });
 });
 
 describe("create*InputSchema", () => {
@@ -126,6 +142,17 @@ describe("create*InputSchema", () => {
 
   it("createCourseInputSchema rejects a negative estimatedDurationHours", () => {
     expect(() => createCourseInputSchema.parse({ title: "x", estimatedDurationHours: -1 })).toThrow();
+  });
+
+  it("createCourseInputSchema accepts the Story 2.3 detail-page fields (prerequisites/outcomes/sampleBoardAssetRef), all optional", () => {
+    expect(() =>
+      createCourseInputSchema.parse({
+        title: "New Course",
+        prerequisites: ["Basic arithmetic"],
+        outcomes: ["Solve linear equations"],
+        sampleBoardAssetRef: "https://example.com/sample.mp4",
+      }),
+    ).not.toThrow();
   });
 
   it("createModuleInputSchema and createTopicInputSchema require a non-negative position", () => {

@@ -145,6 +145,15 @@ describe("CatalogPage", () => {
     await waitFor(() => expect(screen.getByText("Intro to Algebra")).toBeInTheDocument());
   });
 
+  it("links each result's title to its Course detail page (Story 2.3)", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(await jsonResponse(COURSES)));
+    renderWithSession({ accessToken: "a-token" });
+
+    await waitFor(() => expect(screen.getByText("Intro to Algebra")).toBeInTheDocument());
+    expect(screen.getByRole("link", { name: "Intro to Algebra" })).toHaveAttribute("href", "/courses/c1");
+    expect(screen.getByRole("link", { name: "Physics 101" })).toHaveAttribute("href", "/courses/c2");
+  });
+
   it("shows a distinguishable error rather than a blank page when the fetch fails", async () => {
     vi.stubGlobal(
       "fetch",
