@@ -137,6 +137,31 @@ describe("declareAge", () => {
       statusCode: 409,
     });
   });
+
+  it("rejects a minor supplying their own account email as the parent's (review finding: self-consent bypass)", async () => {
+    const email = uniqueEmail("self-consent");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+
+    await expect(
+      declareAge(db, createMockNotificationPort(), user!.id, { birthdate: MINOR_BIRTHDATE, parentEmail: email.toUpperCase() }),
+    ).rejects.toMatchObject({ code: "VALIDATION_ERROR", statusCode: 400 });
+  });
+
+  it("under two concurrent declarations for the same account, exactly one succeeds (review finding: TOCTOU race on the already-declared check)", async () => {
+    const email = uniqueEmail("concurrent-declare");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+
+    const results = await Promise.allSettled([
+      declareAge(db, createMockNotificationPort(), user!.id, { birthdate: ADULT_BIRTHDATE }),
+      declareAge(db, createMockNotificationPort(), user!.id, { birthdate: "1991-01-01" }),
+    ]);
+
+    const fulfilled = results.filter((r) => r.status === "fulfilled");
+    const rejected = results.filter((r) => r.status === "rejected");
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect((rejected[0] as PromiseRejectedResult).reason).toMatchObject({ code: "AGE_ALREADY_DECLARED" });
+  });
 });
 
 describe("recordParentalConsent", () => {

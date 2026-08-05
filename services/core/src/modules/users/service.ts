@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { AppError } from "@usavvy/service-kernel";
 import { can, type Role } from "@usavvy/config";
 import type { AgeDeclarationResponse, MeResponse, ParentalConsentStatus } from "@usavvy/shared-types";
@@ -84,11 +84,20 @@ export async function declareAge(
 
   const isMinor = calculateAge(input.birthdate, todayIso()) < MINOR_AGE_THRESHOLD;
 
+  // The `birthdate !== null` check above is only a fast-path courtesy error message —
+  // it has a TOCTOU race with a concurrent identical request. The real guarantee comes
+  // from the `isNull(users.birthdate)` condition below: only one concurrent request can
+  // ever match it (a compare-and-swap on "declaration not yet made"), so at most one
+  // parental-consent token/email is ever created per account.
   if (!isMinor) {
-    await db
+    const updated = await db
       .update(users)
       .set({ birthdate: input.birthdate, updatedAt: new Date(), version: bumpVersion() })
-      .where(eq(users.id, userId));
+      .where(and(eq(users.id, userId), isNull(users.birthdate)))
+      .returning({ id: users.id });
+    if (updated.length === 0) {
+      throw new AppError("AGE_ALREADY_DECLARED", "age has already been declared for this account", 409);
+    }
     return { isMinor: false, parentalConsentStatus: "not_required" };
   }
 
@@ -96,11 +105,20 @@ export async function declareAge(
     throw new AppError("VALIDATION_ERROR", "parentEmail is required when the declared age is under 18", 400);
   }
   const parentEmail = normalizeEmail(input.parentEmail);
+  if (parentEmail === user.email) {
+    // The entire point of this flow is an independent adult granting consent — a minor
+    // supplying their own account email would let them self-approve and bypass it.
+    throw new AppError("VALIDATION_ERROR", "parentEmail must not be your own account email", 400);
+  }
 
-  await db
+  const updated = await db
     .update(users)
     .set({ birthdate: input.birthdate, parentEmail, updatedAt: new Date(), version: bumpVersion() })
-    .where(eq(users.id, userId));
+    .where(and(eq(users.id, userId), isNull(users.birthdate)))
+    .returning({ id: users.id });
+  if (updated.length === 0) {
+    throw new AppError("AGE_ALREADY_DECLARED", "age has already been declared for this account", 409);
+  }
 
   const rawToken = generateRawToken();
   await db.insert(parentalConsentTokens).values({

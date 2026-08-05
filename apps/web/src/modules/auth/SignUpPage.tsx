@@ -72,7 +72,11 @@ export function SignUpPage() {
           // age-declaration check as everywhere else a session is established. Uses
           // the just-issued session's token directly (see LoginPage's comment on why
           // reading context `session` here would be stale).
-          void getMe(session.accessToken).then((me) => navigate(resolvePostAuthDestination(me)));
+          // Review finding: an un-caught rejection here (a failed /me call after a
+          // successful Google auth) would silently strand the user with no navigation.
+          getMe(session.accessToken)
+            .then((me) => navigate(resolvePostAuthDestination(me)))
+            .catch(() => setServerError("something went wrong — please try again"));
         }}
       />
       <p>

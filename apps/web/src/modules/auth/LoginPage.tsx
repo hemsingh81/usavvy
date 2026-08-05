@@ -65,7 +65,15 @@ export function LoginPage() {
           </Button>
         </Form.Submit>
       </Form.Root>
-      <GoogleSignInButton onError={setServerError} onSuccess={(session) => void goToPostAuthDestination(session)} />
+      <GoogleSignInButton
+        onError={setServerError}
+        onSuccess={(session) => {
+          // Review finding: goToPostAuthDestination can reject (a failed /me call after
+          // a successful Google auth) — an un-caught rejection here would silently strand
+          // the user with no navigation and no error message.
+          goToPostAuthDestination(session).catch(() => setServerError("something went wrong — please try again"));
+        }}
+      />
       <p>
         Don&apos;t have an account? <Link to="/signup">Sign up</Link>
       </p>

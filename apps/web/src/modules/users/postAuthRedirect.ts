@@ -9,7 +9,9 @@ export function resolvePostAuthDestination(me: MeResponse): string {
   if (me.birthdate === null) {
     return "/age-declaration";
   }
-  if (me.isMinor === true && me.parentalConsentStatus === "pending") {
+  // Fail closed: any minor whose consent isn't affirmatively "granted" is gated,
+  // rather than only gating the one status value ("pending") the happy path expects.
+  if (me.isMinor === true && me.parentalConsentStatus !== "granted") {
     return "/waiting-for-consent";
   }
   return "/";

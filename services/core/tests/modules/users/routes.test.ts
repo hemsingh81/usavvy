@@ -140,6 +140,56 @@ describe("POST /users/age-declaration", () => {
     expect(response.json()).toMatchObject({ error: { code: "VALIDATION_ERROR" } });
     await app.close();
   });
+
+  it("rejects a birthdate more than 120 years ago with a VALIDATION_ERROR envelope (review finding: Task 2's own required coverage was missing)", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+    const email = uniqueEmail("age-implausibly-old");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/users/age-declaration",
+      headers: { ...internalHeaders, "x-user-id": user!.id, "x-user-role": "student" },
+      payload: { birthdate: "1900-01-01" },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ error: { code: "VALIDATION_ERROR" } });
+    await app.close();
+  });
+
+  it("returns 409 AGE_ALREADY_DECLARED through the real route on a second declaration (review finding: only service-level tested before)", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+    const email = uniqueEmail("age-already-declared-http");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+    const headers = { ...internalHeaders, "x-user-id": user!.id, "x-user-role": "student" };
+
+    const first = await app.inject({ method: "POST", url: "/users/age-declaration", headers, payload: { birthdate: "1990-01-01" } });
+    expect(first.statusCode).toBe(200);
+
+    const second = await app.inject({ method: "POST", url: "/users/age-declaration", headers, payload: { birthdate: "1991-01-01" } });
+
+    expect(second.statusCode).toBe(409);
+    expect(second.json()).toMatchObject({ error: { code: "AGE_ALREADY_DECLARED" } });
+    await app.close();
+  });
+
+  it("rejects a minor declaring their own account email as the parent's email (review finding: self-consent bypass)", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+    const email = uniqueEmail("age-self-consent");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/users/age-declaration",
+      headers: { ...internalHeaders, "x-user-id": user!.id, "x-user-role": "student" },
+      payload: { birthdate: "2015-01-01", parentEmail: email },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ error: { code: "VALIDATION_ERROR" } });
+    await app.close();
+  });
 });
 
 describe("POST /users/parental-consent", () => {
