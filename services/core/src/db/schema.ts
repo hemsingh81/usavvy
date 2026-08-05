@@ -1,4 +1,4 @@
-import { integer, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { date, integer, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 /**
@@ -21,6 +21,14 @@ export const users = pgTable("users", {
   // Single active refresh token per user (MVP scope — no multi-device session list).
   // Stores only its hash, rotated on every /auth/refresh use.
   refreshTokenHash: text("refresh_token_hash"),
+  // Story 1.2 (FR-A-2/NFR-16): null means "not yet declared". String mode ("YYYY-MM-DD")
+  // matches the wire format end to end with no Date-object conversion layer.
+  birthdate: date("birthdate", { mode: "string" }),
+  // Only ever set when the declared age is under 18 — never the learner's own email.
+  parentEmail: text("parent_email"),
+  // Null means pending (or not-applicable for an adult) — set once the parent clicks
+  // the consent link.
+  parentConsentedAt: timestamp("parent_consented_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   // Optimistic-concurrency column per Consistency Conventions.
@@ -34,6 +42,19 @@ export const emailVerificationTokens = pgTable("email_verification_tokens", {
     .references(() => users.id),
   // Only the SHA-256 hash of the raw token is stored — the raw token is emailed once
   // and never persisted, same hygiene already applied to the refresh token.
+  tokenHash: text("token_hash").notNull().unique(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  usedAt: timestamp("used_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// Story 1.2: structurally identical to emailVerificationTokens — same hygiene (only
+// the token hash is persisted), sent to parentEmail rather than the learner's own.
+export const parentalConsentTokens = pgTable("parental_consent_tokens", {
+  id: uuid("id").primaryKey().default(uuidv7Default),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id),
   tokenHash: text("token_hash").notNull().unique(),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   usedAt: timestamp("used_at", { withTimezone: true }),

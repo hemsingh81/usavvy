@@ -43,7 +43,19 @@ describe("createAuthApi", () => {
   it("me sends the access token as a Bearer header", async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValue({ ok: true, json: () => Promise.resolve({ id: "u1", email: "a@example.com", emailVerified: true, role: "student" }) } as unknown as Response);
+      .mockResolvedValue({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            id: "u1",
+            email: "a@example.com",
+            emailVerified: true,
+            role: "student",
+            birthdate: null,
+            isMinor: null,
+            parentalConsentStatus: null,
+          }),
+      } as unknown as Response);
     vi.stubGlobal("fetch", fetchMock);
 
     const api = createAuthApi("http://localhost:3000");

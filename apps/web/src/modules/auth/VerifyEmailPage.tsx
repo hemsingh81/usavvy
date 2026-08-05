@@ -1,19 +1,23 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+// Direct file import — see LoginPage.tsx's comment on why this bypasses the
+// users/index.js barrel (avoids a real circular import between the two modules).
+import { resolvePostAuthDestination } from "../users/postAuthRedirect.js";
 import { AuthApiError } from "./api.js";
 import { useAuth } from "./useAuth.js";
 
-type ViewState = { kind: "verifying" } | { kind: "success" } | { kind: "error"; message: string };
+type ViewState = { kind: "verifying" } | { kind: "success"; destination: string } | { kind: "error"; message: string };
 
 /**
  * AC #3: verifying also logs the learner in. The epic's own AC names a redirect to
  * onboarding as the destination — that screen doesn't exist yet (Story 1.3), so this
  * lands on a plain confirmation instead. Story 1.3 changes the destination, not this
- * verification mechanism.
+ * verification mechanism. Story 1.2: the "Continue" link's actual destination now
+ * depends on age-declaration state, resolved via /me once verification succeeds.
  */
 export function VerifyEmailPage() {
   const [searchParams] = useSearchParams();
-  const { verifyEmail } = useAuth();
+  const { verifyEmail, getMe } = useAuth();
   const [view, setView] = useState<ViewState>({ kind: "verifying" });
   // Bug found via manual browser testing (StrictMode double-invokes effects in dev):
   // verify-email is a one-time-use mutation. A naive per-invocation `cancelled`
@@ -51,14 +55,20 @@ export function VerifyEmailPage() {
     const isStillCurrent = () => isMountedRef.current && requestedTokenRef.current === token;
 
     verifyEmail(token)
-      .then(() => {
-        if (isStillCurrent()) setView({ kind: "success" });
+      .then(async (session) => {
+        if (!isStillCurrent()) return;
+        // Uses the just-issued session's token directly rather than reading `session`
+        // from useAuth's context, which would still be stale here (setSession hasn't
+        // triggered a re-render yet) — a real bug found via this exact sequence.
+        const me = await getMe(session.accessToken);
+        if (!isStillCurrent()) return;
+        setView({ kind: "success", destination: resolvePostAuthDestination(me) });
       })
       .catch((error: unknown) => {
         if (!isStillCurrent()) return;
         setView({ kind: "error", message: error instanceof AuthApiError ? error.message : "verification failed" });
       });
-  }, [searchParams, verifyEmail]);
+  }, [searchParams, verifyEmail, getMe]);
 
   if (view.kind === "verifying") {
     return (
@@ -76,7 +86,7 @@ export function VerifyEmailPage() {
         <div className="usavvy-banner-success" role="status">
           Your account is verified and you&apos;re logged in.
         </div>
-        <Link to="/">Continue</Link>
+        <Link to={view.destination}>Continue</Link>
       </main>
     );
   }

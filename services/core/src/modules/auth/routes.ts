@@ -23,7 +23,9 @@ const MAX_PASSWORD_LENGTH = 128;
 // Trim+lowercase before format validation so accidental whitespace doesn't reject an
 // otherwise-valid email at this layer — service.ts's normalizeEmail() does the same
 // normalization again before any DB comparison (defense in depth, review finding).
-const emailField = z.string().trim().toLowerCase().pipe(z.email());
+// Exported for reuse by other core modules (e.g. users' parentEmail field, Story 1.2) —
+// one email-validation rule, not a second one redefined per call site.
+export const emailField = z.string().trim().toLowerCase().pipe(z.email());
 
 // Password: 8-char minimum, no forced composition rules (current NIST 800-63B
 // guidance favors length over composition; no NFR mandates anything stricter).

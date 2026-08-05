@@ -2,15 +2,28 @@ import { useState, type FormEvent } from "react";
 import { Form } from "radix-ui";
 import { Link, useNavigate } from "react-router-dom";
 import { Button, TextField } from "../../shared/index.js";
+// Direct file import, not the users/index.js barrel — AgeDeclarationPage.tsx imports
+// useAuth from this module's own index.js, so importing the users barrel here would
+// form a real circular import between the two barrels.
+import { resolvePostAuthDestination } from "../users/postAuthRedirect.js";
 import { AuthApiError } from "./api.js";
-import { useAuth } from "./useAuth.js";
+import { useAuth, type Session } from "./useAuth.js";
 import { GoogleSignInButton } from "./GoogleSignInButton.js";
 
 export function LoginPage() {
-  const { login } = useAuth();
+  const { login, getMe } = useAuth();
   const navigate = useNavigate();
   const [serverError, setServerError] = useState<string | undefined>();
   const [submitting, setSubmitting] = useState(false);
+
+  // Takes the just-issued Session explicitly rather than reading it from context —
+  // `setSession` is asynchronous, so reading `session` from a closure immediately after
+  // `login`/`googleAuth` resolves can see a stale pre-update value (a real bug found via
+  // this exact sequence in testing).
+  async function goToPostAuthDestination(session: Session): Promise<void> {
+    const me = await getMe(session.accessToken);
+    navigate(resolvePostAuthDestination(me));
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -24,8 +37,8 @@ export function LoginPage() {
 
     setSubmitting(true);
     try {
-      await login(email, password);
-      navigate("/");
+      const session = await login(email, password);
+      await goToPostAuthDestination(session);
     } catch (error) {
       // Same message whether the account doesn't exist, the password is wrong, or it's
       // unverified with a specific code — server already decides which; we just render it.
@@ -52,7 +65,7 @@ export function LoginPage() {
           </Button>
         </Form.Submit>
       </Form.Root>
-      <GoogleSignInButton onError={setServerError} onSuccess={() => navigate("/")} />
+      <GoogleSignInButton onError={setServerError} onSuccess={(session) => void goToPostAuthDestination(session)} />
       <p>
         Don&apos;t have an account? <Link to="/signup">Sign up</Link>
       </p>

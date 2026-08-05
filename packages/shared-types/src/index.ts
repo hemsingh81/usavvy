@@ -8,4 +8,10 @@ export {
   type AuthSessionResponse,
   signupResponseSchema,
   type SignupResponse,
+  parentalConsentStatusSchema,
+  type ParentalConsentStatus,
+  ageDeclarationResponseSchema,
+  type AgeDeclarationResponse,
+  parentalConsentResponseSchema,
+  type ParentalConsentResponse,
 } from "./auth.js";

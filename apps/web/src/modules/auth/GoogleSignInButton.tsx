@@ -1,10 +1,10 @@
 import { GoogleLogin, GoogleOAuthProvider } from "@react-oauth/google";
 import { getWebConfig } from "../../app/config.js";
-import { useAuth } from "./useAuth.js";
+import { useAuth, type Session } from "./useAuth.js";
 
 export interface GoogleSignInButtonProps {
   onError: (message: string) => void;
-  onSuccess: () => void;
+  onSuccess: (session: Session) => void;
 }
 
 /**

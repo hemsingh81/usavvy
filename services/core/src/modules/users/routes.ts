@@ -1,16 +1,38 @@
 import type { FastifyInstance } from "fastify";
+import { z } from "zod";
 import { AppError } from "@usavvy/service-kernel";
 import { ROLES, type Role } from "@usavvy/config";
+import { emailField } from "../auth/index.js";
+import { parseOrThrow } from "../auth/validation.js";
 import type { Db } from "../../db/client.js";
-import { getMe } from "./service.js";
+import type { NotificationPort } from "../notification/index.js";
+import { calculateAge } from "./age.js";
+import { declareAge, getMe, recordParentalConsent } from "./service.js";
 
 export interface UsersRouteDeps {
   db: Db;
+  notificationPort: NotificationPort;
 }
+
+const MAX_AGE_YEARS = 120;
 
 function isRole(value: string): value is Role {
   return (ROLES as readonly string[]).includes(value);
 }
+
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+// z.iso.date() validates the "YYYY-MM-DD" wire format (verified live) — a plain
+// z.string() plus manual Date parsing would accept ambiguous/datetime strings.
+const birthdateField = z.iso
+  .date()
+  .refine((value) => value <= todayIso(), { message: "birthdate cannot be in the future" })
+  .refine((value) => calculateAge(value, todayIso()) <= MAX_AGE_YEARS, { message: `birthdate cannot be more than ${MAX_AGE_YEARS} years ago` });
+
+const ageDeclarationSchema = z.object({ birthdate: birthdateField, parentEmail: emailField.optional() });
+const parentalConsentSchema = z.object({ token: z.string().min(1) });
 
 export function registerUsersRoutes(app: FastifyInstance, deps: UsersRouteDeps): void {
   app.get("/me", async (request, reply) => {
@@ -24,5 +46,21 @@ export function registerUsersRoutes(app: FastifyInstance, deps: UsersRouteDeps):
       throw new AppError("UNAUTHENTICATED", "authentication required", 401);
     }
     reply.send(await getMe(deps.db, userId, role));
+  });
+
+  app.post("/users/age-declaration", async (request, reply) => {
+    const userId = request.headers["x-user-id"];
+    const role = request.headers["x-user-role"];
+    if (typeof userId !== "string" || typeof role !== "string" || !isRole(role)) {
+      throw new AppError("UNAUTHENTICATED", "authentication required", 401);
+    }
+    const body = parseOrThrow(ageDeclarationSchema, request.body);
+    reply.send(await declareAge(deps.db, deps.notificationPort, userId, body));
+  });
+
+  // Unauthenticated by design — the parent has no account/session (see service.ts).
+  app.post("/users/parental-consent", async (request, reply) => {
+    const body = parseOrThrow(parentalConsentSchema, request.body);
+    reply.send(await recordParentalConsent(deps.db, body));
   });
 }

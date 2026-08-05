@@ -1,1 +1,2 @@
-export { registerAuthRoutes, type AuthRouteDeps } from "./routes.js";
+export { registerAuthRoutes, type AuthRouteDeps, emailField } from "./routes.js";
+export { normalizeEmail } from "./service.js";

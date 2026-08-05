@@ -51,3 +51,50 @@ describe("GET /me", () => {
     await app.close();
   });
 });
+
+describe("POST /users/age-declaration", () => {
+  it("returns 401 with no token and never calls core", async () => {
+    const forwardToCore = vi.fn();
+    const app = buildApp(createTestAppDeps({ forwardToCore }));
+
+    const response = await app.inject({ method: "POST", url: "/users/age-declaration", payload: { birthdate: "1990-01-01" } });
+
+    expect(response.statusCode).toBe(401);
+    expect(forwardToCore).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("forwards the body plus trusted headers derived from a valid token", async () => {
+    const forwardToCore = vi.fn().mockResolvedValue({ status: 200, body: { isMinor: false, parentalConsentStatus: "not_required" } });
+    const app = buildApp(createTestAppDeps({ forwardToCore }));
+    await app.ready();
+    const token = app.jwt.sign({ sub: "u1", role: "student", typ: "access" });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/users/age-declaration",
+      headers: { authorization: `Bearer ${token}` },
+      payload: { birthdate: "1990-01-01" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(forwardToCore).toHaveBeenCalledWith("POST", "/users/age-declaration", {
+      body: { birthdate: "1990-01-01" },
+      headers: { "x-user-id": "u1", "x-user-role": "student" },
+    });
+    await app.close();
+  });
+});
+
+describe("POST /users/parental-consent", () => {
+  it("is reachable with no Authorization header at all — the parent has no account", async () => {
+    const forwardToCore = vi.fn().mockResolvedValue({ status: 200, body: { success: true } });
+    const app = buildApp(createTestAppDeps({ forwardToCore }));
+
+    const response = await app.inject({ method: "POST", url: "/users/parental-consent", payload: { token: "a-token" } });
+
+    expect(response.statusCode).toBe(200);
+    expect(forwardToCore).toHaveBeenCalledWith("POST", "/users/parental-consent", { body: { token: "a-token" } });
+    await app.close();
+  });
+});

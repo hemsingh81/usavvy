@@ -2,12 +2,15 @@ import { useState, type FormEvent } from "react";
 import { Form } from "radix-ui";
 import { Link, useNavigate } from "react-router-dom";
 import { Button, TextField } from "../../shared/index.js";
+// Direct file import — see LoginPage.tsx's comment on why this bypasses the
+// users/index.js barrel (avoids a real circular import between the two modules).
+import { resolvePostAuthDestination } from "../users/postAuthRedirect.js";
 import { AuthApiError } from "./api.js";
 import { useAuth } from "./useAuth.js";
 import { GoogleSignInButton } from "./GoogleSignInButton.js";
 
 export function SignUpPage() {
-  const { signup } = useAuth();
+  const { signup, getMe } = useAuth();
   const navigate = useNavigate();
   const [sent, setSent] = useState(false);
   const [serverError, setServerError] = useState<string | undefined>();
@@ -62,7 +65,16 @@ export function SignUpPage() {
           </Button>
         </Form.Submit>
       </Form.Root>
-      <GoogleSignInButton onError={setServerError} onSuccess={() => navigate("/")} />
+      <GoogleSignInButton
+        onError={setServerError}
+        onSuccess={(session) => {
+          // Google sign-up is pre-verified (AC #2, Story 1.1) — same post-auth
+          // age-declaration check as everywhere else a session is established. Uses
+          // the just-issued session's token directly (see LoginPage's comment on why
+          // reading context `session` here would be stale).
+          void getMe(session.accessToken).then((me) => navigate(resolvePostAuthDestination(me)));
+        }}
+      />
       <p>
         Already have an account? <Link to="/login">Log in</Link>
       </p>

@@ -1,8 +1,8 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
-import type { AuthSessionResponse } from "@usavvy/shared-types";
+import type { AuthSessionResponse, MeResponse } from "@usavvy/shared-types";
 import { createAuthApi } from "./api.js";
 
-interface Session {
+export interface Session {
   accessToken: string;
   refreshToken: string;
   user: { id: string; email: string; role: string };
@@ -11,10 +11,17 @@ interface Session {
 export interface AuthContextValue {
   session: Session | null;
   signup: (email: string, password: string) => Promise<{ userId: string }>;
-  login: (email: string, password: string) => Promise<void>;
-  verifyEmail: (token: string) => Promise<void>;
-  googleAuth: (idToken: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<Session>;
+  verifyEmail: (token: string) => Promise<Session>;
+  googleAuth: (idToken: string) => Promise<Session>;
   logout: () => void;
+  // Story 1.2: the first real consumer of /me — used to decide where post-auth
+  // navigation lands (age declaration / waiting-for-consent / home). Takes an
+  // explicit accessToken rather than reading `session` from context: `setSession`
+  // is asynchronous, so a caller invoking this immediately after `login`/
+  // `verifyEmail`/`googleAuth` resolves would otherwise read a stale pre-update
+  // closure of `session` (a real bug found via this exact sequence in testing).
+  getMe: (accessToken: string) => Promise<MeResponse>;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -39,38 +46,38 @@ export function AuthProvider({ apiUrl, children }: AuthProviderProps) {
   const api = useMemo(() => createAuthApi(apiUrl), [apiUrl]);
   const [session, setSession] = useState<Session | null>(null);
 
-  const applySession = useCallback((result: AuthSessionResponse) => {
-    setSession({ accessToken: result.accessToken, refreshToken: result.refreshToken, user: result.user });
+  // Returns the new Session synchronously (not just setting state) so a caller can use
+  // its accessToken immediately without waiting for a re-render.
+  const applySession = useCallback((result: AuthSessionResponse): Session => {
+    const next: Session = { accessToken: result.accessToken, refreshToken: result.refreshToken, user: result.user };
+    setSession(next);
+    return next;
   }, []);
 
   const signup = useCallback((email: string, password: string) => api.signup({ email, password }), [api]);
 
   const login = useCallback(
-    async (email: string, password: string) => {
-      applySession(await api.login({ email, password }));
-    },
+    async (email: string, password: string): Promise<Session> => applySession(await api.login({ email, password })),
     [api, applySession],
   );
 
   const verifyEmail = useCallback(
-    async (token: string) => {
-      applySession(await api.verifyEmail({ token }));
-    },
+    async (token: string): Promise<Session> => applySession(await api.verifyEmail({ token })),
     [api, applySession],
   );
 
   const googleAuth = useCallback(
-    async (idToken: string) => {
-      applySession(await api.googleAuth({ idToken }));
-    },
+    async (idToken: string): Promise<Session> => applySession(await api.googleAuth({ idToken })),
     [api, applySession],
   );
 
   const logout = useCallback(() => setSession(null), []);
 
+  const getMe = useCallback((accessToken: string): Promise<MeResponse> => api.me(accessToken), [api]);
+
   const value = useMemo<AuthContextValue>(
-    () => ({ session, signup, login, verifyEmail, googleAuth, logout }),
-    [session, signup, login, verifyEmail, googleAuth, logout],
+    () => ({ session, signup, login, verifyEmail, googleAuth, logout, getMe }),
+    [session, signup, login, verifyEmail, googleAuth, logout, getMe],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

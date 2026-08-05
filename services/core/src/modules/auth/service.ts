@@ -29,8 +29,9 @@ function isUniqueViolation(error: unknown): boolean {
 }
 
 // Review finding: emails were compared/stored as-typed, so "User@Example.com" and
-// "user@example.com" could register as distinct accounts.
-function normalizeEmail(email: string): string {
+// "user@example.com" could register as distinct accounts. Exported for reuse by other
+// core modules (e.g. users' parentEmail field, Story 1.2).
+export function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 

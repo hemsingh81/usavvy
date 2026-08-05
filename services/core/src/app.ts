@@ -61,7 +61,7 @@ export function buildApp(deps: BuildAppDeps) {
   });
 
   registerAuthRoutes(app, { db: deps.db, notificationPort: deps.notificationPort, googleClientId: deps.googleClientId });
-  registerUsersRoutes(app, { db: deps.db });
+  registerUsersRoutes(app, { db: deps.db, notificationPort: deps.notificationPort });
 
   return app;
 }

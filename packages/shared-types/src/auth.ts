@@ -1,10 +1,18 @@
 import { z } from "zod";
 
+export const parentalConsentStatusSchema = z.enum(["not_required", "pending", "granted"]);
+
+export type ParentalConsentStatus = z.infer<typeof parentalConsentStatusSchema>;
+
 export const meResponseSchema = z.object({
   id: z.string(),
   email: z.string(),
   emailVerified: z.boolean(),
   role: z.string(),
+  // Story 1.2 (FR-A-2/NFR-16) — all three null until the learner declares their age.
+  birthdate: z.string().nullable(),
+  isMinor: z.boolean().nullable(),
+  parentalConsentStatus: parentalConsentStatusSchema.nullable(),
 });
 
 export type MeResponse = z.infer<typeof meResponseSchema>;
@@ -26,3 +34,14 @@ export type AuthSessionResponse = z.infer<typeof authSessionResponseSchema>;
 export const signupResponseSchema = z.object({ userId: z.string() });
 
 export type SignupResponse = z.infer<typeof signupResponseSchema>;
+
+export const ageDeclarationResponseSchema = z.object({
+  isMinor: z.boolean(),
+  parentalConsentStatus: parentalConsentStatusSchema,
+});
+
+export type AgeDeclarationResponse = z.infer<typeof ageDeclarationResponseSchema>;
+
+export const parentalConsentResponseSchema = z.object({ success: z.literal(true) });
+
+export type ParentalConsentResponse = z.infer<typeof parentalConsentResponseSchema>;

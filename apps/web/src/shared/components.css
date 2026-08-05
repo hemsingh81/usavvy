@@ -82,3 +82,16 @@
   padding: var(--spacing-3);
   margin-bottom: var(--spacing-4);
 }
+
+/* DESIGN.md's minor-consent-gate component: primary accent, calm/informational tone —
+   never the error/warning palette. A minor waiting on consent is a normal, expected
+   state, not a flagged one. */
+.usavvy-banner-info {
+  font-family: var(--font-family);
+  font-size: 14px;
+  background: var(--color-primary-container);
+  color: var(--color-on-primary-container);
+  border-radius: var(--radius-default);
+  padding: var(--spacing-3);
+  margin-bottom: var(--spacing-4);
+}
