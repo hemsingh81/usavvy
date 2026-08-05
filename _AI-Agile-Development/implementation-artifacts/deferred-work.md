@@ -63,3 +63,11 @@
 - Pressing Enter in the display-name field doesn't trigger a save (only blur does) — matches `PreferencesPage`'s identical established blur-only-save convention.
 - No in-flight guard against the mount-time `getMe` effect re-firing mid-edit — currently unreachable (no silent token-refresh exists in `useAuth` yet).
 - The Profile page's placeholder sections and identity block have no per-section heading/landmark, just flat `<div>`s under one `<h1>` — a systemic, app-wide gap affecting every page, not unique to this story.
+
+## Deferred from: code review of story-1-6 (2026-08-05)
+
+- `ProfilePage`'s mount effect fails the whole page if `GET /users/privacy-settings` fails, even though `GET /me` might have succeeded — no partial-failure recovery UI has any precedent anywhere else in this app (every page's data load is all-or-nothing).
+- `savePrivacyField`'s revert-on-failure reads `previous` from a render-time state closure rather than a synchronously-updated ref — a rapid same-field double-toggle where the second request fails could in theory revert one step off from what was actually on screen. `PreferencesPage`'s `saveField` has the identical pattern for its own 6 fields.
+- No CAS/step-order check on `savePrivacySettings` — two genuinely concurrent same-field writes resolve by last-write-wins with no reconciliation signal. Explicit, deliberate scope decision matching Story 1.4's identical precedent.
+- `createUsersApi(apiUrl)`/`getWebConfig()` re-invoked on every save rather than memoized once — pre-existing style across every save handler in this app.
+- Generated migration/snapshot files lack a trailing newline — matches Story 1.3/1.4's identical dismissed finding.

@@ -38,6 +38,11 @@ export function ProfilePage() {
   // second independently-saving field — the privacy toggles — was added to this same
   // page) so one field's save can never invalidate a different field's in-flight one.
   const requestIdRef = useRef<Record<string, number>>({});
+  // Bumped on every successful (re-)load. Combined with requestIdRef below so a save
+  // issued in a prior "epoch" (e.g. before a session change reloaded this page's data)
+  // can never be mistaken for current just because its per-field counter happens to
+  // match a fresh count restarting from 1 in the new epoch.
+  const epochRef = useRef(0);
   useEffect(
     () => () => {
       isMountedRef.current = false;
@@ -57,6 +62,14 @@ export function ProfilePage() {
         setMe(meResult);
         setDisplayNameInput(meResult.displayName);
         setPrivacy(privacyResult);
+        setFieldError(undefined);
+        setPrivacyErrors({});
+        // Review finding: without this, an in-flight save issued under a prior session
+        // (e.g. a token rotation without a full unmount) could still land after this
+        // reload and, since it's the same field key, pass the per-field requestId check
+        // and overwrite the newly-loaded user's state with a stale/foreign response.
+        epochRef.current += 1;
+        requestIdRef.current = {};
         setView({ kind: "ready" });
       })
       .catch((error: unknown) => {
@@ -88,17 +101,19 @@ export function ProfilePage() {
     }
     const previous = me;
     setFieldError(undefined);
+    const epoch = epochRef.current;
     const requestId = (requestIdRef.current.displayName = (requestIdRef.current.displayName ?? 0) + 1);
+    const isStale = () => epochRef.current !== epoch || requestIdRef.current.displayName !== requestId;
     const { apiUrl } = getWebConfig();
     createUsersApi(apiUrl)
       .updateDisplayName(accessToken, { displayName: trimmed })
       .then((updated) => {
-        if (!isMountedRef.current || requestIdRef.current.displayName !== requestId) return;
+        if (!isMountedRef.current || isStale()) return;
         setMe(updated);
         setDisplayNameInput(updated.displayName);
       })
       .catch((error: unknown) => {
-        if (!isMountedRef.current || requestIdRef.current.displayName !== requestId) return;
+        if (!isMountedRef.current || isStale()) return;
         setDisplayNameInput(previous.displayName);
         setFieldError(error instanceof ApiError ? error.message : "something went wrong — please try again");
       });
@@ -110,20 +125,22 @@ export function ProfilePage() {
   // replace the whole object with a single field's response), reverted with an inline
   // error on failure, race-guarded per field via the shared requestIdRef.
   function savePrivacyField<K extends keyof LearnerPrivacySettings>(field: K, value: LearnerPrivacySettings[K]): void {
-    if (!privacy) return;
+    if (!privacy || privacy[field] === value) return;
     const previous = privacy[field];
     setPrivacy((current) => (current ? { ...current, [field]: value } : current));
     setPrivacyErrors((current) => ({ ...current, [field]: undefined }));
+    const epoch = epochRef.current;
     const requestId = (requestIdRef.current[field] = (requestIdRef.current[field] ?? 0) + 1);
+    const isStale = () => epochRef.current !== epoch || requestIdRef.current[field] !== requestId;
     const { apiUrl } = getWebConfig();
     createUsersApi(apiUrl)
       .savePrivacySettings(accessToken, { [field]: value } as Partial<LearnerPrivacySettings>)
       .then((updated) => {
-        if (!isMountedRef.current || requestIdRef.current[field] !== requestId) return;
+        if (!isMountedRef.current || isStale()) return;
         setPrivacy((current) => (current ? { ...current, [field]: updated[field] } : current));
       })
       .catch((error: unknown) => {
-        if (!isMountedRef.current || requestIdRef.current[field] !== requestId) return;
+        if (!isMountedRef.current || isStale()) return;
         setPrivacy((current) => (current ? { ...current, [field]: previous } : current));
         setPrivacyErrors((current) => ({
           ...current,
