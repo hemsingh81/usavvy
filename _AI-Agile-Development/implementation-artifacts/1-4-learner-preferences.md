@@ -4,7 +4,7 @@ baseline_commit: 185e39d
 
 # Story 1.4: Learner Preferences
 
-Status: ready-for-dev
+Status: review
 
 *(Epic 1, FR-A-4. Extends the same `learnerProfiles` row Story 1.3 created — the architecture's own AD-14 ownership table and the PRD's data model (§18: `User ──1:1── LearnerProfile (goal, level, availability, preferences, privacy flags)`) both nest preferences inside `LearnerProfile`, not a separate entity. Unlike onboarding, this is not a wizard: preferences are freely, repeatedly editable at any time, with real default values from the start — never "null until answered.")*
 
@@ -34,18 +34,18 @@ so that my sessions match how I like to learn.
   - [x] `GET /users/preferences` and `PUT /users/preferences` → both authenticated, same `requireAuth` `preHandler` + trusted-header forwarding pattern already used for every other `users/*` route in `authProxy.ts`
   - [x] Validation happens at `core`'s route layer via zod, same `parseOrThrow` pattern as every other endpoint — gateway stays a thin proxy
 
-- [ ] **Task 4: `apps/web` — preferences page** (AC: #1)
-  - [ ] New shared primitive `apps/web/src/shared/Switch.tsx` (Radix `Switch`-based, matching `Button.tsx`/`TextField.tsx`'s existing wrapper style — unstyled-by-default Radix primitive, styled via CSS classes; `radix-ui` is already a dependency, no new package). Three of the six controls need a boolean toggle (`voiceEnabled`, `captionsEnabled`, `reducedMotion`) — building one reusable primitive for three uses is warranted, unlike a one-off. `DESIGN.md` has no dedicated toggle/switch component token (same gap Story 1.3 hit for the wizard/stepper and `interests` tag-editor) — style it from the generic tokens already in `components.css`, nothing more specific to match
-  - [ ] New route `/preferences` (protected — no session → redirect to `/login`, same pattern as `AgeDeclarationPage`/`OnboardingWizardPage`; **not** gated on `onboardingComplete` — nothing in this story's AC ties preferences to onboarding state, and a learner should be able to set preferences regardless of where they are in that separate flow). `PreferencesPage.tsx` in `apps/web/src/modules/users/`: on mount, `GET /users/preferences`; render all 6 controls at once (this is a settings page, not a wizard — no step/progress concept applies). `voiceEnabled`/`captionsEnabled`/`reducedMotion` → the new `Switch`; `boardTheme`/`explanationStyle` → a native `<select>` wrapped in `Form.Field`/`Form.Control asChild`, the exact pattern `OnboardingWizardPage`'s `LevelStep` already established for an enum control; `speechRate` → a plain `TextField type="number"` (bounded 0.5–2, matching the shared schema) — consistent with how Story 1.3 handled `sessionLengthMinutes`/`availability`'s numeric inputs rather than introducing a new slider primitive with no design token to match either
-  - [ ] Each control **auto-saves independently on change** — `PUT /users/preferences` with just that one field, immediately, no separate "Save" button — matching `EXPERIENCE.md`'s own stated precedent for the Theme Picker ("applied instantly on selection with no page reload, persisted to the Learner Profile"). A per-control save must not block or reset the other five controls' current values while in flight
-  - [ ] A failed individual save surfaces a small, per-control inline error (AD-17 — no silent failures) without discarding the learner's other successfully-saved preferences or forcing a full page reload to retry
+- [x] **Task 4: `apps/web` — preferences page** (AC: #1)
+  - [x] New shared primitive `apps/web/src/shared/Switch.tsx` (Radix `Switch`-based, matching `Button.tsx`/`TextField.tsx`'s existing wrapper style — unstyled-by-default Radix primitive, styled via CSS classes; `radix-ui` is already a dependency, no new package). Three of the six controls need a boolean toggle (`voiceEnabled`, `captionsEnabled`, `reducedMotion`) — building one reusable primitive for three uses is warranted, unlike a one-off. `DESIGN.md` has no dedicated toggle/switch component token (same gap Story 1.3 hit for the wizard/stepper and `interests` tag-editor) — style it from the generic tokens already in `components.css`, nothing more specific to match
+  - [x] New route `/preferences` (protected — no session → redirect to `/login`, same pattern as `AgeDeclarationPage`/`OnboardingWizardPage`; **not** gated on `onboardingComplete` — nothing in this story's AC ties preferences to onboarding state, and a learner should be able to set preferences regardless of where they are in that separate flow). `PreferencesPage.tsx` in `apps/web/src/modules/users/`: on mount, `GET /users/preferences`; render all 6 controls at once (this is a settings page, not a wizard — no step/progress concept applies). `voiceEnabled`/`captionsEnabled`/`reducedMotion` → the new `Switch`; `boardTheme`/`explanationStyle` → a native `<select>` wrapped in `Form.Field`/`Form.Control asChild`, the exact pattern `OnboardingWizardPage`'s `LevelStep` already established for an enum control; `speechRate` → a plain `TextField type="number"` (bounded 0.5–2, matching the shared schema) — consistent with how Story 1.3 handled `sessionLengthMinutes`/`availability`'s numeric inputs rather than introducing a new slider primitive with no design token to match either
+  - [x] Each control **auto-saves independently on change** — `PUT /users/preferences` with just that one field, immediately, no separate "Save" button — matching `EXPERIENCE.md`'s own stated precedent for the Theme Picker ("applied instantly on selection with no page reload, persisted to the Learner Profile"). A per-control save must not block or reset the other five controls' current values while in flight
+  - [x] A failed individual save surfaces a small, per-control inline error (AD-17 — no silent failures) without discarding the learner's other successfully-saved preferences or forcing a full page reload to retry
 
-- [ ] **Task 5: Tests mirroring `src/` 1:1** (AD-8)
-  - [ ] `services/core/tests/modules/users/service.test.ts` (or a dedicated `preferences.test.ts`, matching wherever Task 2's functions land) — `getPreferences` returns `DEFAULT_LEARNER_PREFERENCES` verbatim before any write; a partial `savePreferences` updates only the given field(s), leaving the rest at their previous (or still-default) values; validation rejects an out-of-bounds `speechRate` and an unrecognized `boardTheme`/`explanationStyle`; rejects an empty update body
-  - [ ] `services/core/tests/modules/users/routes.test.ts` — both routes require authentication (401 with no trusted headers)
-  - [ ] `services/gateway/tests/authProxy.test.ts` — both new proxy routes require auth (401 with no token)
-  - [ ] `apps/web/tests/shared/Switch.test.tsx` (new) — renders, toggles, calls `onCheckedChange`
-  - [ ] `apps/web/tests/modules/users/PreferencesPage.test.tsx` (new) — loads and displays the fetched preferences, each control save fires the correct partial `PUT` body and doesn't disturb the other controls' displayed values, a failed save shows an inline error without losing other successfully-saved state
+- [x] **Task 5: Tests mirroring `src/` 1:1** (AD-8)
+  - [x] `services/core/tests/modules/users/service.test.ts` (or a dedicated `preferences.test.ts`, matching wherever Task 2's functions land) — `getPreferences` returns `DEFAULT_LEARNER_PREFERENCES` verbatim before any write; a partial `savePreferences` updates only the given field(s), leaving the rest at their previous (or still-default) values; validation rejects an out-of-bounds `speechRate` and an unrecognized `boardTheme`/`explanationStyle`; rejects an empty update body
+  - [x] `services/core/tests/modules/users/routes.test.ts` — both routes require authentication (401 with no trusted headers)
+  - [x] `services/gateway/tests/authProxy.test.ts` — both new proxy routes require auth (401 with no token)
+  - [x] `apps/web/tests/shared/Switch.test.tsx` (new) — renders, toggles, calls `onCheckedChange`
+  - [x] `apps/web/tests/modules/users/PreferencesPage.test.tsx` (new) — loads and displays the fetched preferences, each control save fires the correct partial `PUT` body and doesn't disturb the other controls' displayed values, a failed save shows an inline error without losing other successfully-saved state
 
 ## Dev Notes
 
@@ -145,6 +145,12 @@ apps/web/
 - [Source: `_AI-Agile-Development/planning-artifacts/architecture/architecture-USavvy-2026-08-04/ARCHITECTURE-SPINE.md` — AD-7, AD-8, AD-13, AD-14 (ownership table — no separate "Preferences" entity), AD-17, Consistency Conventions]
 - [Source: `_AI-Agile-Development/implementation-artifacts/1-3-onboarding-wizard.md` — established `ensureLearnerProfile`/`requireTrustedUser` reuse points, the `LevelStep` enum-control pattern, and its own code-review findings (step-order enforcement, cancellation guards) that inform what does/doesn't apply here]
 
+## Change Log
+
+- 2026-08-05: Checkpoint 1 (Tasks 1-3, backend) — 6 nullable preference columns on `learnerProfiles`, defaults computed at the service layer via `DEFAULT_LEARNER_PREFERENCES` (no DB defaults, no backfill needed for future preferences), `GET`/`PUT /users/preferences` reusing `ensureLearnerProfile`, a genuine partial update with no step-order/CAS check since every preference is freely re-editable, gateway proxy routes. 121 `services/core` tests (up from 108), 36 `services/gateway` tests (up from 32), 56 `shared-types` tests (up from 43).
+- 2026-08-05: Checkpoint 2 (Task 4, frontend) — new shared `Switch` primitive (Radix-based), `PreferencesPage` with all 6 controls auto-saving independently on change (optimistic update, reverted with an inline error on failure, matching `EXPERIENCE.md`'s Theme Picker "instant-apply" precedent), `/preferences` route. 90 `apps/web` tests (up from 80).
+- 2026-08-05: Task 5 completion — full regression clean (329 tests across the monorepo), migration applied to the live Postgres container, and the full flow reverified end-to-end via `curl`: first-call defaults, a single-field partial update, a multi-field partial update (confirming unrelated fields survive), and all three validation rejections (empty body, out-of-bounds `speechRate`, invalid `boardTheme`). A live browser render/interaction check of `PreferencesPage` was not performed beyond what's already covered by its unit-test suite — this session's browser-automation tooling was already confirmed unable to send `PUT`/`PATCH`/`DELETE` requests at all (discovered and documented during Story 1.3's own live verification), so a browser pass here would hit the identical wall for zero additional confidence beyond the existing `curl` + mocked-fetch component-test coverage. Status → `review`.
+
 ## Dev Agent Record
 
 ### Agent Model Used
@@ -155,4 +161,39 @@ Claude Sonnet 5
 
 ### Completion Notes List
 
+- **Tasks 1-3 (backend):** `toLearnerPreferences()` maps each nullable DB column through `?? DEFAULT_LEARNER_PREFERENCES[field]`, so `GET`/`PUT` always return a fully-populated object regardless of how many fields have actually been overridden. `savePreferences` spreads `PreferencesUpdateInput` directly into Drizzle's `.set()` — the input's keys are already validated as a subset of the table's own preference columns with matching types (via `preferencesUpdateInputSchema`), so no per-field mapping function was needed the way `stepColumnUpdate` was for onboarding's discriminated union.
+- **Task 4 (frontend):** `PreferencesPage` keeps a separate `speechRateInput` string state for the numeric field — committing (validating + saving) on blur rather than on every keystroke, since firing a network request per digit typed would be poor UX and inconsistent with the calm, deliberate "instant-apply per control" pattern the other five controls follow. Each `saveField()` call does an optimistic local update first, then reverts that one field (and only that field) if the save fails, with a per-field inline error — verified via a dedicated test that the other controls' displayed values are untouched by one field's failure.
+- **Real bug found via test failures (not live testing this time):** the page's `Form.Field`/`Form.Control` usage (for the `speechRate` input and the two `<select>`s) requires a Radix `Form.Root` ancestor — omitted at first since there's no single submit button on a page where every control auto-saves independently. Wrapped the whole control set in a `Form.Root` with a `preventDefault`-only `onSubmit` (there's nothing to actually submit) rather than dropping `Form.Field` in favor of raw HTML, keeping the same Radix-Form-based pattern every other form field in the app already uses.
+- **Test infrastructure fix:** jsdom has no `ResizeObserver`, which Radix's `Switch` reads internally — added a minimal no-op stub to `apps/web/tests/setup.ts` (global, not per-test, since any future control using Radix's `useSize` hook would hit the same gap).
+- **Task 5 (full regression + live verification):** 329 tests green across the monorepo (config 14, shared-types 56, service-kernel 12, apps/web 90, gateway 36, core 121), `tsc --noEmit`/`eslint .` clean in every workspace. Applied the new migration to the live Postgres container and verified the complete preferences flow end-to-end via `curl` — confirmed defaults on first call, single- and multi-field partial updates each leaving unrelated fields untouched, and all three validation rejections returning the expected `VALIDATION_ERROR` envelope. All test data cleaned up from Postgres afterward.
+
 ### File List
+
+**Task 1 (schema + shared contract):**
+- `services/core/src/db/schema.ts` (updated — `learnerProfiles` gains 6 nullable preference columns)
+- `services/core/drizzle/0003_superb_iceman.sql` (new — generated migration)
+- `services/core/drizzle/meta/0003_snapshot.json` (new), `services/core/drizzle/meta/_journal.json` (updated)
+- `packages/shared-types/src/preferences.ts` (new — `boardThemeSchema`, `explanationStyleSchema`, `learnerPreferencesSchema`, `DEFAULT_LEARNER_PREFERENCES`, `preferencesUpdateInputSchema`)
+- `packages/shared-types/src/index.ts` (updated — barrel), `packages/shared-types/tests/preferences.test.ts` (new)
+
+**Task 2 (core users module):**
+- `services/core/src/modules/users/service.ts` (updated — `getPreferences`, `savePreferences`, `toLearnerPreferences`)
+- `services/core/src/modules/users/routes.ts` (updated — `GET/PUT /users/preferences`)
+- `services/core/tests/modules/users/preferences.test.ts` (new), `services/core/tests/modules/users/routes.test.ts` (updated)
+
+**Task 3 (gateway proxy):**
+- `services/gateway/src/authProxy.ts` (updated — two new authenticated routes)
+- `services/gateway/tests/authProxy.test.ts` (updated)
+
+**Task 4 (apps/web):**
+- `apps/web/src/shared/Switch.tsx` (new), `apps/web/src/shared/index.ts` (updated — barrel), `apps/web/src/shared/components.css` (updated — `.usavvy-switch*` classes)
+- `apps/web/src/modules/users/PreferencesPage.tsx` (new)
+- `apps/web/src/modules/users/api.ts` (updated — `getPreferences`, `savePreferences`), `apps/web/src/modules/users/index.ts` (updated — barrel)
+- `apps/web/src/app/App.tsx` (updated — `/preferences` route)
+- `apps/web/tests/shared/Switch.test.tsx` (new)
+- `apps/web/tests/modules/users/PreferencesPage.test.tsx` (new)
+- `apps/web/tests/modules/users/api.test.ts` (updated)
+- `apps/web/tests/setup.ts` (updated — `ResizeObserver` stub for jsdom)
+
+**Task 5 (sprint tracking):**
+- `_AI-Agile-Development/implementation-artifacts/sprint-status.yaml` (updated — Story 1.4 → `review`)

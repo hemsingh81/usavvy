@@ -115,4 +115,53 @@ describe("createUsersApi", () => {
       expect.objectContaining({ method: "PUT", body: JSON.stringify({ step: "goal", value: "learn calculus" }) }),
     );
   });
+
+  it("getPreferences sends the access token and no body, returns the parsed preferences", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          voiceEnabled: true,
+          speechRate: 1,
+          boardTheme: "dark",
+          explanationStyle: "concise",
+          captionsEnabled: false,
+          reducedMotion: false,
+        }),
+    } as unknown as Response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const api = createUsersApi("http://localhost:3000");
+    const result = await api.getPreferences("a-token");
+
+    expect(result.boardTheme).toBe("dark");
+    const [, callOptions] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(callOptions.method).toBe("GET");
+    expect(callOptions.headers).toEqual(expect.objectContaining({ authorization: "Bearer a-token" }));
+  });
+
+  it("savePreferences sends the partial body and access token, returns the full preferences shape", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          voiceEnabled: false,
+          speechRate: 1,
+          boardTheme: "dark",
+          explanationStyle: "concise",
+          captionsEnabled: false,
+          reducedMotion: false,
+        }),
+    } as unknown as Response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const api = createUsersApi("http://localhost:3000");
+    const result = await api.savePreferences("a-token", { voiceEnabled: false });
+
+    expect(result.voiceEnabled).toBe(false);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:3000/users/preferences",
+      expect.objectContaining({ method: "PUT", body: JSON.stringify({ voiceEnabled: false }) }),
+    );
+  });
 });
