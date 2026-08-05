@@ -1,5 +1,14 @@
-import { catalogListResponseSchema, courseResponseSchema, type CatalogSearchParams, type CourseResponse, type CourseSummary } from "@usavvy/shared-types";
-import { apiRequest } from "../../shared/apiClient.js";
+import {
+  catalogListResponseSchema,
+  courseCustomizationResponseSchema,
+  courseResponseSchema,
+  type CatalogSearchParams,
+  type CourseCustomizationResponse,
+  type CourseResponse,
+  type CourseSummary,
+  type SaveCourseCustomizationInput,
+} from "@usavvy/shared-types";
+import { apiRequest, ApiError } from "../../shared/apiClient.js";
 
 function buildQueryString(params: CatalogSearchParams): string {
   const search = new URLSearchParams();
@@ -20,6 +29,22 @@ export function createCoursesApi(apiUrl: string) {
     // apps/web consumer.
     getCourse: (accessToken: string, id: string): Promise<CourseResponse> =>
       apiRequest(apiUrl, `/courses/${id}`, courseResponseSchema, { method: "GET", accessToken }),
+    // Story 2.4: a 404 means "no customization saved yet" (AC #4's first-time case), not an
+    // error state — caught here and turned into null rather than propagated.
+    getCustomization: async (accessToken: string, courseId: string): Promise<CourseCustomizationResponse | null> => {
+      try {
+        return await apiRequest(apiUrl, `/courses/${courseId}/customization`, courseCustomizationResponseSchema, { method: "GET", accessToken });
+      } catch (error) {
+        if (error instanceof ApiError && error.code === "NOT_FOUND") {
+          return null;
+        }
+        throw error;
+      }
+    },
+    // A DEPENDENCY_CONFLICT error (AC #3) is left to propagate — the caller needs its
+    // `details` (the conflict list), not a swallowed generic message.
+    saveCustomization: (accessToken: string, courseId: string, input: SaveCourseCustomizationInput): Promise<CourseCustomizationResponse> =>
+      apiRequest(apiUrl, `/courses/${courseId}/customization`, courseCustomizationResponseSchema, { method: "PUT", body: input, accessToken }),
   };
 }
 

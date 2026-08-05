@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Navigate, useParams } from "react-router-dom";
+import { Link, Navigate, useParams } from "react-router-dom";
 import type { CourseResponse } from "@usavvy/shared-types";
 import { ApiError } from "../../shared/apiClient.js";
 import { getWebConfig } from "../../app/config.js";
@@ -115,9 +115,10 @@ export function CourseDetailPage() {
             <button type="button" className="usavvy-button-primary" disabled>
               Start course
             </button>
-            <button type="button" className="usavvy-button-secondary" disabled>
+            {/* Story 2.4: wires this up for real — Epic 3/4 still own "Start course". */}
+            <Link to={`/courses/${id}/customize`} className="usavvy-button-secondary">
               Customise before starting
-            </button>
+            </Link>
           </div>
         </>
       ) : null}

@@ -91,3 +91,13 @@ export {
   type CatalogSearchParams,
   catalogListResponseSchema,
 } from "./catalog.js";
+export {
+  courseCustomizationDepthSchema,
+  type CourseCustomizationDepth,
+  saveCourseCustomizationInputSchema,
+  type SaveCourseCustomizationInput,
+  courseCustomizationResponseSchema,
+  type CourseCustomizationResponse,
+  dependencyConflictSchema,
+  type DependencyConflict,
+} from "./courseCustomization.js";

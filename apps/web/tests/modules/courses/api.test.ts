@@ -64,4 +64,77 @@ describe("createCoursesApi", () => {
     expect(fetchMock).toHaveBeenCalledWith("http://localhost:3000/courses/c1", expect.objectContaining({ method: "GET" }));
     expect(result).toEqual(course);
   });
+
+  it("getCustomization returns null (not a thrown error) when none has been saved yet (Story 2.4, AC #4)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        json: () => Promise.resolve({ error: { code: "NOT_FOUND", message: "no customization saved yet" } }),
+      } as unknown as Response),
+    );
+
+    const api = createCoursesApi("http://localhost:3000");
+    const result = await api.getCustomization("a-token", "c1");
+
+    expect(result).toBeNull();
+  });
+
+  it("getCustomization returns the parsed customization when one exists", async () => {
+    const customization = {
+      courseId: "c1",
+      deselectedTopicIds: ["t1"],
+      priorityTopicIds: [],
+      depth: "standard",
+      explanationStyle: "concise",
+      estimatedHours: 6,
+      updatedAt: "2026-01-15T00:00:00.000Z",
+    };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve(customization) } as unknown as Response));
+
+    const api = createCoursesApi("http://localhost:3000");
+    const result = await api.getCustomization("a-token", "c1");
+
+    expect(result).toEqual(customization);
+  });
+
+  it("saveCustomization PUTs to /courses/:id/customization and returns the saved result", async () => {
+    const customization = {
+      courseId: "c1",
+      deselectedTopicIds: [],
+      priorityTopicIds: [],
+      depth: "deep-dive",
+      explanationStyle: "concise",
+      estimatedHours: 9,
+      updatedAt: "2026-01-15T00:00:00.000Z",
+    };
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve(customization) } as unknown as Response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const api = createCoursesApi("http://localhost:3000");
+    const result = await api.saveCustomization("a-token", "c1", { depth: "deep-dive" });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:3000/courses/c1/customization",
+      expect.objectContaining({ method: "PUT", body: JSON.stringify({ depth: "deep-dive" }) }),
+    );
+    expect(result).toEqual(customization);
+  });
+
+  it("saveCustomization lets a DEPENDENCY_CONFLICT error propagate with its details, rather than swallowing it", async () => {
+    const conflicts = [{ topicId: "t1", topicTitle: "Basics", requiredByTopicId: "t2", requiredByTopicTitle: "Advanced" }];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        json: () => Promise.resolve({ error: { code: "DEPENDENCY_CONFLICT", message: "conflict", details: conflicts } }),
+      } as unknown as Response),
+    );
+
+    const api = createCoursesApi("http://localhost:3000");
+
+    await expect(api.saveCustomization("a-token", "c1", { deselectedTopicIds: ["t1"] })).rejects.toMatchObject({
+      code: "DEPENDENCY_CONFLICT",
+    });
+  });
 });

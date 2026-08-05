@@ -72,4 +72,18 @@ export function registerCoursesProxyRoutes(app: FastifyInstance, deps: CoursesPr
     const result = await deps.forwardToCourses("GET", `/courses/${id}`, { headers: trustedHeaders(request) });
     reply.code(result.status).send(result.body);
   });
+
+  // Story 2.4: the learner's own personal data — same auth-only gate as every other
+  // route here; RBAC (if any were needed) is left to the service it forwards to.
+  app.get("/courses/:id/customization", { preHandler: requireAuth }, async (request, reply) => {
+    const id = requireValidId((request.params as { id: string }).id);
+    const result = await deps.forwardToCourses("GET", `/courses/${id}/customization`, { headers: trustedHeaders(request) });
+    reply.code(result.status).send(result.body);
+  });
+
+  app.put("/courses/:id/customization", { preHandler: requireAuth }, async (request, reply) => {
+    const id = requireValidId((request.params as { id: string }).id);
+    const result = await deps.forwardToCourses("PUT", `/courses/${id}/customization`, { body: request.body, headers: trustedHeaders(request) });
+    reply.code(result.status).send(result.body);
+  });
 }

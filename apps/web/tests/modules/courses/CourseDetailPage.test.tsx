@@ -97,13 +97,13 @@ describe("CourseDetailPage", () => {
     expect(screen.getByText("Module 1")).toBeInTheDocument();
   });
 
-  it("shows both 'Start course' and 'Customise before starting' CTAs, both disabled (AC #4)", async () => {
+  it("shows 'Start course' disabled and 'Customise before starting' as a real link to the customize screen (AC #4; Story 2.4 wires up the latter)", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(await jsonResponse(FULL_COURSE)));
     renderWithSession({ accessToken: "a-token" });
 
     await waitFor(() => expect(screen.getByText("Intro to Algebra")).toBeInTheDocument());
     expect(screen.getByRole("button", { name: "Start course" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Customise before starting" })).toBeDisabled();
+    expect(screen.getByRole("link", { name: "Customise before starting" })).toHaveAttribute("href", "/courses/c1/customize");
   });
 
   it("shows a distinguishable error rather than a blank page when the fetch fails", async () => {

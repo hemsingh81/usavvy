@@ -6,6 +6,9 @@ export class ApiError extends Error {
   constructor(
     public readonly code: string,
     message: string,
+    // Story 2.4: DEPENDENCY_CONFLICT's structured conflict list needs to reach the caller,
+    // not just a flattened message string.
+    public readonly details?: unknown,
   ) {
     super(message);
     this.name = "ApiError";
@@ -23,7 +26,7 @@ async function throwForErrorResponse(response: Response): Promise<never> {
   const json: unknown = await response.json().catch(() => undefined);
   const parsedError = errorEnvelopeSchema.safeParse(json);
   if (parsedError.success) {
-    throw new ApiError(parsedError.data.error.code, parsedError.data.error.message);
+    throw new ApiError(parsedError.data.error.code, parsedError.data.error.message, parsedError.data.error.details);
   }
   throw new ApiError("UNKNOWN_ERROR", "an unexpected error occurred");
 }

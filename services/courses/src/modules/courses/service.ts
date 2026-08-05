@@ -1,21 +1,25 @@
-import { eq, inArray, sql, type SQL } from "drizzle-orm";
+import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
 import { AppError } from "@usavvy/service-kernel";
 import { can, type Role } from "@usavvy/config";
 import type {
   CatalogSearchParams,
   ConceptResponse,
+  CourseCustomizationDepth,
+  CourseCustomizationResponse,
   CourseResponse,
   CourseSummary,
   CreateConceptInput,
   CreateCourseInput,
   CreateModuleInput,
   CreateTopicInput,
+  DependencyConflict,
   DurationBucket,
   ModuleResponse,
+  SaveCourseCustomizationInput,
   TopicResponse,
 } from "@usavvy/shared-types";
 import type { Db } from "../../db/client.js";
-import { concepts, conceptPrerequisites, courses, modules, topics } from "../../db/schema.js";
+import { concepts, conceptPrerequisites, courseCustomizations, courses, modules, topics } from "../../db/schema.js";
 
 // Review finding: every write function previously checked can(role, "create", ...)
 // regardless of what it actually does — archiveModule is semantically a delete but never
@@ -418,4 +422,220 @@ function durationBucketCondition(bucket: DurationBucket): SQL {
     case "long":
       return sql`c.estimated_duration_hours > 15`;
   }
+}
+
+interface CourseTopicGraph {
+  courseEstimatedDurationHours: number | null;
+  topicIds: Set<string>;
+  topicTitleById: Map<string, string>;
+  conceptTopicId: Map<string, string>;
+  prerequisiteEdges: { conceptId: string; prerequisiteConceptId: string }[];
+}
+
+/**
+ * Story 2.4 (FR-C-4). Story 2.1 only modeled prerequisites at the Concept level
+ * (concept_prerequisites, within the same Course) — there is no separate Topic-level
+ * prerequisite store. This reads that same data to let saveCourseCustomization *derive*
+ * Topic-level dependency conflicts (AC #3) at request time, rather than duplicating a
+ * second prerequisite model.
+ */
+async function getCourseTopicGraph(db: Db, courseId: string): Promise<CourseTopicGraph> {
+  const [course] = await db.select().from(courses).where(eq(courses.id, courseId));
+  if (!course) {
+    throw new AppError("NOT_FOUND", "course not found", 404);
+  }
+
+  const moduleRows = await db.select({ id: modules.id }).from(modules).where(eq(modules.courseId, courseId));
+  const moduleIds = moduleRows.map((m) => m.id);
+  const topicRows =
+    moduleIds.length > 0 ? await db.select({ id: topics.id, title: topics.title }).from(topics).where(inArray(topics.moduleId, moduleIds)) : [];
+  const topicIds = new Set(topicRows.map((t) => t.id));
+  const topicTitleById = new Map(topicRows.map((t) => [t.id, t.title]));
+
+  const conceptRows =
+    topicIds.size > 0
+      ? await db
+          .select({ id: concepts.id, topicId: concepts.topicId })
+          .from(concepts)
+          .where(inArray(concepts.topicId, [...topicIds]))
+      : [];
+  const conceptTopicId = new Map(conceptRows.map((c) => [c.id, c.topicId]));
+  const conceptIds = conceptRows.map((c) => c.id);
+
+  const prerequisiteEdges =
+    conceptIds.length > 0
+      ? await db
+          .select({ conceptId: conceptPrerequisites.conceptId, prerequisiteConceptId: conceptPrerequisites.prerequisiteConceptId })
+          .from(conceptPrerequisites)
+          .where(inArray(conceptPrerequisites.conceptId, conceptIds))
+      : [];
+
+  return { courseEstimatedDurationHours: course.estimatedDurationHours, topicIds, topicTitleById, conceptTopicId, prerequisiteEdges };
+}
+
+/**
+ * AC #3: a conflict is a still-selected Topic that depends (via one of its Concepts'
+ * prerequisites) on a Topic the caller is about to deselect. Deduped per (prerequisite
+ * topic, dependent topic) pair — a Course with several Concepts sharing the same
+ * cross-Topic prerequisite link should surface one warning per Topic pair, not one per
+ * Concept.
+ */
+function computeDependencyConflicts(graph: CourseTopicGraph, deselectedTopicIds: string[]): DependencyConflict[] {
+  const deselected = new Set(deselectedTopicIds);
+  const seenPairs = new Set<string>();
+  const conflicts: DependencyConflict[] = [];
+
+  for (const edge of graph.prerequisiteEdges) {
+    const dependentTopicId = graph.conceptTopicId.get(edge.conceptId);
+    const prerequisiteTopicId = graph.conceptTopicId.get(edge.prerequisiteConceptId);
+    if (!dependentTopicId || !prerequisiteTopicId || dependentTopicId === prerequisiteTopicId) {
+      continue;
+    }
+    if (!deselected.has(prerequisiteTopicId) || deselected.has(dependentTopicId)) {
+      continue;
+    }
+    const pairKey = `${prerequisiteTopicId}:${dependentTopicId}`;
+    if (seenPairs.has(pairKey)) {
+      continue;
+    }
+    seenPairs.add(pairKey);
+    conflicts.push({
+      topicId: prerequisiteTopicId,
+      topicTitle: graph.topicTitleById.get(prerequisiteTopicId) ?? "",
+      requiredByTopicId: dependentTopicId,
+      requiredByTopicTitle: graph.topicTitleById.get(dependentTopicId) ?? "",
+    });
+  }
+
+  return conflicts;
+}
+
+// Story 2.4 Dev Notes: documented product default — no FR names exact multiplier values.
+const DEPTH_MULTIPLIER: Record<CourseCustomizationDepth, number> = { overview: 0.5, standard: 1, "deep-dive": 1.5 };
+
+/**
+ * AC #1/#2: no per-Topic duration exists (only the Course's single total), so each Topic
+ * is weighted equally — a documented product default, same class of assumption as Story
+ * 2.2's duration buckets. Guards: a Course with no estimatedDurationHours yet never
+ * fabricates a number; a Course with zero Topics has nothing to weight or deselect, so its
+ * own total passes through unchanged.
+ */
+function computeEstimatedHours(graph: CourseTopicGraph, deselectedTopicIds: string[], depth: CourseCustomizationDepth): number | null {
+  if (graph.courseEstimatedDurationHours === null) {
+    return null;
+  }
+  const totalTopicCount = graph.topicIds.size;
+  if (totalTopicCount === 0) {
+    return graph.courseEstimatedDurationHours;
+  }
+  const selectedTopicCount = totalTopicCount - deselectedTopicIds.length;
+  const hoursPerTopic = graph.courseEstimatedDurationHours / totalTopicCount;
+  return Math.round(hoursPerTopic * selectedTopicCount * DEPTH_MULTIPLIER[depth] * 10) / 10;
+}
+
+function toCourseCustomizationResponse(
+  courseId: string,
+  row: {
+    deselectedTopicIds: string[] | null;
+    priorityTopicIds: string[] | null;
+    depth: CourseCustomizationDepth;
+    explanationStyle: CourseCustomizationResponse["explanationStyle"];
+    updatedAt: Date;
+  },
+  graph: CourseTopicGraph,
+): CourseCustomizationResponse {
+  const deselectedTopicIds = row.deselectedTopicIds ?? [];
+  return {
+    courseId,
+    deselectedTopicIds,
+    priorityTopicIds: row.priorityTopicIds ?? [],
+    depth: row.depth,
+    explanationStyle: row.explanationStyle,
+    estimatedHours: computeEstimatedHours(graph, deselectedTopicIds, row.depth),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+/** AC #4: null (mapped to 404 by the route) when the learner has never saved one yet. */
+export async function getCourseCustomization(db: Db, userId: string, courseId: string): Promise<CourseCustomizationResponse | null> {
+  const [row] = await db
+    .select()
+    .from(courseCustomizations)
+    .where(and(eq(courseCustomizations.userId, userId), eq(courseCustomizations.courseId, courseId)));
+  if (!row) {
+    return null;
+  }
+  const graph = await getCourseTopicGraph(db, courseId);
+  return toCourseCustomizationResponse(courseId, row, graph);
+}
+
+export async function saveCourseCustomization(
+  db: Db,
+  userId: string,
+  courseId: string,
+  input: SaveCourseCustomizationInput,
+): Promise<CourseCustomizationResponse> {
+  const graph = await getCourseTopicGraph(db, courseId);
+
+  // Review-lesson from Story 2.3, applied proactively: dedupe id arrays at the write layer.
+  const deselectedTopicIds = input.deselectedTopicIds !== undefined ? [...new Set(input.deselectedTopicIds)] : undefined;
+  const priorityTopicIds = input.priorityTopicIds !== undefined ? [...new Set(input.priorityTopicIds)] : undefined;
+
+  for (const topicId of [...(deselectedTopicIds ?? []), ...(priorityTopicIds ?? [])]) {
+    if (!graph.topicIds.has(topicId)) {
+      throw new AppError("VALIDATION_ERROR", `invalid topic reference: topic "${topicId}" does not exist in this Course`, 400);
+    }
+  }
+
+  const [existing] = await db
+    .select()
+    .from(courseCustomizations)
+    .where(and(eq(courseCustomizations.userId, userId), eq(courseCustomizations.courseId, courseId)));
+
+  const effectiveDeselected = deselectedTopicIds ?? existing?.deselectedTopicIds ?? [];
+  const effectivePriority = priorityTopicIds ?? existing?.priorityTopicIds ?? [];
+  const effectiveDepth = input.depth ?? existing?.depth ?? "standard";
+  const effectiveExplanationStyle = input.explanationStyle ?? existing?.explanationStyle ?? "concise";
+
+  // AC #3: only re-check conflicts when the EFFECTIVE deselected set actually changes from
+  // what's already saved — comparing by value, not by whether the caller happened to
+  // include the field in this request. A caller that always resends its full current state
+  // (as apps/web's CustomizePage does) must not re-trigger an already-force-confirmed
+  // conflict forever just because `deselectedTopicIds` is present again with the same value.
+  const previousDeselected = new Set(existing?.deselectedTopicIds ?? []);
+  const nextDeselected = new Set(effectiveDeselected);
+  const deselectionChanged =
+    previousDeselected.size !== nextDeselected.size || [...previousDeselected].some((topicId) => !nextDeselected.has(topicId));
+  const conflicts = deselectionChanged ? computeDependencyConflicts(graph, effectiveDeselected) : [];
+  if (conflicts.length > 0 && input.force !== true) {
+    throw new AppError("DEPENDENCY_CONFLICT", "deselecting this would leave a dependent topic without its prerequisite", 409, conflicts);
+  }
+
+  const [row] = await db
+    .insert(courseCustomizations)
+    .values({
+      userId,
+      courseId,
+      deselectedTopicIds: effectiveDeselected,
+      priorityTopicIds: effectivePriority,
+      depth: effectiveDepth,
+      explanationStyle: effectiveExplanationStyle,
+    })
+    .onConflictDoUpdate({
+      target: [courseCustomizations.userId, courseCustomizations.courseId],
+      set: {
+        deselectedTopicIds: effectiveDeselected,
+        priorityTopicIds: effectivePriority,
+        depth: effectiveDepth,
+        explanationStyle: effectiveExplanationStyle,
+        updatedAt: sql`now()`,
+        version: sql`${courseCustomizations.version} + 1`,
+      },
+    })
+    .returning();
+
+  if (!row) {
+    throw new AppError("INTERNAL_ERROR", "failed to save course customization", 500);
+  }
+  return toCourseCustomizationResponse(courseId, row, graph);
 }

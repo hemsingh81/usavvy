@@ -41,3 +41,19 @@ describe("apiRequestBlob", () => {
     });
   });
 });
+
+describe("ApiError", () => {
+  it("carries an optional structured details payload (Story 2.4: DEPENDENCY_CONFLICT's conflict list)", () => {
+    const conflicts = [{ topicId: "t1", requiredByTopicId: "t2" }];
+
+    const error = new ApiError("DEPENDENCY_CONFLICT", "conflict", conflicts);
+
+    expect(error.details).toEqual(conflicts);
+  });
+
+  it("defaults details to undefined when not given", () => {
+    const error = new ApiError("NOT_FOUND", "missing");
+
+    expect(error.details).toBeUndefined();
+  });
+});

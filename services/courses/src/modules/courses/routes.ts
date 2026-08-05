@@ -8,9 +8,20 @@ import {
   createCourseInputSchema,
   createModuleInputSchema,
   createTopicInputSchema,
+  saveCourseCustomizationInputSchema,
 } from "@usavvy/shared-types";
 import type { Db } from "../../db/client.js";
-import { archiveModule, createConcept, createCourse, createModule, createTopic, getCourse, searchCourses } from "./service.js";
+import {
+  archiveModule,
+  createConcept,
+  createCourse,
+  createModule,
+  createTopic,
+  getCourse,
+  getCourseCustomization,
+  saveCourseCustomization,
+  searchCourses,
+} from "./service.js";
 
 export interface CoursesRouteDeps {
   db: Db;
@@ -89,5 +100,25 @@ export function registerCoursesRoutes(app: FastifyInstance, deps: CoursesRouteDe
     requireTrustedUser(request);
     const { id } = parseOrThrow(idParamsSchema, request.params);
     reply.send(await getCourse(deps.db, id));
+  });
+
+  // Story 2.4: the learner's own personal data (their choices about their own course) —
+  // no RBAC gate beyond authentication, matching PUT /users/preferences' (Story 1.4)
+  // identical precedent, not a courseHierarchy content-ops action.
+  app.get("/courses/:id/customization", async (request, reply) => {
+    const { userId } = requireTrustedUser(request);
+    const { id } = parseOrThrow(idParamsSchema, request.params);
+    const result = await getCourseCustomization(deps.db, userId, id);
+    if (!result) {
+      throw new AppError("NOT_FOUND", "no customization saved yet", 404);
+    }
+    reply.send(result);
+  });
+
+  app.put("/courses/:id/customization", async (request, reply) => {
+    const { userId } = requireTrustedUser(request);
+    const { id } = parseOrThrow(idParamsSchema, request.params);
+    const body = parseOrThrow(saveCourseCustomizationInputSchema, request.body);
+    reply.send(await saveCourseCustomization(deps.db, userId, id, body));
   });
 }

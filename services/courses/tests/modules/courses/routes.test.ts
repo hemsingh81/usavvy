@@ -3,7 +3,7 @@ import postgres from "postgres";
 import { eq } from "drizzle-orm";
 import { buildApp } from "../../../src/app.js";
 import { createDb } from "../../../src/db/client.js";
-import { concepts, conceptPrerequisites, courses, modules, topics } from "../../../src/db/schema.js";
+import { concepts, conceptPrerequisites, courseCustomizations, courses, modules, topics } from "../../../src/db/schema.js";
 import { loadCoursesConfig } from "../../../src/config.js";
 import { createTestAppDeps, TEST_INTERNAL_SECRET } from "../../testHelpers.js";
 
@@ -18,6 +18,7 @@ afterEach(async () => {
   while (createdCourseIds.length > 0) {
     const courseId = createdCourseIds.pop();
     if (!courseId) continue;
+    await db.delete(courseCustomizations).where(eq(courseCustomizations.courseId, courseId));
     const moduleRows = await db.select().from(modules).where(eq(modules.courseId, courseId));
     for (const moduleRow of moduleRows) {
       const topicRows = await db.select().from(topics).where(eq(topics.moduleId, moduleRow.id));
@@ -176,6 +177,49 @@ describe("GET /courses (catalog search)", () => {
     const titles = (response.json() as { title: string }[]).map((c) => c.title);
     expect(titles).toContain("Published");
     expect(titles).not.toContain("Draft");
+    await app.close();
+  });
+});
+
+describe("GET/PUT /courses/:id/customization", () => {
+  it("requires the internal secret and trusted user headers (GET)", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+
+    const response = await app.inject({ method: "GET", url: "/courses/019fd200-0000-7000-8000-000000000000/customization" });
+
+    expect(response.statusCode).toBe(401);
+    await app.close();
+  });
+
+  it("requires the internal secret and trusted user headers (PUT)", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+
+    const response = await app.inject({ method: "PUT", url: "/courses/019fd200-0000-7000-8000-000000000000/customization", payload: {} });
+
+    expect(response.statusCode).toBe(401);
+    await app.close();
+  });
+
+  it("GET returns 404 before any save, then the saved customization after PUT", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+    const courseResponse = await app.inject({ method: "POST", url: "/courses", headers: adminHeaders, payload: { title: "x", estimatedDurationHours: 10 } });
+    const course = courseResponse.json() as { id: string };
+    createdCourseIds.push(course.id);
+
+    const before = await app.inject({ method: "GET", url: `/courses/${course.id}/customization`, headers: adminHeaders });
+    expect(before.statusCode).toBe(404);
+
+    const putResponse = await app.inject({
+      method: "PUT",
+      url: `/courses/${course.id}/customization`,
+      headers: adminHeaders,
+      payload: { depth: "deep-dive", explanationStyle: "detailed" },
+    });
+    expect(putResponse.statusCode).toBe(200);
+
+    const after = await app.inject({ method: "GET", url: `/courses/${course.id}/customization`, headers: adminHeaders });
+    expect(after.statusCode).toBe(200);
+    expect(after.json()).toMatchObject({ depth: "deep-dive", explanationStyle: "detailed" });
     await app.close();
   });
 });

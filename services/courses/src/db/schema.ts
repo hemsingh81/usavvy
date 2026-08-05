@@ -1,6 +1,6 @@
-import { integer, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { integer, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
-import type { CheckpointQuestion, CourseStatus, DifficultyTier } from "@usavvy/shared-types";
+import type { CheckpointQuestion, CourseCustomizationDepth, CourseStatus, DifficultyTier, ExplanationStyle } from "@usavvy/shared-types";
 
 // Story 2.1 (FR-C-1). Same uuidv7() default every other service's tables use
 // (Consistency Conventions) — verified live against the running container in Story 1.0.
@@ -95,3 +95,26 @@ export const conceptPrerequisites = pgTable("concept_prerequisites", {
     .references(() => concepts.id),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// Story 2.4 (FR-C-4). userId is an opaque cross-service reference (services/core owns the
+// real User row) — same pattern every cross-service id in this codebase already uses, not
+// a real FK. One row per (userId, courseId): the composite unique index is the upsert
+// target for saveCourseCustomization.
+export const courseCustomizations = pgTable(
+  "course_customizations",
+  {
+    id: uuid("id").primaryKey().default(uuidv7Default),
+    userId: text("user_id").notNull(),
+    courseId: uuid("course_id")
+      .notNull()
+      .references(() => courses.id),
+    deselectedTopicIds: text("deselected_topic_ids").array(),
+    priorityTopicIds: text("priority_topic_ids").array(),
+    depth: text("depth").notNull().default("standard").$type<CourseCustomizationDepth>(),
+    explanationStyle: text("explanation_style").notNull().default("concise").$type<ExplanationStyle>(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    version: integer("version").notNull().default(1),
+  },
+  (table) => [uniqueIndex("course_customizations_user_course_idx").on(table.userId, table.courseId)],
+);
