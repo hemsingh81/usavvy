@@ -1,0 +1,115 @@
+---
+baseline_commit: 1f8d246
+---
+
+# Story 1.10: Notification Center
+
+Status: ready-for-dev
+
+*(Epic 1, FR-A-10. Architecture's own AD-18 ("Notification Center and Activity History are read-projections, not new sources of truth") settles the biggest design question up front: the Notification Center persists its own `Notification` record — owned by `core`'s `auth/users` area alongside `User`/`LearnerProfile` (per AD-14's ownership table) — created via `NotificationPort`'s existing in-app channel, alongside the email channel Story 1.1 already built. This is genuinely new ground in three ways this story's Dev Notes call out explicitly: (1) it's the first entity in this codebase referenced by a mutable "is this resolved yet" status that gates a user action (clearing), (2) it's the first route in this codebase with a path parameter (`/users/notifications/:id/...`), and (3) no "app chrome" (a persistent header/nav visible across pages) exists yet anywhere in `apps/web` — every page today renders its own bare `<main>` — so a minimal one is now unavoidable for the bell icon to have anywhere to live.)*
+
+## Story
+
+As a learner,
+I want to see, mark as read, and clear my notifications,
+so that I know what needs my attention without losing track of things still in progress.
+
+## Acceptance Criteria
+
+1. **Given** a domain event that should notify the learner in-app occurs **When** it is processed **Then** a `Notification` record is created via `NotificationPort`'s in-app channel (mock adapter per Story 1.0 in dev), referencing the source process/event it came from **And** the bell icon in the app chrome shows an unread indicator (an accent-colored dot, not a count badge, per `DESIGN.md`)
+2. **Given** a learner opens the Notification Center **When** they select a notification **Then** it is marked read, independent of whether it is cleared
+3. **Given** a learner attempts to clear a notification **When** its referenced source process has already resolved (completed, failed, or cancelled) **Then** it is cleared/removed from the list
+4. **Given** a learner attempts to clear a notification **When** its referenced source process is still in progress **Then** the clear action is disabled with an explanatory tooltip ("still in progress") — the notification can still be marked read, just not cleared, until the process resolves
+
+## Tasks / Subtasks
+
+- [ ] **Task 1: Shared contract — `Notification` types** (AC: #1-4)
+  - [ ] New `packages/shared-types/src/notification.ts`: `notificationSourceProcessStatusSchema = z.enum(["in_progress", "resolved"])`; `notificationResponseSchema` = `{ id: z.uuid(), type: z.string(), message: z.string(), sourceProcessType: z.string().nullable(), sourceProcessStatus: notificationSourceProcessStatusSchema.nullable(), readAt: z.iso.datetime().nullable(), createdAt: z.iso.datetime() }`. `sourceProcessType`/`sourceProcessStatus` are both nullable together — a notification with no `sourceProcessType` (e.g. a plain informational message with nothing to resolve) is always clearable, matching AC #3/#4's "referenced source process" framing (no reference means nothing blocks clearing)
+  - [ ] `notificationListResponseSchema = z.array(notificationResponseSchema)` — a bare array (matching this being the first list-shaped response in this codebase with no existing `{ items: [...] }` precedent either way; keep it simple)
+  - [ ] Export all of the above (types + schemas) from `packages/shared-types/src/index.ts`'s barrel
+  - [ ] `packages/shared-types/tests/notification.test.ts` (new): valid shape accepted; `sourceProcessStatus` rejects a value outside the 2-item enum; a `null`/`null` pair for `sourceProcessType`/`sourceProcessStatus` is accepted (the "no process" case)
+
+- [ ] **Task 2: `services/core` — `notifications` table + service functions + routes** (AC: #1-4)
+  - [ ] New table in `services/core/src/db/schema.ts`, in the same file as `users`/`learnerProfiles` (AD-14: `Notification` is owned by `auth/users`, not a separate module): `notifications` — `id` (uuid, `uuidv7Default`), `userId` (uuid, `.notNull().references(() => users.id)`), `type` (text, not null — a short machine key like `"account_deletion_requested"`, mirroring `DomainEvent.type`'s own naming convention), `message` (text, not null — the human-readable string shown in the panel), `sourceProcessType` (text, nullable), `sourceProcessStatus` (text, nullable, `.$type<"in_progress" | "resolved">()`), `readAt` (timestamp with tz, nullable), `createdAt` (timestamp with tz, not null, `.defaultNow()`)
+  - [ ] In `services/core/src/modules/users/service.ts` (same file as every other `auth/users`-owned entity's service functions — do not create a new `modules/notifications/` folder):
+    - `createNotification(db, notificationPort, logger, userId, input: { type, message, sourceProcessType?, sourceProcessStatus? })`: `INSERT` the row, then best-effort `notificationPort.sendInApp({ userId, message })` — matching `requestAccountDeletion`'s own already-established `Promise.allSettled` + `logger.error` (not swallowed, AD-17) pattern for "the DB write is the source of truth; the port call is a best-effort side channel that must never roll back or block the already-correct persisted state." Returns the inserted row mapped to `NotificationResponse` shape
+    - `listNotifications(db, userId)`: `SELECT * FROM notifications WHERE user_id = userId ORDER BY created_at DESC` — newest-first per AC's own "Notification Center" framing and `EXPERIENCE.md`'s explicit "newest-first" instruction
+    - `markNotificationRead(db, userId, notificationId)`: `UPDATE notifications SET read_at = now() WHERE id = notificationId AND user_id = userId RETURNING *` — the `AND user_id = userId` in the same `WHERE` (not a separate ownership pre-check) is load-bearing: it's what makes another learner's notification id return `NOT_FOUND` rather than leaking whether that id exists at all. Zero rows returned → `AppError("NOT_FOUND", ..., 404)`
+    - `clearNotification(db, userId, notificationId)`: `SELECT` first (by `id` AND `user_id`, same ownership reasoning) — not found → `NOT_FOUND` (404); found with `sourceProcessStatus === "in_progress"` → `AppError("NOTIFICATION_STILL_IN_PROGRESS", "this notification can't be cleared until its process resolves", 409)` (AC #4); otherwise `DELETE ... WHERE id = notificationId AND user_id = userId`
+    - Extend `requestAccountDeletion` (the one real, already-shipped "in progress, resolves later" process in this codebase — see Dev Notes on why no other epic's example from the AC text is buildable yet) to also call `createNotification(db, deps.notificationPort, deps.logger, userId, { type: "account_deletion_requested", message: "Your account deletion is scheduled", sourceProcessType: "account_deletion", sourceProcessStatus: "in_progress" })`, added as a third parallel action alongside its existing `Promise.allSettled([sendEmail, publish])` — extend that array to three entries, all still best-effort/logged-not-swallowed
+  - [ ] Routes in `services/core/src/modules/users/routes.ts` — this story's routes are the **first in this codebase with a path parameter**, so validate it explicitly rather than trusting `request.params` blindly:
+    - `GET /users/notifications` → `requireTrustedUser` → `listNotifications`
+    - `PUT /users/notifications/:id/read` → `requireTrustedUser`, parse `request.params.id` with `z.uuid()` (`parseOrThrow` against a one-field schema, or inline — match whatever's more consistent with this file's existing style) → `markNotificationRead`
+    - `DELETE /users/notifications/:id` → same param validation → `clearNotification` → `reply.code(204).send()` (no existing 204 response in this codebase yet; this is the first delete-shaped endpoint)
+  - [ ] Generate + apply the migration (`pnpm --filter @usavvy/core db:generate` then `db:migrate`) — do not hand-write SQL
+  - [ ] Tests: new `services/core/tests/modules/users/notifications.test.ts` (DB-integration, mirroring `preferences.test.ts`'s own direct-DB-fixture style) — `createNotification` inserts a row and best-effort calls `sendInApp` (assert via a spy/mock `NotificationPort`, matching how `declareAge`'s tests already assert `sendEmail` calls); `listNotifications` returns newest-first and is scoped to the calling user only (a second user's notifications never appear); `markNotificationRead` sets `readAt` and is idempotent on a second call; `markNotificationRead`/`clearNotification` both return `NOT_FOUND` for another user's notification id (proving the ownership check, not just documenting it); `clearNotification` rejects (409) a `sourceProcessStatus: "in_progress"` row and succeeds for a `"resolved"` row and for a row with `sourceProcessType: null` (inserted directly via a test fixture, since no live event in this codebase ever transitions a notification to `"resolved"` yet — see Dev Notes); extend `routes.test.ts` for all three new routes (auth-required 401s, the ownership-check 404 through the real route, the 409-with-tooltip-worthy-message on an in-progress clear attempt) and extend the existing account-deletion route test to assert a `Notification` row now also exists after a successful request
+
+- [ ] **Task 3: `services/gateway`** (AC: #1-4)
+  - [ ] Add three routes to `services/gateway/src/authProxy.ts`, following the exact `requireAuth` + `forwardToCore` + `trustedHeaders` shape every other authenticated route already uses: `GET /users/notifications`, `PUT /users/notifications/:id/read`, `DELETE /users/notifications/:id`. The two `:id` routes are this proxy's first-ever path-param routes — read `(request.params as { id: string }).id` and interpolate it into the forwarded path string (e.g. `` `/users/notifications/${id}/read` ``); no change to `forwardToCore`/`coreClient.ts` itself is needed since it already takes an arbitrary path string
+  - [ ] Extend `services/gateway/tests/authProxy.test.ts` (or wherever the existing proxy route tests live — check first): all three routes require authentication (401 with no token); each forwards to the correctly-interpolated core path with the right HTTP method
+
+- [ ] **Task 4: `apps/web` — bell icon, notification panel, and the app chrome it needs to live in** (AC: #1-4)
+  - [ ] **No persistent header/nav exists anywhere in `apps/web` today** (verified — every page is its own bare `<main>`, confirmed by reading `HomePage.tsx`/`PreferencesPage.tsx`/every other page). A bell icon literally has nowhere to render without one. Add a minimal new `apps/web/src/app/AppHeader.tsx` — not a full nav/branding header, just enough chrome to host the bell — rendered once in `App.tsx`, above `<Routes>`, only when a session exists (matches AC's own framing: notifications are a logged-in concept). This is the same "a story must leave the system working end-to-end, not just satisfy its literal AC text" reasoning Story 1.9 already applied to its own missing `body` base-CSS-rule gap — building the bare-minimum chrome needed for the bell to exist is in scope; a full site-wide nav/branding redesign is explicitly not (see Scope note)
+  - [ ] New `apps/web/src/app/useNotifications.tsx` (a hook + thin provider, mirroring `ColorThemeProvider`'s already-established shape in this same `app/` folder): fetches `GET /users/notifications` once when a session exists (same mount-effect + `cancelled` guard convention as every other page's load effect), exposes `notifications`, `unreadCount` (derived: `readAt === null`), `markRead(id)`, `clear(id)` — both calling the new `createUsersApi` methods below and updating local state from the response (`markRead`) or by filtering the cleared id out (`clear`), matching this codebase's existing "update local state from the server response, don't just assume the request shape" convention
+  - [ ] Extend `apps/web/src/modules/users/api.ts`'s `createUsersApi`: `getNotifications`, `markNotificationRead(accessToken, id)` (`PUT`), `clearNotification(accessToken, id)` (`DELETE`, no response body — resolves `void` on a `204`)
+  - [ ] `AppHeader.tsx`: a bell `<button>` showing an `accent`-colored dot (`DESIGN.md`'s `notification-center.unread-dot` token) when `unreadCount > 0`, toggling a panel on click. The panel (`background: surface` per the same token) lists notifications newest-first (already sorted by the backend); each row is a `<button>` that calls `markRead(id)` on click (AC #2 — reading and clearing are independent actions, so this is separate from the clear control); each row also has a clear control that's a working button calling `clear(id)` when `sourceProcessStatus !== "in_progress"`, and a `disabled` button with a `title="still in progress"` tooltip (native `title` attribute — no existing tooltip component in this codebase to reuse) with a small locked-clear icon styled via `DESIGN.md`'s `in-progress-lock-icon: on-surface-variant` token when it is
+  - [ ] Wire `AppHeader` into `App.tsx`: rendered as a sibling immediately inside `AuthProvider`/`ColorThemeProvider`, above `<BrowserRouter>` — like `ColorThemeProvider`, it needs `useAuth()`'s session and should persist across route changes, not remount per-page
+  - [ ] New `.usavvy-notification-*` classes in `apps/web/src/shared/components.css` per the tokens above
+
+- [ ] **Task 5: Tests mirroring `src/` 1:1** (AD-8)
+  - [ ] `packages/shared-types/tests/notification.test.ts` — see Task 1
+  - [ ] `services/core/tests/modules/users/notifications.test.ts` (new) + `routes.test.ts` (extend) — see Task 2
+  - [ ] `services/gateway/tests/authProxy.test.ts` (or equivalent — extend) — see Task 3
+  - [ ] `apps/web/tests/app/useNotifications.test.tsx` (new) — fetches and exposes notifications once a session exists; `unreadCount` derives correctly from `readAt`; `markRead`/`clear` call the right API methods and update local state from the response; a mount-time fetch failure doesn't crash the app (same non-critical-enrichment pattern as `ColorThemeProvider`'s own already-reviewed identical gap — apply the same "only seed once, guard the session-null case" fixes proactively here from the start, not as a follow-up review round)
+  - [ ] `apps/web/tests/app/AppHeader.test.tsx` (new) — hidden with no session; shows the unread dot only when `unreadCount > 0`; clicking the bell opens the panel listing notifications newest-first; clicking a notification row marks it read (dot updates/disappears once nothing is unread); clicking clear on a resolved notification removes it from the list; clear is disabled with the "still in progress" title on an in-progress notification
+  - [ ] `apps/web/tests/modules/users/api.test.ts` (extend) — the three new client methods hit the right method/path and parse/ignore the response correctly
+
+## Dev Notes
+
+### Architecture constraints that apply directly to this story
+
+- **AD-18 (Notification Center is a read-projection, not a new source of truth for *other* modules' data):** this story's own `Notification` record is itself new-owned state (it's the thing AD-18 says core owns), not a duplicate of something else. AD-18 is what settles "the notification record links directly to the triggering process, so is-it-resolved is a lookup, not a guess" — implemented here as the denormalized `sourceProcessType`/`sourceProcessStatus` columns set at creation time (and, in a future story once a real resolving event exists, updated at resolution time), rather than a live cross-table join computed at clear-attempt time.
+- **AD-14 (ownership):** `Notification` extends `core`'s `auth/users` area — same service file, same migration file set as `users`/`learnerProfiles`, no new module folder.
+- **AD-1/AD-13 (ports over concrete adapters):** notification creation goes through the existing `NotificationPort.sendInApp` (mock adapter, unchanged from Story 1.0) — this story adds a caller, not a new port method.
+- **AD-7 (RBAC):** no new role/permission — identical reasoning to every other `/users/*` route; only the `student` role can sign up at all today.
+- **AD-17 (no silent failures):** a `sendInApp` failure is logged (not swallowed) and never blocks the notification row from existing — same shape as `requestAccountDeletion`'s existing email/publish handling. Attempting to clear an in-progress notification surfaces a specific `409 NOTIFICATION_STILL_IN_PROGRESS`, not a generic error.
+- **AD-8 (test mirroring):** see Task 5.
+
+### Why "account deletion" is this story's one real trigger (not a reminder/ingestion/grading example from the AC text)
+
+The AC's own examples — "a reminder, a completed ingestion, a graded assignment" — all come from epics that haven't shipped yet (Epic 3/4/6), and none of them exist as real, callable code in this repository today. Per this project's own established, repeatedly-applied pattern (Story 1.7's account-deletion *request* was built and live-verified in full while its *purge* half was explicitly documented as deferred, since no `JobQueuePort`/purge-subscriber exists yet), this story wires its generic `createNotification` function into the **one** process in this codebase that is genuinely, already, real: `requestAccountDeletion`'s 30-day-scheduled deletion. It is a real "in progress" process (a request has been made; nothing has resolved it yet). No event in this codebase currently *resolves* one, since Story 1.7 also has no cancel flow and no purge execution — so the "resolved" half of AC #3 is proven with a direct DB-fixture-inserted `"resolved"` row in `notifications.test.ts`, the same honest, explicitly-documented-as-such testing approach already used elsewhere in this codebase for not-yet-fully-wired lifecycles, rather than inventing a fake resolution trigger that doesn't reflect anything real.
+
+### Previous story intelligence (Story 1.9 — read before starting, don't rediscover this)
+
+- **`ColorThemeProvider`'s original implementation shipped two real bugs, both caught by adversarial review and both directly relevant here**: (1) it didn't reset its state when `session` went to `null` (logout left stale state applied) — `useNotifications`'s own session-mount-effect must explicitly clear `notifications`/`unreadCount` when `session` becomes falsy, not just skip re-fetching. (2) its mount-time fetch could resolve *after* a more recent local change and silently clobber it — guard any analogous "seed once" fetch here the same way (`setState((current) => current === undefined-or-empty ? fetched : current)`-style), or, simpler for this hook's shape, make sure a `markRead`/`clear` call's locally-updated state is never overwritten by a slow, now-stale initial `GET` response landing late. Build both guards in from the start this time — do not ship the same two bugs a second time and rediscover them in review.
+- **Also apply `AuthProvider`'s `useMemo`-wrapped context value convention** from the start (a review finding on `ColorThemeProvider` last story) if `useNotifications` exposes a context value at all.
+- **`saveField`'s optimistic-update-with-merge-only-the-changed-field pattern** (Story 1.4, reused unmodified through every preferences-page story since) is the right shape for `markRead`/`clear` too: update only the one affected notification in local state from the server's response, never refetch-and-replace the whole list on every action.
+
+### Scope note: what's explicitly OUT of scope for this story
+
+- **A full site-wide navigation/branding header.** `AppHeader` is deliberately minimal — just enough chrome to host the bell icon. A real nav bar (logo, links to Preferences/Profile/etc.) is a separate, unscoped design decision for a future story; do not design one here.
+- **Real-time push of new notifications** (WebSocket/SSE/polling for "a new notification arrived while the panel is open"). The panel reflects whatever was fetched on mount; a genuinely live-updating badge is future work once a real async event source exists.
+- **Any change to `requestAccountDeletion`'s existing email/domain-event behavior** beyond adding the one new `createNotification` call alongside them.
+- **A real "resolved" trigger for account-deletion notifications** (would require the `JobQueuePort`/purge-subscriber work Story 1.7 already deferred) — out of scope here too; tested via a direct fixture instead (see above).
+- **Notification preferences/opt-out** (e.g. "don't notify me about X") — no such control exists in FR-A-10's AC; not building one speculatively.
+
+### References
+
+- [Source: `_AI-Agile-Development/planning-artifacts/epics.md` — Story 1.10, Epic 1 intro, FR-A-10]
+- [Source: `_AI-Agile-Development/planning-artifacts/architecture/architecture-USavvy-2026-08-04/ARCHITECTURE-SPINE.md` — AD-18 (Notification Center as read-projection), the `auth/users` ownership table (AD-14), the ERD's `USER ||--o{ NOTIFICATION : receives` relationship]
+- [Source: `_AI-Agile-Development/planning-artifacts/ux-designs/ux-USavvy-2026-08-04/DESIGN.md` — the `notification-center` component token (`unread-dot: accent`, `background: surface`, `in-progress-lock-icon: on-surface-variant`) and its prose description of the accent dot vs. a count badge]
+- [Source: `_AI-Agile-Development/planning-artifacts/ux-designs/ux-USavvy-2026-08-04/EXPERIENCE.md` — "Notification Center (FR-A-10)... bell icon in the persistent app chrome... Clear is disabled, with an explanatory tooltip... for any notification referencing a process that hasn't resolved"]
+- [Source: `_AI-Agile-Development/implementation-artifacts/1-7-account-deletion.md` and `services/core/src/modules/users/service.ts`'s `requestAccountDeletion` — the exact `Promise.allSettled`/best-effort/logged-not-swallowed pattern this story's `createNotification` call site reuses]
+- [Source: `_AI-Agile-Development/implementation-artifacts/1-9-predefined-color-theme-picker.md` — `ColorThemeProvider`'s shape and its own two review-round bugs (logout reset, stale-fetch race), both proactively addressed here from the start]
+
+## Dev Agent Record
+
+### Agent Model Used
+
+Claude Sonnet 5
+
+### Debug Log References
+
+### Completion Notes List
+
+### File List
