@@ -61,4 +61,58 @@ describe("createUsersApi", () => {
 
     await expect(api.parentalConsent({ token: "a-token" })).rejects.toBeInstanceOf(ApiError);
   });
+
+  it("getOnboarding sends the access token and no body, returns the parsed profile", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          goal: null,
+          interests: null,
+          availability: null,
+          sessionLengthMinutes: null,
+          targetCompletionDate: null,
+          level: null,
+          currentStep: 0,
+          completedAt: null,
+        }),
+    } as unknown as Response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const api = createUsersApi("http://localhost:3000");
+    const result = await api.getOnboarding("a-token");
+
+    expect(result.currentStep).toBe(0);
+    const [, callOptions] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(callOptions.method).toBe("GET");
+    expect(callOptions.body).toBeUndefined();
+    expect(callOptions.headers).toEqual(expect.objectContaining({ authorization: "Bearer a-token" }));
+  });
+
+  it("saveOnboardingStep sends the step body and access token, returns the updated profile", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          goal: "learn calculus",
+          interests: null,
+          availability: null,
+          sessionLengthMinutes: null,
+          targetCompletionDate: null,
+          level: null,
+          currentStep: 1,
+          completedAt: null,
+        }),
+    } as unknown as Response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const api = createUsersApi("http://localhost:3000");
+    const result = await api.saveOnboardingStep("a-token", { step: "goal", value: "learn calculus" });
+
+    expect(result.currentStep).toBe(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:3000/users/onboarding/step",
+      expect.objectContaining({ method: "PUT", body: JSON.stringify({ step: "goal", value: "learn calculus" }) }),
+    );
+  });
 });

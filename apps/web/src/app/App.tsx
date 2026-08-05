@@ -2,7 +2,7 @@ import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { HomePage } from "./HomePage.js";
 import { getWebConfig } from "./config.js";
 import { AuthProvider, LoginPage, SignUpPage, VerifyEmailPage } from "../modules/auth/index.js";
-import { AgeDeclarationPage, ParentalConsentPage, WaitingForConsentPage } from "../modules/users/index.js";
+import { AgeDeclarationPage, OnboardingWizardPage, ParentalConsentPage, WaitingForConsentPage } from "../modules/users/index.js";
 
 // Review finding: no catch-all route meant an unmatched URL blank-screened instead of
 // showing a distinguishable state (AD-17).
@@ -41,6 +41,7 @@ export function App() {
           <Route path="/age-declaration" element={<AgeDeclarationPage />} />
           <Route path="/waiting-for-consent" element={<WaitingForConsentPage />} />
           <Route path="/parental-consent" element={<ParentalConsentPage />} />
+          <Route path="/onboarding" element={<OnboardingWizardPage />} />
           <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </BrowserRouter>

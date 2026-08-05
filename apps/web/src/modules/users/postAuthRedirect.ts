@@ -14,5 +14,10 @@ export function resolvePostAuthDestination(me: MeResponse): string {
   if (me.isMinor === true && me.parentalConsentStatus !== "granted") {
     return "/waiting-for-consent";
   }
+  // Story 1.3: checked after (not instead of) the age/consent gates above — a minor
+  // still awaiting consent must never skip ahead to onboarding.
+  if (me.onboardingComplete === false) {
+    return "/onboarding";
+  }
   return "/";
 }

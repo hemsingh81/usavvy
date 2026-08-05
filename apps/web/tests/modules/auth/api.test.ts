@@ -54,6 +54,7 @@ describe("createAuthApi", () => {
             birthdate: null,
             isMinor: null,
             parentalConsentStatus: null,
+            onboardingComplete: false,
           }),
       } as unknown as Response);
     vi.stubGlobal("fetch", fetchMock);

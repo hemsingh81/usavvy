@@ -19,6 +19,7 @@ function mockLoginThenMe(meOverrides: Record<string, unknown> = {}) {
             birthdate: null,
             isMinor: null,
             parentalConsentStatus: null,
+            onboardingComplete: false,
             ...meOverrides,
           }),
       } as unknown as Response);
