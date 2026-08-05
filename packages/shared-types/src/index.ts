@@ -47,3 +47,4 @@ export {
   type PrivacySettingsUpdateInput,
 } from "./privacy.js";
 export { accountDeletionResponseSchema, type AccountDeletionResponse } from "./accountDeletion.js";
+export { dataExportSchema, type DataExport } from "./dataExport.js";

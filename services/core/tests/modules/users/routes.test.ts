@@ -675,3 +675,60 @@ describe("POST /users/account-deletion", () => {
     await app.close();
   });
 });
+
+describe("GET /users/data-export/json", () => {
+  it("requires authentication (401 with no trusted headers)", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+
+    const response = await app.inject({ method: "GET", url: "/users/data-export/json", headers: internalHeaders });
+
+    expect(response.statusCode).toBe(401);
+    await app.close();
+  });
+
+  it("returns 200 with the expected top-level keys", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+    const email = uniqueEmail("export-json");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/users/data-export/json",
+      headers: { ...internalHeaders, "x-user-id": user!.id, "x-user-role": "student" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(Object.keys(response.json())).toEqual(
+      expect.arrayContaining(["account", "learnerProfile", "preferences", "privacySettings"]),
+    );
+    await app.close();
+  });
+});
+
+describe("GET /users/data-export/pdf", () => {
+  it("requires authentication (401 with no trusted headers)", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+
+    const response = await app.inject({ method: "GET", url: "/users/data-export/pdf", headers: internalHeaders });
+
+    expect(response.statusCode).toBe(401);
+    await app.close();
+  });
+
+  it("returns 200 with application/pdf content-type and PDF magic bytes", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+    const email = uniqueEmail("export-pdf");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/users/data-export/pdf",
+      headers: { ...internalHeaders, "x-user-id": user!.id, "x-user-role": "student" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["content-type"]).toBe("application/pdf");
+    expect(response.rawPayload.subarray(0, 5).toString("ascii")).toBe("%PDF-");
+    await app.close();
+  });
+});

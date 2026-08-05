@@ -7,6 +7,7 @@ import {
   ONBOARDING_STEPS,
   type AccountDeletionResponse,
   type AgeDeclarationResponse,
+  type DataExport,
   type LearnerPreferences,
   type LearnerPrivacySettings,
   type LearnerProfileResponse,
@@ -451,4 +452,28 @@ export async function requestAccountDeletion(
   }
 
   return { scheduledDeletionAt: scheduledDeletionAt.toISOString() };
+}
+
+/**
+ * Story 1.8 (FR-A-8). A thin composition of existing pieces — `getMe` for the account
+ * section (no field-mapping logic duplicated), and the three existing row-to-response
+ * mappers (Stories 1.3/1.4/1.6) applied to a single `ensureLearnerProfile` read, not
+ * three separate queries.
+ */
+export async function generateDataExport(db: Db, userId: string, role: Role): Promise<DataExport> {
+  const me = await getMe(db, userId, role);
+  const profileRow = await ensureLearnerProfile(db, userId);
+  return {
+    account: {
+      id: me.id,
+      email: me.email,
+      displayName: me.displayName,
+      memberSince: me.memberSince,
+      birthdate: me.birthdate,
+      role: me.role,
+    },
+    learnerProfile: toLearnerProfileResponse(profileRow),
+    preferences: toLearnerPreferences(profileRow),
+    privacySettings: toPrivacySettings(profileRow),
+  };
 }

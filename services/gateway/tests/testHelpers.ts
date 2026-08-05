@@ -6,6 +6,7 @@ export function createTestAppDeps(overrides: Partial<BuildAppDeps> = {}): BuildA
   return {
     fetchCoreHealth: vi.fn().mockResolvedValue({ status: "ok", db: true, storage: true }),
     forwardToCore: vi.fn().mockResolvedValue({ status: 200, body: {} }),
+    forwardBinaryToCore: vi.fn().mockResolvedValue({ status: 200, body: Buffer.from(""), contentType: "application/pdf" }),
     corsOrigin: "http://localhost:5173",
     jwtSecret: "test-secret",
     logger: createLogger("test"),

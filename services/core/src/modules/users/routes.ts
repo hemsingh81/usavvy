@@ -14,8 +14,10 @@ import type { Db } from "../../db/client.js";
 import type { NotificationPort } from "../notification/index.js";
 import type { PubSubPort } from "../pubsub/index.js";
 import { calculateAge } from "./age.js";
+import { generateDataExportPdf } from "./dataExportPdf.js";
 import {
   declareAge,
+  generateDataExport,
   getMe,
   getOnboarding,
   getPreferences,
@@ -130,5 +132,20 @@ export function registerUsersRoutes(app: FastifyInstance, deps: UsersRouteDeps):
   app.post("/users/account-deletion", async (request, reply) => {
     const { userId } = requireTrustedUser(request);
     reply.send(await requestAccountDeletion(deps.db, deps.notificationPort, deps.pubSubPort, deps.logger, userId));
+  });
+
+  app.get("/users/data-export/json", async (request, reply) => {
+    const { userId, role } = requireTrustedUser(request);
+    reply.send(await generateDataExport(deps.db, userId, role));
+  });
+
+  // The first non-JSON success response in this codebase — reply.send(buffer) bypasses
+  // Fastify's default JSON serialization; the error path (e.g. requireTrustedUser's
+  // 401) still goes through the normal JSON error envelope untouched.
+  app.get("/users/data-export/pdf", async (request, reply) => {
+    const { userId, role } = requireTrustedUser(request);
+    const data = await generateDataExport(deps.db, userId, role);
+    const buffer = await generateDataExportPdf(data);
+    reply.type("application/pdf").header("content-disposition", 'attachment; filename="usavvy-data-export.pdf"').send(buffer);
   });
 }

@@ -1,9 +1,10 @@
 import type { FastifyInstance } from "fastify";
-import type { ProxyOptions, ProxyResult } from "./coreClient.js";
+import type { BinaryProxyOptions, BinaryProxyResult, ProxyOptions, ProxyResult } from "./coreClient.js";
 import { requireAuth, trustedHeaders } from "./authPlugin.js";
 
 export interface AuthProxyDeps {
   forwardToCore: (method: string, path: string, options?: ProxyOptions) => Promise<ProxyResult>;
+  forwardBinaryToCore: (method: string, path: string, options?: BinaryProxyOptions) => Promise<BinaryProxyResult>;
 }
 
 // Unauthenticated by definition (pre-JWT-auth) — forwarded to `core` as-is, no trusted
@@ -66,6 +67,24 @@ export function registerAuthProxyRoutes(app: FastifyInstance, deps: AuthProxyDep
 
   app.post("/users/account-deletion", { preHandler: requireAuth }, async (request, reply) => {
     const result = await deps.forwardToCore("POST", "/users/account-deletion", { headers: trustedHeaders(request) });
+    reply.code(result.status).send(result.body);
+  });
+
+  app.get("/users/data-export/json", { preHandler: requireAuth }, async (request, reply) => {
+    const result = await deps.forwardToCore("GET", "/users/data-export/json", { headers: trustedHeaders(request) });
+    reply.code(result.status).send(result.body);
+  });
+
+  app.get("/users/data-export/pdf", { preHandler: requireAuth }, async (request, reply) => {
+    const result = await deps.forwardBinaryToCore("GET", "/users/data-export/pdf", { headers: trustedHeaders(request) });
+    if (result.contentType === "application/pdf") {
+      reply
+        .code(result.status)
+        .type("application/pdf")
+        .header("content-disposition", 'attachment; filename="usavvy-data-export.pdf"')
+        .send(result.body);
+      return;
+    }
     reply.code(result.status).send(result.body);
   });
 }

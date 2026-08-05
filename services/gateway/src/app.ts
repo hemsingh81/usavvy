@@ -2,13 +2,14 @@ import Fastify from "fastify";
 import cors from "@fastify/cors";
 import type { DownstreamHealth, GatewayHealth } from "@usavvy/shared-types";
 import { registerErrorHandler, type Logger } from "@usavvy/service-kernel";
-import type { ProxyOptions, ProxyResult } from "./coreClient.js";
+import type { BinaryProxyOptions, BinaryProxyResult, ProxyOptions, ProxyResult } from "./coreClient.js";
 import { registerJwtPlugin } from "./authPlugin.js";
 import { registerAuthProxyRoutes } from "./authProxy.js";
 
 export interface BuildAppDeps {
   fetchCoreHealth: () => Promise<DownstreamHealth>;
   forwardToCore: (method: string, path: string, options?: ProxyOptions) => Promise<ProxyResult>;
+  forwardBinaryToCore: (method: string, path: string, options?: BinaryProxyOptions) => Promise<BinaryProxyResult>;
   corsOrigin: string;
   jwtSecret: string;
   logger: Logger;
@@ -34,7 +35,7 @@ export function buildApp(deps: BuildAppDeps) {
     return { gateway: { status: "ok" }, core };
   });
 
-  registerAuthProxyRoutes(app, { forwardToCore: deps.forwardToCore });
+  registerAuthProxyRoutes(app, { forwardToCore: deps.forwardToCore, forwardBinaryToCore: deps.forwardBinaryToCore });
 
   return app;
 }

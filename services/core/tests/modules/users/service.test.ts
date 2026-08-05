@@ -8,6 +8,7 @@ import { loadCoreConfig } from "../../../src/config.js";
 import { createMockNotificationPort, createMockPubSubPort } from "../../testHelpers.js";
 import {
   declareAge,
+  generateDataExport,
   getMe,
   getOnboarding,
   getPrivacySettings,
@@ -665,5 +666,55 @@ describe("requestAccountDeletion", () => {
     expect(result.scheduledDeletionAt).toBeDefined();
     const [updated] = await db.select().from(users).where(eq(users.id, user!.id));
     expect(updated?.deletionRequestedAt).not.toBeNull();
+  });
+});
+
+describe("generateDataExport", () => {
+  it("returns all-null/default sections for a fresh, never-onboarded account", async () => {
+    const email = uniqueEmail("export-fresh");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+
+    const result = await generateDataExport(db, user!.id, "student");
+
+    expect(result.account).toMatchObject({ id: user!.id, email, role: "student", birthdate: null, displayName: email.split("@")[0] });
+    expect(result.learnerProfile).toEqual({
+      goal: null,
+      interests: null,
+      availability: null,
+      sessionLengthMinutes: null,
+      targetCompletionDate: null,
+      level: null,
+      currentStep: 0,
+      completedAt: null,
+    });
+    expect(result.preferences).toEqual({
+      voiceEnabled: true,
+      speechRate: 1,
+      boardTheme: "dark",
+      explanationStyle: "concise",
+      captionsEnabled: false,
+      reducedMotion: false,
+    });
+    expect(result.privacySettings).toEqual({ publicLeaderboardSharing: false, cohortDisplayName: true, uploadsForTraining: false });
+  });
+
+  it("reflects actual stored values, not just defaults", async () => {
+    const email = uniqueEmail("export-populated");
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date(), displayName: "Ananya", birthdate: ADULT_BIRTHDATE }).returning();
+    await saveOnboardingStep(db, user!.id, { step: "goal", value: "learn calculus" });
+    await savePrivacySettings(db, user!.id, { publicLeaderboardSharing: true });
+
+    const result = await generateDataExport(db, user!.id, "student");
+
+    expect(result.account).toMatchObject({ displayName: "Ananya", birthdate: ADULT_BIRTHDATE });
+    expect(result.learnerProfile.goal).toBe("learn calculus");
+    expect(result.privacySettings.publicLeaderboardSharing).toBe(true);
+  });
+
+  it("throws NOT_FOUND for a user id that doesn't exist", async () => {
+    await expect(generateDataExport(db, "00000000-0000-0000-0000-000000000000", "student")).rejects.toMatchObject({
+      code: "NOT_FOUND",
+      statusCode: 404,
+    });
   });
 });

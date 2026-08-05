@@ -338,3 +338,73 @@ describe("POST /users/account-deletion", () => {
     await app.close();
   });
 });
+
+describe("GET /users/data-export/json", () => {
+  it("returns 401 with no token and never calls core", async () => {
+    const forwardToCore = vi.fn();
+    const app = buildApp(createTestAppDeps({ forwardToCore }));
+
+    const response = await app.inject({ method: "GET", url: "/users/data-export/json" });
+
+    expect(response.statusCode).toBe(401);
+    expect(forwardToCore).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("forwards trusted x-user-id/x-user-role headers derived from a valid token", async () => {
+    const forwardToCore = vi.fn().mockResolvedValue({ status: 200, body: { account: {} } });
+    const app = buildApp(createTestAppDeps({ forwardToCore }));
+    await app.ready();
+    const token = app.jwt.sign({ sub: "u1", role: "student", typ: "access" });
+
+    const response = await app.inject({ method: "GET", url: "/users/data-export/json", headers: { authorization: `Bearer ${token}` } });
+
+    expect(response.statusCode).toBe(200);
+    expect(forwardToCore).toHaveBeenCalledWith("GET", "/users/data-export/json", { headers: { "x-user-id": "u1", "x-user-role": "student" } });
+    await app.close();
+  });
+});
+
+describe("GET /users/data-export/pdf", () => {
+  it("returns 401 with no token and never calls core", async () => {
+    const forwardBinaryToCore = vi.fn();
+    const app = buildApp(createTestAppDeps({ forwardBinaryToCore }));
+
+    const response = await app.inject({ method: "GET", url: "/users/data-export/pdf" });
+
+    expect(response.statusCode).toBe(401);
+    expect(forwardBinaryToCore).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("sets content-type: application/pdf on a successful proxied response", async () => {
+    const pdfBytes = Buffer.from("%PDF-1.4");
+    const forwardBinaryToCore = vi.fn().mockResolvedValue({ status: 200, body: pdfBytes, contentType: "application/pdf" });
+    const app = buildApp(createTestAppDeps({ forwardBinaryToCore }));
+    await app.ready();
+    const token = app.jwt.sign({ sub: "u1", role: "student", typ: "access" });
+
+    const response = await app.inject({ method: "GET", url: "/users/data-export/pdf", headers: { authorization: `Bearer ${token}` } });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["content-type"]).toBe("application/pdf");
+    expect(response.rawPayload.equals(pdfBytes)).toBe(true);
+    expect(forwardBinaryToCore).toHaveBeenCalledWith("GET", "/users/data-export/pdf", { headers: { "x-user-id": "u1", "x-user-role": "student" } });
+    await app.close();
+  });
+
+  it("passes through a JSON error envelope (not as a PDF) when core returns a non-2xx response", async () => {
+    const forwardBinaryToCore = vi
+      .fn()
+      .mockResolvedValue({ status: 500, body: { error: { code: "INTERNAL_ERROR", message: "boom" } }, contentType: "application/json" });
+    const app = buildApp(createTestAppDeps({ forwardBinaryToCore }));
+    await app.ready();
+    const token = app.jwt.sign({ sub: "u1", role: "student", typ: "access" });
+
+    const response = await app.inject({ method: "GET", url: "/users/data-export/pdf", headers: { authorization: `Bearer ${token}` } });
+
+    expect(response.statusCode).toBe(500);
+    expect(response.json()).toEqual({ error: { code: "INTERNAL_ERROR", message: "boom" } });
+    await app.close();
+  });
+});

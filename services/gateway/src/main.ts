@@ -10,6 +10,7 @@ const coreClient = createCoreClient(config.coreServiceUrl, logger, config.intern
 const app = buildApp({
   fetchCoreHealth: () => coreClient.fetchHealth(),
   forwardToCore: (method, path, options) => coreClient.forward(method, path, options),
+  forwardBinaryToCore: (method, path, options) => coreClient.forwardBinary(method, path, options),
   corsOrigin: config.webOrigin,
   jwtSecret: config.jwtSecret,
   logger,
