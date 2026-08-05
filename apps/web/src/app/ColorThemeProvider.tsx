@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { ColorTheme } from "@usavvy/shared-types";
 import { getWebConfig } from "./config.js";
 import { useAuth } from "../modules/auth/index.js";
@@ -23,14 +23,24 @@ export function ColorThemeProvider({ children }: { children: ReactNode }) {
   const [colorTheme, setColorTheme] = useState<ColorTheme | undefined>(undefined);
 
   useEffect(() => {
-    if (!session) return;
+    // Review finding: logging out left the previous learner's theme applied — session
+    // going to null must reset to the no-attribute default, not just skip re-fetching.
+    if (!session) {
+      setColorTheme(undefined);
+      return;
+    }
     let cancelled = false;
     const { apiUrl } = getWebConfig();
     createUsersApi(apiUrl)
       .getPreferences(session.accessToken)
       .then((result) => {
         if (cancelled) return;
-        setColorTheme(result.colorTheme);
+        // Review finding: this fetch races PreferencesPage's own load-and-possibly-save
+        // sequence. Only seed the initial value — never overwrite a theme that's already
+        // been set by then (by that page's own more current load, or by a user's actual
+        // choice), or a slow-resolving stale response could silently revert a just-saved
+        // theme back to what the server held before the save.
+        setColorTheme((current) => (current === undefined ? result.colorTheme : current));
       })
       .catch(() => {
         // Non-critical enrichment — keep the default (no data-color-theme attribute).
@@ -48,7 +58,9 @@ export function ColorThemeProvider({ children }: { children: ReactNode }) {
     document.documentElement.dataset.colorTheme = colorTheme;
   }, [colorTheme]);
 
-  return <ColorThemeContext.Provider value={{ colorTheme, setColorTheme }}>{children}</ColorThemeContext.Provider>;
+  const value = useMemo<ColorThemeContextValue>(() => ({ colorTheme, setColorTheme }), [colorTheme]);
+
+  return <ColorThemeContext.Provider value={value}>{children}</ColorThemeContext.Provider>;
 }
 
 export function useColorTheme(): ColorThemeContextValue {

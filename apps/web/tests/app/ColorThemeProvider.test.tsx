@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { ColorThemeProvider, useColorTheme } from "../../src/app/ColorThemeProvider.js";
 
 const useAuthMock = vi.fn();
@@ -71,5 +71,42 @@ describe("ColorThemeProvider", () => {
 
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(document.documentElement.dataset.colorTheme).toBeUndefined();
+  });
+
+  it("resets colorTheme and clears the DOM attribute when the session ends (review finding: logout left the previous learner's theme applied)", async () => {
+    useAuthMock.mockReturnValue({ session: { accessToken: "a-token" } });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(await jsonResponse(DEFAULT_PREFERENCES)));
+
+    const { rerender } = renderHook(() => useColorTheme(), { wrapper: ({ children }) => <ColorThemeProvider>{children}</ColorThemeProvider> });
+    await waitFor(() => expect(document.documentElement.dataset.colorTheme).toBe("midnight"));
+
+    useAuthMock.mockReturnValue({ session: null });
+    rerender();
+
+    await waitFor(() => expect(document.documentElement.dataset.colorTheme).toBeUndefined());
+  });
+
+  it("does not let a slow-resolving mount-time fetch clobber a theme already applied via setColorTheme (review finding: two independent findings, an out-of-order background fetch could silently revert a just-saved theme)", async () => {
+    useAuthMock.mockReturnValue({ session: { accessToken: "a-token" } });
+    let resolveFetch: (value: unknown) => void = () => undefined;
+    const pendingFetch = new Promise((resolve) => {
+      resolveFetch = resolve;
+    });
+    vi.stubGlobal("fetch", vi.fn().mockReturnValue(pendingFetch));
+
+    const { result } = renderHook(() => useColorTheme(), { wrapper: ({ children }) => <ColorThemeProvider>{children}</ColorThemeProvider> });
+
+    // Simulate the user (via PreferencesPage) picking a new theme before the slow
+    // mount-time fetch resolves.
+    act(() => {
+      result.current.setColorTheme("warm-paper");
+    });
+    await waitFor(() => expect(document.documentElement.dataset.colorTheme).toBe("warm-paper"));
+
+    // The slow mount-time fetch now resolves with the stale (pre-change) value.
+    resolveFetch(await jsonResponse(DEFAULT_PREFERENCES));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(document.documentElement.dataset.colorTheme).toBe("warm-paper");
   });
 });
