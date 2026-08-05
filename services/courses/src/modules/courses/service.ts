@@ -200,7 +200,14 @@ export async function archiveModule(db: Db, role: Role, moduleId: string): Promi
   }
 
   await db.transaction(async (tx) => {
-    const now = new Date();
+    // Review finding: using the app server's `new Date()` here (matching core's own
+    // convention elsewhere) makes `updatedAt` incomparable against `createdAt`/the
+    // pre-archive `updatedAt` — both of which come from Postgres's own `defaultNow()` at
+    // insert time. Any clock skew between the app process and the Postgres container
+    // (even a few ms) could then make "updatedAt > createdAt" flip, as directly observed
+    // in a real (if rare) test failure. Using the database's own `now()` for every
+    // timestamp this table ever gets keeps all comparisons within one clock source.
+    const now = sql`now()`;
     await tx
       .update(modules)
       .set({ archivedAt: now, updatedAt: now, version: sql`${modules.version} + 1` })
