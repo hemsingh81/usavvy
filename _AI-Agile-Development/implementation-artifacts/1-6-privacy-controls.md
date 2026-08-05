@@ -4,7 +4,7 @@ baseline_commit: 2bafda0
 
 # Story 1.6: Privacy Controls
 
-Status: ready-for-dev
+Status: review
 
 *(Epic 1, FR-A-6. Structurally near-identical to Story 1.4 (Preferences): three booleans nested inside the same `learnerProfiles` row per the PRD's own data model (§18: `User ──1:1── LearnerProfile (goal, level, availability, preferences, privacy flags)`), each with a real default from the start, freely re-editable at any time via a `GET`/`PUT`-with-computed-defaults pair — same shape, same reasoning, same "no CAS needed" conclusion Story 1.4 already established for exactly this kind of field. The one difference: these three controls render on the `ProfilePage` Story 1.5 already built, replacing the exact placeholder div Story 1.5 left for this story — `EXPERIENCE.md`'s IA map lists "Privacy" as its own profile-menu entry, but epics.md's own Story 1.5 AC places privacy toggles directly on the profile page and this project's established precedent is that epics.md is authoritative over the UX doc's navigation framing where they disagree (Stories 1.3/1.4 both used this same precedent) — so no new route is created.)*
 
@@ -34,18 +34,18 @@ so that I control what's shared about me.
 - [x] **Task 3: `services/gateway` — proxy the two new routes** (AC: #1, #2)
   - [x] `GET /users/privacy-settings` and `PUT /users/privacy-settings` → both authenticated, identical `requireAuth` `preHandler` + trusted-header forwarding pattern as every other `users/*` route in `authProxy.ts`
 
-- [ ] **Task 4: `apps/web` — wire real privacy controls into the existing `ProfilePage`** (AC: #1, #2)
-  - [ ] **Do not create a new page or route.** `apps/web/src/modules/users/ProfilePage.tsx` currently renders a static placeholder div (`"Privacy controls will appear here once Story 1.6 ships."`, the last of four `.usavvy-profile-placeholder` divs) — replace **only that one div** with three real `Switch` controls (`apps/web/src/shared/Switch.tsx`, already built by Story 1.4 — reuse it, do not build a second toggle primitive). Leave the other three placeholder divs (stars/streak, courses, certificates) untouched — they remain genuinely out of this story's scope (Epic 5/Epic 2/Epic 4)
-  - [ ] On mount, alongside the existing `getMe` call, also fetch `GET /users/privacy-settings` (via a new `getPrivacySettings`/`savePrivacySettings` pair added to `apps/web/src/modules/users/api.ts`'s `createUsersApi`, matching the existing `getPreferences`/`savePreferences` pattern exactly) — a second independent fetch, not bolted onto `me`'s response shape, since the two are genuinely different resources at different endpoints
-  - [ ] Each `Switch` auto-saves independently on change — `PUT /users/privacy-settings` with just that one field, matching `PreferencesPage`'s established per-control auto-save pattern **exactly**, including its optimistic update + revert-on-failure + inline error behavior and its request-sequencing guard (`ProfilePage`'s own `displayName` save just added this exact guard during Story 1.5's code review — generalize it to a per-field request-id map, e.g. `useRef<Record<string, number>>({})`, so an in-flight `publicLeaderboardSharing` save can never be clobbered by a `cohortDisplayName` save's response or vice versa, and a field's own overlapping saves are sequenced correctly too)
-  - [ ] A failed toggle save surfaces a small per-control inline error (AD-17) without discarding the other two controls' or the display-name field's current values
+- [x] **Task 4: `apps/web` — wire real privacy controls into the existing `ProfilePage`** (AC: #1, #2)
+  - [x] **Do not create a new page or route.** `apps/web/src/modules/users/ProfilePage.tsx` currently renders a static placeholder div (`"Privacy controls will appear here once Story 1.6 ships."`, the last of four `.usavvy-profile-placeholder` divs) — replace **only that one div** with three real `Switch` controls (`apps/web/src/shared/Switch.tsx`, already built by Story 1.4 — reuse it, do not build a second toggle primitive). Leave the other three placeholder divs (stars/streak, courses, certificates) untouched — they remain genuinely out of this story's scope (Epic 5/Epic 2/Epic 4)
+  - [x] On mount, alongside the existing `getMe` call, also fetch `GET /users/privacy-settings` (via a new `getPrivacySettings`/`savePrivacySettings` pair added to `apps/web/src/modules/users/api.ts`'s `createUsersApi`, matching the existing `getPreferences`/`savePreferences` pattern exactly) — a second independent fetch, not bolted onto `me`'s response shape, since the two are genuinely different resources at different endpoints
+  - [x] Each `Switch` auto-saves independently on change — `PUT /users/privacy-settings` with just that one field, matching `PreferencesPage`'s established per-control auto-save pattern **exactly**, including its optimistic update + revert-on-failure + inline error behavior and its request-sequencing guard (`ProfilePage`'s own `displayName` save just added this exact guard during Story 1.5's code review — generalize it to a per-field request-id map, e.g. `useRef<Record<string, number>>({})`, so an in-flight `publicLeaderboardSharing` save can never be clobbered by a `cohortDisplayName` save's response or vice versa, and a field's own overlapping saves are sequenced correctly too)
+  - [x] A failed toggle save surfaces a small per-control inline error (AD-17) without discarding the other two controls' or the display-name field's current values
 
-- [ ] **Task 5: Tests mirroring `src/` 1:1** (AD-8)
-  - [ ] `services/core/tests/modules/users/service.test.ts` — `getPrivacySettings` returns `DEFAULT_PRIVACY_SETTINGS` verbatim before any write; a partial `savePrivacySettings` updates only the given field(s), leaving the rest at their previous (or still-default) values; rejects an empty update body
-  - [ ] `services/core/tests/modules/users/routes.test.ts` — both routes require authentication (401 with no trusted headers); `GET` returns the exact 3-field default shape through the real route
-  - [ ] `services/gateway/tests/authProxy.test.ts` — both new proxy routes require auth (401 with no token)
-  - [ ] `packages/shared-types/tests/privacy.test.ts` (new) — `DEFAULT_PRIVACY_SETTINGS` is a valid `learnerPrivacySettingsSchema`; `privacySettingsUpdateInputSchema` accepts single/multi-field partial updates and rejects an empty body
-  - [ ] `apps/web/tests/modules/users/ProfilePage.test.tsx` (updated) — loads and displays the fetched privacy settings as three switches with their correct on/off state; toggling one fires a partial `PUT /users/privacy-settings` with just that field and doesn't disturb the other two switches' or the display-name field's displayed values; a failed toggle save reverts and shows an inline error; a race between an in-flight privacy-field save and a display-name save (or between two different privacy fields) resolves correctly regardless of response order
+- [x] **Task 5: Tests mirroring `src/` 1:1** (AD-8)
+  - [x] `services/core/tests/modules/users/service.test.ts` — `getPrivacySettings` returns `DEFAULT_PRIVACY_SETTINGS` verbatim before any write; a partial `savePrivacySettings` updates only the given field(s), leaving the rest at their previous (or still-default) values; rejects an empty update body
+  - [x] `services/core/tests/modules/users/routes.test.ts` — both routes require authentication (401 with no trusted headers); `GET` returns the exact 3-field default shape through the real route
+  - [x] `services/gateway/tests/authProxy.test.ts` — both new proxy routes require auth (401 with no token)
+  - [x] `packages/shared-types/tests/privacy.test.ts` (new) — `DEFAULT_PRIVACY_SETTINGS` is a valid `learnerPrivacySettingsSchema`; `privacySettingsUpdateInputSchema` accepts single/multi-field partial updates and rejects an empty body
+  - [x] `apps/web/tests/modules/users/ProfilePage.test.tsx` (updated) — loads and displays the fetched privacy settings as three switches with their correct on/off state; toggling one fires a partial `PUT /users/privacy-settings` with just that field and doesn't disturb the other two switches' or the display-name field's displayed values; a failed toggle save reverts and shows an inline error; a race between an in-flight privacy-field save and a display-name save (or between two different privacy fields) resolves correctly regardless of response order
 
 ## Dev Notes
 
@@ -139,6 +139,8 @@ apps/web/
 ## Change Log
 
 - 2026-08-05: Checkpoint 1 (Tasks 1-3, backend) — 3 nullable privacy columns on `learnerProfiles`, `GET`/`PUT /users/privacy-settings` reusing `ensureLearnerProfile`/`requireTrustedUser`, gateway proxy routes. 144 `services/core` tests (up from 133), 42 `services/gateway` tests (up from 38), 71 `shared-types` tests (up from 64).
+- 2026-08-05: Checkpoint 2 (Task 4, frontend) — `ProfilePage`'s privacy placeholder replaced with three real `Switch` controls, each auto-saving independently (`getPrivacySettings`/`savePrivacySettings` added to `users/api.ts`). The mount effect now fetches `getMe` and `getPrivacySettings` in parallel via `Promise.all`. The single-field `requestIdRef` counter Story 1.5's own code review added for `displayName` was generalized to a per-field `Record<string, number>` so the display-name save and the three privacy-toggle saves — four independently-saving controls now on one page — can never invalidate each other's in-flight requests. 110 `apps/web` tests (up from 106).
+- 2026-08-05: Task 5 completion — full regression clean (393 tests across the monorepo: 14 config, 71 shared-types, 12 service-kernel, 110 apps/web, 42 gateway, 144 core), `tsc --noEmit`/`eslint .` clean in every workspace. Migration applied to the live Postgres container and the full flow reverified end-to-end via `curl` directly against `core`: defaults on first call, a partial update leaving the other two fields untouched, and the empty-body validation rejection. Status → `review`.
 
 ### Agent Model Used
 
@@ -149,6 +151,7 @@ Claude Sonnet 5
 ### Completion Notes List
 
 - **Tasks 1-3 (backend):** near-identical copy of Story 1.4's `getPreferences`/`savePreferences` shape — `toPrivacySettings` maps each nullable column through `?? DEFAULT_PRIVACY_SETTINGS[field]`, and `savePrivacySettings` spreads the validated partial input directly into Drizzle's `.set()`, same as `savePreferences`.
+- **Task 4 (frontend):** `ProfilePage` now has four independently-saving fields (`displayName` + 3 privacy toggles) sharing one component. Generalized Story 1.5's single `saveRequestIdRef` counter into a `Record<string, number>` keyed by field name — each field gets its own sequence number, so an in-flight `publicLeaderboardSharing` save can never be invalidated by a `cohortDisplayName` save resolving, and vice versa, while overlapping saves *within* the same field are still correctly sequenced.
 
 ### File List
 
@@ -166,3 +169,11 @@ Claude Sonnet 5
 **Task 3 (gateway proxy):**
 - `services/gateway/src/authProxy.ts` (updated — two new authenticated routes)
 - `services/gateway/tests/authProxy.test.ts` (updated)
+
+**Task 4 (apps/web):**
+- `apps/web/src/modules/users/ProfilePage.tsx` (updated — privacy placeholder replaced with three `Switch` controls, mount effect fetches privacy settings alongside `getMe`, request-sequencing generalized to a per-field map)
+- `apps/web/src/modules/users/api.ts` (updated — `getPrivacySettings`, `savePrivacySettings`)
+- `apps/web/tests/modules/users/ProfilePage.test.tsx` (updated — privacy-settings load/toggle/race/error tests, all existing tests updated for the new mount-time `GET /users/privacy-settings` call)
+
+**Task 5 (sprint tracking):**
+- `_AI-Agile-Development/implementation-artifacts/sprint-status.yaml` (updated — Story 1.6 → `in-progress`, then `review`)

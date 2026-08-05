@@ -23,6 +23,8 @@ const DEFAULT_ME = {
   memberSince: "2026-01-15T00:00:00.000Z",
 };
 
+const DEFAULT_PRIVACY = { publicLeaderboardSharing: false, cohortDisplayName: true, uploadsForTraining: false };
+
 function renderWithSession(session: { accessToken: string } | null, getMe = vi.fn().mockResolvedValue(DEFAULT_ME)) {
   useAuthMock.mockReturnValue({ session, getMe });
   return render(
@@ -39,6 +41,19 @@ function jsonResponse(body: unknown) {
   return Promise.resolve({ ok: true, json: () => Promise.resolve(body) } as unknown as Response);
 }
 
+/** Every test needs `GET /users/privacy-settings` answered — this stubs it with the
+ * defaults, routing any other URL/method to a caller-supplied override. */
+function stubFetch(overrides?: (url: string, init: RequestInit) => Promise<Response> | undefined) {
+  const fetchMock = vi.fn().mockImplementation((url: string, init: RequestInit) => {
+    const override = overrides?.(url, init);
+    if (override) return override;
+    if (url.includes("/users/privacy-settings") && init.method === "GET") return jsonResponse(DEFAULT_PRIVACY);
+    return jsonResponse(DEFAULT_PRIVACY);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
 describe("ProfilePage", () => {
   afterEach(() => {
     cleanup();
@@ -53,6 +68,7 @@ describe("ProfilePage", () => {
   });
 
   it("loads and displays the display name, member-since date, and avatar initials", async () => {
+    stubFetch();
     renderWithSession({ accessToken: "a-token" });
 
     await waitFor(() => expect(screen.getByDisplayValue("ananya")).toBeInTheDocument());
@@ -60,9 +76,18 @@ describe("ProfilePage", () => {
     expect(screen.getByText(/2026/)).toBeInTheDocument();
   });
 
-  it("renders explicitly-labeled placeholder sections for stars, streak, courses, certificates, and privacy, with no extra network calls", async () => {
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
+  it("loads and displays the fetched privacy settings as three switches with their correct on/off state", async () => {
+    stubFetch();
+    renderWithSession({ accessToken: "a-token" });
+
+    await waitFor(() => expect(screen.getByRole("switch", { name: "Public leaderboard sharing" })).toBeInTheDocument());
+    expect(screen.getByRole("switch", { name: "Public leaderboard sharing" })).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByRole("switch", { name: "Display name in cohorts" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("switch", { name: "Use my uploads to improve Usavvy" })).toHaveAttribute("aria-checked", "false");
+  });
+
+  it("renders explicitly-labeled placeholder sections for stars, streak, courses, and certificates, with no calls beyond the two initial GETs", async () => {
+    const fetchMock = stubFetch();
     renderWithSession({ accessToken: "a-token" });
 
     await waitFor(() => expect(screen.getByDisplayValue("ananya")).toBeInTheDocument());
@@ -71,15 +96,13 @@ describe("ProfilePage", () => {
     expect(screen.getByText(/[Ss]treak/)).toBeInTheDocument();
     expect(screen.getByText(/[Cc]ourses/)).toBeInTheDocument();
     expect(screen.getByText(/[Cc]ertificates/)).toBeInTheDocument();
-    expect(screen.getByText(/1\.6/)).toBeInTheDocument();
-    // getMe is mocked directly (not via fetch) in these tests, so any placeholder
-    // section wired to a real API call would show up here as an unexpected fetch call.
-    expect(fetchMock).not.toHaveBeenCalled();
+    // getMe is mocked directly (not via fetch) in these tests, so the only real fetch
+    // call expected is the mount-time GET /users/privacy-settings.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("editing the display name and blurring saves it and reflects the new value", async () => {
-    const fetchMock = vi.fn().mockImplementation(() => jsonResponse({ ...DEFAULT_ME, displayName: "Ananya Sharma" }));
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = stubFetch((url, init) => (init.method === "PUT" ? jsonResponse({ ...DEFAULT_ME, displayName: "Ananya Sharma" }) : undefined));
     renderWithSession({ accessToken: "a-token" });
     const user = userEvent.setup();
     await waitFor(() => expect(screen.getByDisplayValue("ananya")).toBeInTheDocument());
@@ -95,8 +118,7 @@ describe("ProfilePage", () => {
   });
 
   it("does not save when the display name is blurred unchanged", async () => {
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = stubFetch();
     renderWithSession({ accessToken: "a-token" });
     const user = userEvent.setup();
     await waitFor(() => expect(screen.getByDisplayValue("ananya")).toBeInTheDocument());
@@ -104,17 +126,19 @@ describe("ProfilePage", () => {
     await user.click(screen.getByDisplayValue("ananya"));
     await user.tab();
 
-    expect(fetchMock).not.toHaveBeenCalled();
+    // Only the mount-time GET /users/privacy-settings — no PUT fired.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("reverts to the previous display name and shows an inline error when the save fails", async () => {
-    const fetchMock = vi.fn().mockImplementation(() =>
-      Promise.resolve({
-        ok: false,
-        json: () => Promise.resolve({ error: { code: "VALIDATION_ERROR", message: "name is invalid" } }),
-      } as unknown as Response),
+    stubFetch((url, init) =>
+      init.method === "PUT"
+        ? (Promise.resolve({
+            ok: false,
+            json: () => Promise.resolve({ error: { code: "VALIDATION_ERROR", message: "name is invalid" } }),
+          }) as unknown as Promise<Response>)
+        : undefined,
     );
-    vi.stubGlobal("fetch", fetchMock);
     renderWithSession({ accessToken: "a-token" });
     const user = userEvent.setup();
     await waitFor(() => expect(screen.getByDisplayValue("ananya")).toBeInTheDocument());
@@ -128,10 +152,47 @@ describe("ProfilePage", () => {
     expect(screen.getByDisplayValue("ananya")).toBeInTheDocument();
   });
 
+  it("toggling a privacy switch fires a partial PUT with just that field and doesn't disturb the other switches or the display name", async () => {
+    const fetchMock = stubFetch((url, init) =>
+      init.method === "PUT" ? jsonResponse({ ...DEFAULT_PRIVACY, publicLeaderboardSharing: true }) : undefined,
+    );
+    renderWithSession({ accessToken: "a-token" });
+    const user = userEvent.setup();
+    await waitFor(() => expect(screen.getByRole("switch", { name: "Public leaderboard sharing" })).toBeInTheDocument());
+
+    await user.click(screen.getByRole("switch", { name: "Public leaderboard sharing" }));
+
+    await waitFor(() => expect(screen.getByRole("switch", { name: "Public leaderboard sharing" })).toHaveAttribute("aria-checked", "true"));
+    const putCall = fetchMock.mock.calls.find((call) => (call[1] as RequestInit).method === "PUT");
+    expect(putCall?.[1]).toMatchObject({ body: JSON.stringify({ publicLeaderboardSharing: true }) });
+    expect(screen.getByRole("switch", { name: "Display name in cohorts" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("switch", { name: "Use my uploads to improve Usavvy" })).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByDisplayValue("ananya")).toBeInTheDocument();
+  });
+
+  it("reverts a privacy toggle and shows an inline error when its save fails", async () => {
+    stubFetch((url, init) =>
+      init.method === "PUT"
+        ? (Promise.resolve({
+            ok: false,
+            json: () => Promise.resolve({ error: { code: "VALIDATION_ERROR", message: "could not save privacy setting" } }),
+          }) as unknown as Promise<Response>)
+        : undefined,
+    );
+    renderWithSession({ accessToken: "a-token" });
+    const user = userEvent.setup();
+    await waitFor(() => expect(screen.getByRole("switch", { name: "Public leaderboard sharing" })).toBeInTheDocument());
+
+    await user.click(screen.getByRole("switch", { name: "Public leaderboard sharing" }));
+
+    await waitFor(() => expect(screen.getByText("could not save privacy setting")).toBeInTheDocument());
+    expect(screen.getByRole("switch", { name: "Public leaderboard sharing" })).toHaveAttribute("aria-checked", "false");
+  });
+
   it("an earlier-issued save's late-arriving response doesn't clobber a later-issued save (review finding: all three review layers independently flagged this race)", async () => {
     const pending: Array<{ resolve: (displayName: string) => void }> = [];
-    const fetchMock = vi.fn().mockImplementation((_url: string, init: RequestInit) => {
-      if (init.method === "GET") return jsonResponse(DEFAULT_ME);
+    stubFetch((url, init) => {
+      if (init.method !== "PUT") return undefined;
       return new Promise((resolve) => {
         pending.push({
           resolve: (displayName: string) =>
@@ -139,7 +200,6 @@ describe("ProfilePage", () => {
         });
       });
     });
-    vi.stubGlobal("fetch", fetchMock);
     renderWithSession({ accessToken: "a-token" });
     const user = userEvent.setup();
     await waitFor(() => expect(screen.getByDisplayValue("ananya")).toBeInTheDocument());
@@ -165,9 +225,17 @@ describe("ProfilePage", () => {
     expect(screen.getByDisplayValue("Second Edit")).toBeInTheDocument();
   });
 
-  it("shows a generic error view when the initial load fails", async () => {
+  it("shows a generic error view when the initial getMe load fails", async () => {
+    stubFetch();
     const getMe = vi.fn().mockRejectedValue(new Error("network down"));
     renderWithSession({ accessToken: "a-token" }, getMe);
+
+    await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
+  });
+
+  it("shows a generic error view when the initial privacy-settings load fails", async () => {
+    stubFetch(() => Promise.resolve({ ok: false, json: () => Promise.resolve({ error: { code: "INTERNAL_ERROR", message: "boom" } }) }) as unknown as Promise<Response>);
+    renderWithSession({ accessToken: "a-token" });
 
     await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
   });

@@ -1,16 +1,19 @@
 import {
   ageDeclarationResponseSchema,
   learnerPreferencesSchema,
+  learnerPrivacySettingsSchema,
   learnerProfileResponseSchema,
   meResponseSchema,
   parentalConsentResponseSchema,
   type AgeDeclarationResponse,
   type LearnerPreferences,
+  type LearnerPrivacySettings,
   type LearnerProfileResponse,
   type MeResponse,
   type OnboardingStepInput,
   type ParentalConsentResponse,
   type PreferencesUpdateInput,
+  type PrivacySettingsUpdateInput,
   type UpdateDisplayNameInput,
 } from "@usavvy/shared-types";
 import { apiRequest } from "../../shared/apiClient.js";
@@ -32,6 +35,10 @@ export function createUsersApi(apiUrl: string) {
       apiRequest(apiUrl, "/users/preferences", learnerPreferencesSchema, { method: "PUT", body: input, accessToken }),
     updateDisplayName: (accessToken: string, input: UpdateDisplayNameInput): Promise<MeResponse> =>
       apiRequest(apiUrl, "/users/display-name", meResponseSchema, { method: "PUT", body: input, accessToken }),
+    getPrivacySettings: (accessToken: string): Promise<LearnerPrivacySettings> =>
+      apiRequest(apiUrl, "/users/privacy-settings", learnerPrivacySettingsSchema, { method: "GET", accessToken }),
+    savePrivacySettings: (accessToken: string, input: PrivacySettingsUpdateInput): Promise<LearnerPrivacySettings> =>
+      apiRequest(apiUrl, "/users/privacy-settings", learnerPrivacySettingsSchema, { method: "PUT", body: input, accessToken }),
   };
 }
 

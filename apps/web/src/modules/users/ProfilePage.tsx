@@ -1,25 +1,26 @@
 import { useEffect, useRef, useState } from "react";
 import { Form } from "radix-ui";
 import { Navigate } from "react-router-dom";
-import type { MeResponse } from "@usavvy/shared-types";
-import { Avatar, TextField } from "../../shared/index.js";
+import type { LearnerPrivacySettings, MeResponse } from "@usavvy/shared-types";
+import { Avatar, Switch, TextField } from "../../shared/index.js";
 import { ApiError } from "../../shared/apiClient.js";
 import { getWebConfig } from "../../app/config.js";
 import { useAuth } from "../auth/index.js";
 import { createUsersApi } from "./api.js";
 
 type ViewState = { kind: "loading" } | { kind: "ready" } | { kind: "error"; message: string };
+type PrivacyFieldErrors = Partial<Record<keyof LearnerPrivacySettings, string>>;
 
 /**
  * AC #1/#2: reached directly (no nav chrome wires it up yet — same gap Stories 1.3/1.4
  * documented for themselves). Protected — no session means no identity to display.
  *
- * Rescoped per this story's own Dev Notes (following the Implementation Readiness
- * Report's finding that epics.md's AC bundles fields owned by later epics): only
- * displayName/avatar/memberSince are real, editable identity data this story owns.
- * Stars/streak/courses/certificates/privacy render as explicit, static placeholder
- * text — never fabricated numbers — since engagement/courses/plans-progress aren't
- * scaffolded yet and privacy toggles are Story 1.6's own scope.
+ * Rescoped per Story 1.5's own Dev Notes (following the Implementation Readiness
+ * Report's finding that epics.md's AC bundles fields owned by later epics):
+ * displayName/avatar/memberSince (Story 1.5) and privacy toggles (Story 1.6, FR-A-6)
+ * are the real, editable identity/settings data this page owns. Stars/streak/courses/
+ * certificates still render as explicit, static placeholder text — never fabricated
+ * numbers — since engagement/courses/plans-progress aren't scaffolded yet.
  */
 export function ProfilePage() {
   const { session, getMe } = useAuth();
@@ -27,13 +28,16 @@ export function ProfilePage() {
   const [me, setMe] = useState<MeResponse | null>(null);
   const [displayNameInput, setDisplayNameInput] = useState("");
   const [fieldError, setFieldError] = useState<string | undefined>();
+  const [privacy, setPrivacy] = useState<LearnerPrivacySettings | null>(null);
+  const [privacyErrors, setPrivacyErrors] = useState<PrivacyFieldErrors>({});
   const isMountedRef = useRef(true);
-  // Review finding (all three review layers): overlapping saves (edit, blur, edit
-  // again, blur again before the first request resolves) previously let whichever
-  // response *arrived* last win, not whichever request was *issued* last. This counter
-  // tags each request at issue time; a response is only applied if it's still the most
-  // recently issued one by the time it resolves.
-  const saveRequestIdRef = useRef(0);
+  // Review finding (Story 1.5, all three review layers): overlapping saves (edit,
+  // blur, edit again, blur again before the first request resolves) previously let
+  // whichever response *arrived* last win, not whichever request was *issued* last.
+  // Keyed per-field (Story 1.6 Dev Notes: generalized from a single counter once a
+  // second independently-saving field — the privacy toggles — was added to this same
+  // page) so one field's save can never invalidate a different field's in-flight one.
+  const requestIdRef = useRef<Record<string, number>>({});
   useEffect(
     () => () => {
       isMountedRef.current = false;
@@ -46,11 +50,13 @@ export function ProfilePage() {
     // Guards against a stale response landing after the session changed or this page
     // was navigated away from before the request resolved (Story 1.3/1.4 precedent).
     let cancelled = false;
-    getMe(session.accessToken)
-      .then((result) => {
+    const { apiUrl } = getWebConfig();
+    Promise.all([getMe(session.accessToken), createUsersApi(apiUrl).getPrivacySettings(session.accessToken)])
+      .then(([meResult, privacyResult]) => {
         if (cancelled) return;
-        setMe(result);
-        setDisplayNameInput(result.displayName);
+        setMe(meResult);
+        setDisplayNameInput(meResult.displayName);
+        setPrivacy(privacyResult);
         setView({ kind: "ready" });
       })
       .catch((error: unknown) => {
@@ -82,19 +88,47 @@ export function ProfilePage() {
     }
     const previous = me;
     setFieldError(undefined);
-    const requestId = ++saveRequestIdRef.current;
+    const requestId = (requestIdRef.current.displayName = (requestIdRef.current.displayName ?? 0) + 1);
     const { apiUrl } = getWebConfig();
     createUsersApi(apiUrl)
       .updateDisplayName(accessToken, { displayName: trimmed })
       .then((updated) => {
-        if (!isMountedRef.current || saveRequestIdRef.current !== requestId) return;
+        if (!isMountedRef.current || requestIdRef.current.displayName !== requestId) return;
         setMe(updated);
         setDisplayNameInput(updated.displayName);
       })
       .catch((error: unknown) => {
-        if (!isMountedRef.current || saveRequestIdRef.current !== requestId) return;
+        if (!isMountedRef.current || requestIdRef.current.displayName !== requestId) return;
         setDisplayNameInput(previous.displayName);
         setFieldError(error instanceof ApiError ? error.message : "something went wrong — please try again");
+      });
+  }
+
+  // Story 1.6 (FR-A-6): each toggle auto-saves independently on change, matching
+  // PreferencesPage's established per-control pattern exactly — optimistic update,
+  // merge only the one changed field into state (Story 1.4 review finding — never
+  // replace the whole object with a single field's response), reverted with an inline
+  // error on failure, race-guarded per field via the shared requestIdRef.
+  function savePrivacyField<K extends keyof LearnerPrivacySettings>(field: K, value: LearnerPrivacySettings[K]): void {
+    if (!privacy) return;
+    const previous = privacy[field];
+    setPrivacy((current) => (current ? { ...current, [field]: value } : current));
+    setPrivacyErrors((current) => ({ ...current, [field]: undefined }));
+    const requestId = (requestIdRef.current[field] = (requestIdRef.current[field] ?? 0) + 1);
+    const { apiUrl } = getWebConfig();
+    createUsersApi(apiUrl)
+      .savePrivacySettings(accessToken, { [field]: value } as Partial<LearnerPrivacySettings>)
+      .then((updated) => {
+        if (!isMountedRef.current || requestIdRef.current[field] !== requestId) return;
+        setPrivacy((current) => (current ? { ...current, [field]: updated[field] } : current));
+      })
+      .catch((error: unknown) => {
+        if (!isMountedRef.current || requestIdRef.current[field] !== requestId) return;
+        setPrivacy((current) => (current ? { ...current, [field]: previous } : current));
+        setPrivacyErrors((current) => ({
+          ...current,
+          [field]: error instanceof ApiError ? error.message : "something went wrong — please try again",
+        }));
       });
   }
 
@@ -107,7 +141,7 @@ export function ProfilePage() {
     );
   }
 
-  if (view.kind === "error" || !me) {
+  if (view.kind === "error" || !me || !privacy) {
     return (
       <main>
         <h1>Profile</h1>
@@ -144,7 +178,39 @@ export function ProfilePage() {
         Courses in progress and completed will appear here once the catalog (Epic 2) and progress tracking (Epic 4) ship.
       </div>
       <div className="usavvy-profile-placeholder">Certificates will appear here once Epic 5 ships.</div>
-      <div className="usavvy-profile-placeholder">Privacy controls will appear here once Story 1.6 ships.</div>
+
+      <Switch
+        label="Public leaderboard sharing"
+        checked={privacy.publicLeaderboardSharing}
+        onCheckedChange={(value) => savePrivacyField("publicLeaderboardSharing", value)}
+      />
+      {privacyErrors.publicLeaderboardSharing ? (
+        <span className="usavvy-message-error" role="alert">
+          {privacyErrors.publicLeaderboardSharing}
+        </span>
+      ) : null}
+
+      <Switch
+        label="Display name in cohorts"
+        checked={privacy.cohortDisplayName}
+        onCheckedChange={(value) => savePrivacyField("cohortDisplayName", value)}
+      />
+      {privacyErrors.cohortDisplayName ? (
+        <span className="usavvy-message-error" role="alert">
+          {privacyErrors.cohortDisplayName}
+        </span>
+      ) : null}
+
+      <Switch
+        label="Use my uploads to improve Usavvy"
+        checked={privacy.uploadsForTraining}
+        onCheckedChange={(value) => savePrivacyField("uploadsForTraining", value)}
+      />
+      {privacyErrors.uploadsForTraining ? (
+        <span className="usavvy-message-error" role="alert">
+          {privacyErrors.uploadsForTraining}
+        </span>
+      ) : null}
     </main>
   );
 }
