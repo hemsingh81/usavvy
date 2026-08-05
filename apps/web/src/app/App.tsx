@@ -7,6 +7,7 @@ import { AppHeader } from "./AppHeader.js";
 import { AuthProvider, LoginPage, SignUpPage, VerifyEmailPage } from "../modules/auth/index.js";
 import {
   AccountDeletionPage,
+  ActivityHistoryPage,
   AgeDeclarationPage,
   DataExportPage,
   OnboardingWizardPage,
@@ -61,6 +62,7 @@ export function App() {
               <Route path="/profile" element={<ProfilePage />} />
               <Route path="/account-deletion" element={<AccountDeletionPage />} />
               <Route path="/data-export" element={<DataExportPage />} />
+              <Route path="/activity-history" element={<ActivityHistoryPage />} />
               <Route path="*" element={<NotFoundPage />} />
             </Routes>
           </BrowserRouter>

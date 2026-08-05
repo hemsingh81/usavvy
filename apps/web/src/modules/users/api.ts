@@ -1,5 +1,6 @@
 import {
   accountDeletionResponseSchema,
+  activityHistoryResponseSchema,
   ageDeclarationResponseSchema,
   learnerPreferencesSchema,
   learnerPrivacySettingsSchema,
@@ -9,6 +10,7 @@ import {
   notificationResponseSchema,
   parentalConsentResponseSchema,
   type AccountDeletionResponse,
+  type ActivityHistoryEntry,
   type AgeDeclarationResponse,
   type LearnerPreferences,
   type LearnerPrivacySettings,
@@ -57,6 +59,8 @@ export function createUsersApi(apiUrl: string) {
       apiRequest(apiUrl, `/users/notifications/${id}/read`, notificationResponseSchema, { method: "PUT", accessToken }),
     clearNotification: (accessToken: string, id: string): Promise<void> =>
       apiRequest(apiUrl, `/users/notifications/${id}`, voidSchema, { method: "DELETE", accessToken }),
+    getActivityHistory: (accessToken: string): Promise<ActivityHistoryEntry[]> =>
+      apiRequest(apiUrl, "/users/activity-history", activityHistoryResponseSchema, { method: "GET", accessToken }),
   };
 }
 

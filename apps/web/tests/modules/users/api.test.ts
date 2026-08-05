@@ -239,4 +239,17 @@ describe("createUsersApi", () => {
 
     await expect(api.clearNotification("a-token", "n1")).rejects.toMatchObject({ code: "NOTIFICATION_STILL_IN_PROGRESS" });
   });
+
+  it("getActivityHistory sends the access token and no body, returns the parsed list", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve([]) } as unknown as Response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const api = createUsersApi("http://localhost:3000");
+    const result = await api.getActivityHistory("a-token");
+
+    expect(result).toEqual([]);
+    const [, callOptions] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(callOptions.method).toBe("GET");
+    expect(callOptions.headers).toEqual(expect.objectContaining({ authorization: "Bearer a-token" }));
+  });
 });
