@@ -17,6 +17,20 @@ describe("activityHistoryEntrySchema", () => {
     const rest = Object.fromEntries(Object.entries(VALID_ENTRY).filter(([k]) => k !== key));
     expect(() => activityHistoryEntrySchema.parse(rest)).toThrow();
   });
+
+  it("rejects an empty label (review finding: would render a link with no visible text)", () => {
+    expect(() => activityHistoryEntrySchema.parse({ ...VALID_ENTRY, label: "" })).toThrow();
+  });
+
+  it("rejects a sourceUrl that isn't a relative in-app path (review finding: confirmed independently by both Blind Hunter and Edge Case Hunter — an unconstrained sourceUrl is rendered directly as an <a href>, so a javascript: URI would pass validation and execute on click)", () => {
+    expect(() => activityHistoryEntrySchema.parse({ ...VALID_ENTRY, sourceUrl: "javascript:alert(1)" })).toThrow();
+    expect(() => activityHistoryEntrySchema.parse({ ...VALID_ENTRY, sourceUrl: "https://evil.example.com" })).toThrow();
+    expect(() => activityHistoryEntrySchema.parse({ ...VALID_ENTRY, sourceUrl: "" })).toThrow();
+  });
+
+  it("accepts a relative in-app sourceUrl", () => {
+    expect(() => activityHistoryEntrySchema.parse({ ...VALID_ENTRY, sourceUrl: "/assignments/1/feedback" })).not.toThrow();
+  });
 });
 
 describe("activityHistoryResponseSchema", () => {

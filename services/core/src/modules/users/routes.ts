@@ -179,6 +179,12 @@ export function registerUsersRoutes(app: FastifyInstance, deps: UsersRouteDeps):
     reply.code(204).send();
   });
 
+  // Review finding: unlike every sibling route above, this one doesn't destructure
+  // `userId` from requireTrustedUser — deliberately, since getActivityHistory() has no
+  // query to scope by it yet and an unused binding would fail this repo's zero-tolerance
+  // no-unused-vars lint rule. Whichever future story (3.x/6.x/7.x) adds the first real
+  // read MUST destructure { userId } here and thread it through, matching every other
+  // route in this file — do not add a real query without also adding that scoping.
   app.get("/users/activity-history", async (request, reply) => {
     requireTrustedUser(request);
     reply.send(await getActivityHistory());
