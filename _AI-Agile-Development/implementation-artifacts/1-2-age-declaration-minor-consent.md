@@ -4,7 +4,7 @@ baseline_commit: 46548f4
 
 # Story 1.2: Age Declaration & Minor Consent
 
-Status: ready-for-dev
+Status: review
 
 *(Epic 1, FR-A-2/NFR-16. Directly extends Story 1.1's just-built auth flow — reuses its Drizzle/token/NotificationPort/error-envelope patterns rather than inventing new ones. First story to add a genuinely protected, authenticated write endpoint beyond `/me`.)*
 
@@ -26,39 +26,39 @@ so that the platform applies the right protections if I'm a minor.
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1: Extend the `users` schema + new `parental_consent_tokens` table** (AC: #1, #2, #3, #4)
-  - [ ] Add to `services/core/src/db/schema.ts`'s `users` table: `birthdate` (Drizzle's `date()` column, default string mode — verified live that `date()` with no config returns a string-typed column, matching the `"YYYY-MM-DD"` wire format end to end with no `Date`-object conversion layer; nullable, null means "not yet declared"), `parentEmail` (text, nullable — only ever set for minors), `parentConsentedAt` (timestamptz, nullable — null means pending/not-applicable)
-  - [ ] New table `parentalConsentTokens`, structurally identical to Story 1.1's `emailVerificationTokens` (id uuidv7 default, `userId` FK, `tokenHash` unique, `expiresAt`, `usedAt`, `createdAt`) — same hygiene: only the SHA-256 hash of the raw token is ever persisted, reuse `tokens.ts`'s existing `generateRawToken`/`hashToken` rather than duplicating them
-  - [ ] Generate + apply the migration (`pnpm --filter @usavvy/core db:generate` then `db:migrate`) — do not hand-write SQL
+- [x] **Task 1: Extend the `users` schema + new `parental_consent_tokens` table** (AC: #1, #2, #3, #4)
+  - [x] Add to `services/core/src/db/schema.ts`'s `users` table: `birthdate` (Drizzle's `date()` column, default string mode — verified live that `date()` with no config returns a string-typed column, matching the `"YYYY-MM-DD"` wire format end to end with no `Date`-object conversion layer; nullable, null means "not yet declared"), `parentEmail` (text, nullable — only ever set for minors), `parentConsentedAt` (timestamptz, nullable — null means pending/not-applicable)
+  - [x] New table `parentalConsentTokens`, structurally identical to Story 1.1's `emailVerificationTokens` (id uuidv7 default, `userId` FK, `tokenHash` unique, `expiresAt`, `usedAt`, `createdAt`) — same hygiene: only the SHA-256 hash of the raw token is ever persisted, reuse `tokens.ts`'s existing `generateRawToken`/`hashToken` rather than duplicating them
+  - [x] Generate + apply the migration (`pnpm --filter @usavvy/core db:generate` then `db:migrate`) — do not hand-write SQL
 
-- [ ] **Task 2: Age computation utility** (AC: #1, #4)
-  - [ ] A pure, unit-tested `calculateAge(birthdate: Date, now: Date): number` in a new `services/core/src/modules/auth/age.ts` (or `users` module — this is squarely a `User` concern, so `modules/users/` is the better home; `age.ts` there) — exact year/month/day arithmetic, **not** a naive `now.year - birthdate.year` (that's off by one for anyone whose birthday hasn't occurred yet this calendar year — a classic, easy-to-miss bug; test it explicitly with a birthdate of "yesterday, N years + 1 day ago" vs "yesterday, exactly N years ago" vs "tomorrow, N+1 years ago")
-  - [ ] Reject a birthdate that is in the future or implausibly old (e.g. >120 years) at the validation layer (Task 4) — a basic sanity bound, not a business rule requiring a decision
+- [x] **Task 2: Age computation utility** (AC: #1, #4)
+  - [x] A pure, unit-tested `calculateAge(birthdate: Date, now: Date): number` in a new `services/core/src/modules/auth/age.ts` (or `users` module — this is squarely a `User` concern, so `modules/users/` is the better home; `age.ts` there) — exact year/month/day arithmetic, **not** a naive `now.year - birthdate.year` (that's off by one for anyone whose birthday hasn't occurred yet this calendar year — a classic, easy-to-miss bug; test it explicitly with a birthdate of "yesterday, N years + 1 day ago" vs "yesterday, exactly N years ago" vs "tomorrow, N+1 years ago")
+  - [x] Reject a birthdate that is in the future or implausibly old (e.g. >120 years) at the validation layer (Task 4) — a basic sanity bound, not a business rule requiring a decision
 
-- [ ] **Task 3: `services/core`'s `users` module — age declaration + `/me` extension** (AC: #1, #2, #4)
-  - [ ] `POST /users/age-declaration` `{ birthdate, parentEmail? }` — **authenticated** (reads the same trusted `x-user-id` header `/me` already reads; gated through the internal-secret + gateway JWT chain Story 1.1 built, no new auth mechanism). Rejects if the user has already declared (`birthdate` already set) with a specific `error.code` (e.g. `AGE_ALREADY_DECLARED`) — this is a one-time declaration, not an editable profile field in this story's scope
-  - [ ] If computed age ≥ 18: set `birthdate`, leave `parentEmail`/`parentConsentedAt` null, return `{ isMinor: false, parentalConsentStatus: "not_required" }` — no email sent, no token created
-  - [ ] If computed age < 18: require `parentEmail` in the same request (reject with `VALIDATION_ERROR` if absent — the client should only ever omit it for the adult path); set `birthdate` + `parentEmail`, generate a consent token exactly like Story 1.1's verification token (24h expiry, matching precedent — no NFR specifies a different window), send it via `notificationPort.sendEmail(...)` to `parentEmail` (never to the learner's own email), return `{ isMinor: true, parentalConsentStatus: "pending" }`
-  - [ ] `GET /me`'s response gains `birthdate: string | null`, `isMinor: boolean | null` (null until declared), `parentalConsentStatus: "not_required" | "pending" | "granted" | null` (null until declared) — extend `meResponseSchema` in `packages/shared-types` (genuine cross-service contract, same reasoning Story 1.1 used for adding it there) rather than a story-local shape
-  - [ ] `POST /users/parental-consent` `{ token }` — **unauthenticated by design**, same public-link pattern as Story 1.1's `/auth/verify-email` (the parent has no account/session). Hash the incoming token, look up, reject if not found/expired/already-used with `INVALID_CONSENT_TOKEN`; in one transaction, mark the token `usedAt` and the user's `parentConsentedAt = now()`. Returns a simple `{ success: true }` — no session is issued (the parent isn't the account holder, unlike Story 1.1's verify-email which logs the *learner* in)
+- [x] **Task 3: `services/core`'s `users` module — age declaration + `/me` extension** (AC: #1, #2, #4)
+  - [x] `POST /users/age-declaration` `{ birthdate, parentEmail? }` — **authenticated** (reads the same trusted `x-user-id` header `/me` already reads; gated through the internal-secret + gateway JWT chain Story 1.1 built, no new auth mechanism). Rejects if the user has already declared (`birthdate` already set) with a specific `error.code` (e.g. `AGE_ALREADY_DECLARED`) — this is a one-time declaration, not an editable profile field in this story's scope
+  - [x] If computed age ≥ 18: set `birthdate`, leave `parentEmail`/`parentConsentedAt` null, return `{ isMinor: false, parentalConsentStatus: "not_required" }` — no email sent, no token created
+  - [x] If computed age < 18: require `parentEmail` in the same request (reject with `VALIDATION_ERROR` if absent — the client should only ever omit it for the adult path); set `birthdate` + `parentEmail`, generate a consent token exactly like Story 1.1's verification token (24h expiry, matching precedent — no NFR specifies a different window), send it via `notificationPort.sendEmail(...)` to `parentEmail` (never to the learner's own email), return `{ isMinor: true, parentalConsentStatus: "pending" }`
+  - [x] `GET /me`'s response gains `birthdate: string | null`, `isMinor: boolean | null` (null until declared), `parentalConsentStatus: "not_required" | "pending" | "granted" | null` (null until declared) — extend `meResponseSchema` in `packages/shared-types` (genuine cross-service contract, same reasoning Story 1.1 used for adding it there) rather than a story-local shape
+  - [x] `POST /users/parental-consent` `{ token }` — **unauthenticated by design**, same public-link pattern as Story 1.1's `/auth/verify-email` (the parent has no account/session). Hash the incoming token, look up, reject if not found/expired/already-used with `INVALID_CONSENT_TOKEN`; in one transaction, mark the token `usedAt` and the user's `parentConsentedAt = now()`. Returns a simple `{ success: true }` — no session is issued (the parent isn't the account holder, unlike Story 1.1's verify-email which logs the *learner* in)
 
-- [ ] **Task 4: `services/gateway` — proxy the two new routes** (AC: #1, #2, #3)
-  - [ ] `POST /users/age-declaration` → authenticated (apply the same `requireAuth` `preHandler` + trusted-header forwarding `/me` already uses — extend `authProxy.ts`'s route list, don't invent a second protected-route pattern)
-  - [ ] `POST /users/parental-consent` → unauthenticated, forwarded as-is (add to the existing `AUTH_PATHS`-style pass-through list, or a small sibling list — it's pre-authentication by definition, same reasoning as `/auth/*`)
-  - [ ] Validation (email format for `parentEmail`, birthdate format/bounds) happens at `core`'s route layer via zod, same `parseOrThrow` pattern as every other endpoint — gateway stays a thin proxy, no business logic duplicated there
+- [x] **Task 4: `services/gateway` — proxy the two new routes** (AC: #1, #2, #3)
+  - [x] `POST /users/age-declaration` → authenticated (apply the same `requireAuth` `preHandler` + trusted-header forwarding `/me` already uses — extend `authProxy.ts`'s route list, don't invent a second protected-route pattern)
+  - [x] `POST /users/parental-consent` → unauthenticated, forwarded as-is (add to the existing `AUTH_PATHS`-style pass-through list, or a small sibling list — it's pre-authentication by definition, same reasoning as `/auth/*`)
+  - [x] Validation (email format for `parentEmail`, birthdate format/bounds) happens at `core`'s route layer via zod, same `parseOrThrow` pattern as every other endpoint — gateway stays a thin proxy, no business logic duplicated there
 
-- [ ] **Task 5: `apps/web` — age declaration form + waiting screen** (AC: #1, #2, #3, #4)
-  - [ ] New route `/age-declaration` (protected — if there's no session, `useAuth`'s `session` is null; redirect to `/login` rather than rendering a form with nothing to submit against). Radix `Form`-based birthdate input (`type="date"`) + conditional `parentEmail` field that appears once the entered birthdate computes to under 18 **client-side** (mirror the server's exact age math — do not let client and server drift on the age-boundary calculation; extract the same day/month/year-aware logic, don't naively parse only the year)
-  - [ ] After login/verify-email succeeds (Story 1.1's `LoginPage`/`VerifyEmailPage` both currently `navigate("/")`), check `/me`'s new fields: if `birthdate` is null, navigate to `/age-declaration` instead of `/`; if `isMinor && parentalConsentStatus === "pending"`, navigate to a `/waiting-for-consent` page instead — this requires calling `api.me()` (built in Story 1.1, never wired to any UI path until now — this is the first real consumer)
-  - [ ] `/waiting-for-consent` page: calm, informational tone per `DESIGN.md`'s `minor-consent-gate` component (primary accent, full surface background, **no** `usavvy-banner-error`/warning styling — this is a normal expected state, not a problem) — add a `usavvy-banner-info` (or reuse `usavvy-banner-success`'s calm styling; do not reuse the error banner class for this)
-  - [ ] Age-declaration form submit → on `{ isMinor: false }` response, navigate to `/` (same placeholder-for-onboarding destination as Story 1.1); on `{ isMinor: true, parentalConsentStatus: "pending" }`, navigate to `/waiting-for-consent`
-  - [ ] No new page needed for the parent's consent-click landing — the parent clicks a link with a `token`, which should go to a **new, separate** `/parental-consent` frontend route (distinct from the learner's `/verify-email`) that calls `POST /users/parental-consent` and shows a simple success/expired/already-used result, same three-state pattern as `VerifyEmailPage` (success/error UI, not session-related since the parent never gets a session)
+- [x] **Task 5: `apps/web` — age declaration form + waiting screen** (AC: #1, #2, #3, #4)
+  - [x] New route `/age-declaration` (protected — if there's no session, `useAuth`'s `session` is null; redirect to `/login` rather than rendering a form with nothing to submit against). Radix `Form`-based birthdate input (`type="date"`) + conditional `parentEmail` field that appears once the entered birthdate computes to under 18 **client-side** (mirror the server's exact age math — do not let client and server drift on the age-boundary calculation; extract the same day/month/year-aware logic, don't naively parse only the year)
+  - [x] After login/verify-email succeeds (Story 1.1's `LoginPage`/`VerifyEmailPage` both currently `navigate("/")`), check `/me`'s new fields: if `birthdate` is null, navigate to `/age-declaration` instead of `/`; if `isMinor && parentalConsentStatus === "pending"`, navigate to a `/waiting-for-consent` page instead — this requires calling `api.me()` (built in Story 1.1, never wired to any UI path until now — this is the first real consumer)
+  - [x] `/waiting-for-consent` page: calm, informational tone per `DESIGN.md`'s `minor-consent-gate` component (primary accent, full surface background, **no** `usavvy-banner-error`/warning styling — this is a normal expected state, not a problem) — add a `usavvy-banner-info` (or reuse `usavvy-banner-success`'s calm styling; do not reuse the error banner class for this)
+  - [x] Age-declaration form submit → on `{ isMinor: false }` response, navigate to `/` (same placeholder-for-onboarding destination as Story 1.1); on `{ isMinor: true, parentalConsentStatus: "pending" }`, navigate to `/waiting-for-consent`
+  - [x] No new page needed for the parent's consent-click landing — the parent clicks a link with a `token`, which should go to a **new, separate** `/parental-consent` frontend route (distinct from the learner's `/verify-email`) that calls `POST /users/parental-consent` and shows a simple success/expired/already-used result, same three-state pattern as `VerifyEmailPage` (success/error UI, not session-related since the parent never gets a session)
 
-- [ ] **Task 6: Tests mirroring `src/` 1:1** (AD-8, extending Story 1.1's now-established pattern)
-  - [ ] `services/core/tests/modules/users/age.test.ts` — `calculateAge`'s exact-boundary cases (day-before/day-of/day-after an 18th birthday), future-birthdate rejection, implausibly-old rejection
-  - [ ] `services/core/tests/modules/users/*.test.ts` — age-declaration adult path, minor path (email sent, token created), already-declared rejection, missing-`parentEmail`-for-a-minor rejection; parental-consent success/expired/already-used/unknown-token; `/me`'s new fields in all three states (not-declared/pending/granted)
-  - [ ] `services/gateway/tests/*.test.ts` — new proxy routes: age-declaration requires auth (401 with no token), parental-consent reachable with no token
-  - [ ] `apps/web/tests/modules/auth/*.test.tsx` (or a new `users` module test dir, matching wherever Task 5's components land) — age-declaration form's adult/minor branches, waiting-for-consent page, parental-consent landing page's three states, and the post-login/verify redirect logic now consuming `/me`
+- [x] **Task 6: Tests mirroring `src/` 1:1** (AD-8, extending Story 1.1's now-established pattern)
+  - [x] `services/core/tests/modules/users/age.test.ts` — `calculateAge`'s exact-boundary cases (day-before/day-of/day-after an 18th birthday), future-birthdate rejection, implausibly-old rejection
+  - [x] `services/core/tests/modules/users/*.test.ts` — age-declaration adult path, minor path (email sent, token created), already-declared rejection, missing-`parentEmail`-for-a-minor rejection; parental-consent success/expired/already-used/unknown-token; `/me`'s new fields in all three states (not-declared/pending/granted)
+  - [x] `services/gateway/tests/*.test.ts` — new proxy routes: age-declaration requires auth (401 with no token), parental-consent reachable with no token
+  - [x] `apps/web/tests/modules/auth/*.test.tsx` (or a new `users` module test dir, matching wherever Task 5's components land) — age-declaration form's adult/minor branches, waiting-for-consent page, parental-consent landing page's three states, and the post-login/verify redirect logic now consuming `/me`
 
 ## Dev Notes
 
@@ -150,6 +150,11 @@ apps/web/
 - [Source: `_AI-Agile-Development/planning-artifacts/architecture/architecture-USavvy-2026-08-04/ARCHITECTURE-SPINE.md` — AD-1, AD-7, AD-8, AD-14, AD-17, Consistency Conventions]
 - [Source: `_AI-Agile-Development/implementation-artifacts/1-1-sign-up-log-in-with-email-verification.md` — established token/config/error-mapper/trust-boundary/test conventions this story builds directly on, including its own code-review fixes (email normalization, `version` bump, internal-secret guard) that now apply automatically to this story's new routes]
 
+## Change Log
+
+- 2026-08-05: Checkpoint 1 (Tasks 1-5) — `birthdate`/`parentEmail`/`parentConsentedAt` on `users`, new `parentalConsentTokens` table, `calculateAge` (server + a deliberately-duplicated client mirror), `POST /users/age-declaration` (authenticated, adult/minor branches) and `POST /users/parental-consent` (unauthenticated — the parent has no account), `/me` extended with derived `isMinor`/`parentalConsentStatus`. Gateway proxies both routes. Frontend: `AgeDeclarationPage` (protected, conditional parent-email field), `WaitingForConsentPage`, `ParentalConsentPage` (StrictMode-safe dedup, mirrors `VerifyEmailPage`'s pattern), and a `resolvePostAuthDestination` resolver wired into login/signup/verify-email. Fixed a real state-timing bug found via test failures: `getMe()` was reading `session` from `useAuth`'s context immediately after `login`/`verifyEmail`/`googleAuth` resolved, racing `setSession`'s async update and reading a stale closure — those three functions now return the `Session` directly instead of `void`. 215 tests green across the monorepo (up from 157), `tsc --noEmit`/`eslint .` clean.
+- 2026-08-05: Task 6 — full regression suite run clean, migration applied to the live Postgres container, and both the adult and minor+parental-consent flows confirmed end-to-end against the real running stack: via `curl` (signup → verify → declare age → `/me` reflects the new fields → for the minor path, unauthenticated consent grant → token-reuse correctly rejected → `/me` flips to `granted`) and via a real browser (signup → verify-email → redirected to `/age-declaration` → parent-email field appears live once the entered birthdate computes to a minor → submit → redirected to `/waiting-for-consent` → parent's consent link renders `ParentalConsentPage`'s success state). Status → `review`.
+
 ## Dev Agent Record
 
 ### Agent Model Used
@@ -160,4 +165,43 @@ Claude Sonnet 5
 
 ### Completion Notes List
 
+- **Tasks 1-4 (backend):** `deriveAgeFields()` computes `isMinor`/`parentalConsentStatus` dynamically from `birthdate` on every `getMe()` call rather than persisting a snapshot — deliberate: a former minor who ages out shouldn't need stale consent tracking cleared. `recordParentalConsent` runs in a `db.transaction()` with a `.for("update")` row lock on the token row (same pattern as Story 1.1's `verifyEmail`) since it's the one write path with no session/auth to serialize against. Exported `emailField` (auth/routes.ts) and `normalizeEmail` (auth/service.ts) for reuse on `parentEmail` rather than redefining the trim+lowercase+email zod chain.
+- **Task 5 (frontend):** Avoided a real circular import between `modules/auth` and `modules/users` — `useAuth`/`resolvePostAuthDestination` are the only two cross-module symbols consumed, so `LoginPage`/`SignUpPage`/`VerifyEmailPage` import `resolvePostAuthDestination` directly from `../users/postAuthRedirect.js` (bypassing the `users/index.js` barrel) while `AgeDeclarationPage` imports `useAuth` from the `auth/index.js` barrel — a one-directional barrel dependency, not a cycle. `apps/web/src/modules/users/age.ts` duplicates the server's `calculateAge` byte-for-byte per the story's own instruction to keep the two in sync deliberately, so the conditional parent-email field never drifts from what the server will actually decide.
+- **Real bug found via test failures (not manual testing this time):** `getMe()` reading `session` from `useAuth`'s context immediately after `login`/`verifyEmail`/`googleAuth` resolved read a stale pre-update closure, since `setSession` is asynchronous. Fixed by having those three functions return the `Session` object directly and `getMe` accept an explicit `accessToken` parameter instead of reading from context state — required updating `GoogleSignInButton`'s prop signature and all three consuming pages.
+- **Task 6 (full regression + live verification):** 215 tests green across the monorepo (config 14, shared-types 19, service-kernel 12, apps/web 60, gateway 28, core 82), `tsc --noEmit`/`eslint .` clean in every workspace. Applied the new migration to the live Postgres container and re-verified both the adult and minor+parental-consent paths end-to-end via `curl` against the running gateway/core, then again in a real browser (signup → verify-email → `/age-declaration` with the parent-email field appearing live for a minor birthdate → `/waiting-for-consent` → the parent's `/parental-consent` link landing on `ParentalConsentPage`'s success state) — confirmed the token-reuse rejection (`INVALID_CONSENT_TOKEN`) and `/me`'s three-state transition (`not_required`/`pending`/`granted`) live, not just unit-tested. All smoke-test rows cleaned up from Postgres afterward.
+
 ### File List
+
+**Task 1 (schema + migration):**
+- `services/core/src/db/schema.ts` (updated — `users` gains `birthdate`/`parentEmail`/`parentConsentedAt`; new `parentalConsentTokens` table)
+- `services/core/drizzle/0001_messy_legion.sql` (new — generated migration)
+- `services/core/drizzle/meta/0001_snapshot.json` (new), `services/core/drizzle/meta/_journal.json` (updated)
+
+**Task 2 (age utility):**
+- `services/core/src/modules/users/age.ts` (new — `calculateAge`)
+- `services/core/tests/modules/users/age.test.ts` (new)
+
+**Task 3 (core users module):**
+- `services/core/src/modules/users/service.ts` (rewritten — `getMe` extended, `declareAge`, `recordParentalConsent`)
+- `services/core/src/modules/users/routes.ts` (rewritten — `POST /users/age-declaration`, `POST /users/parental-consent`)
+- `services/core/src/modules/auth/routes.ts` (updated — `emailField` exported), `services/core/src/modules/auth/service.ts` (updated — `normalizeEmail` exported), `services/core/src/modules/auth/index.ts` (updated — re-exports both)
+- `services/core/src/app.ts` (updated — wires `notificationPort` into `registerUsersRoutes`)
+- `packages/shared-types/src/auth.ts` (updated — `parentalConsentStatusSchema`, `meResponseSchema` extended, `ageDeclarationResponseSchema`, `parentalConsentResponseSchema`), `packages/shared-types/src/index.ts` (updated), `packages/shared-types/tests/auth.test.ts` (updated)
+- `services/core/tests/modules/users/service.test.ts`, `services/core/tests/modules/users/routes.test.ts` (rewritten)
+
+**Task 4 (gateway proxy):**
+- `services/gateway/src/authProxy.ts` (updated — `AUTH_PATHS` renamed `PUBLIC_PROXY_PATHS` + `/users/parental-consent` added, new authenticated `POST /users/age-declaration` route)
+- `services/gateway/tests/authProxy.test.ts` (updated)
+
+**Task 5 (apps/web):**
+- `apps/web/src/shared/apiClient.ts` (new — `ApiError`/`apiRequest` extracted from `auth/api.ts` for shared reuse)
+- `apps/web/src/modules/auth/api.ts` (updated — uses the shared client), `apps/web/src/modules/auth/useAuth.tsx` (rewritten — `login`/`verifyEmail`/`googleAuth` return `Session` directly, `getMe` takes an explicit `accessToken`; fixes the stale-context-read bug), `apps/web/src/modules/auth/index.ts` (updated — exports `Session`)
+- `apps/web/src/modules/auth/GoogleSignInButton.tsx`, `LoginPage.tsx`, `SignUpPage.tsx`, `VerifyEmailPage.tsx` (updated — consume the returned `Session` and resolve the post-auth destination via `/me`)
+- `apps/web/src/modules/users/api.ts` (new — `createUsersApi`), `age.ts` (new — client mirror of `calculateAge`), `postAuthRedirect.ts` (new — `resolvePostAuthDestination`), `AgeDeclarationPage.tsx`, `WaitingForConsentPage.tsx`, `ParentalConsentPage.tsx` (new), `index.ts` (new — barrel)
+- `apps/web/src/shared/tokens.css` (updated — `--color-primary-container`/`--color-on-primary-container`), `apps/web/src/shared/components.css` (updated — `.usavvy-banner-info`)
+- `apps/web/src/app/App.tsx` (updated — `/age-declaration`, `/waiting-for-consent`, `/parental-consent` routes)
+- `apps/web/tests/modules/auth/api.test.ts`, `LoginPage.test.tsx`, `VerifyEmailPage.test.tsx` (updated)
+- `apps/web/tests/modules/users/age.test.ts`, `api.test.ts`, `postAuthRedirect.test.ts`, `AgeDeclarationPage.test.tsx`, `WaitingForConsentPage.test.tsx`, `ParentalConsentPage.test.tsx` (new)
+
+**Task 6 (sprint tracking):**
+- `_AI-Agile-Development/implementation-artifacts/sprint-status.yaml` (updated — Story 1.2 → `review`)
