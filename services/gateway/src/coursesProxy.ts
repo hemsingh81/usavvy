@@ -29,6 +29,15 @@ function requireValidId(id: string): string {
  * route leaves authorization decisions to the service it forwards to.
  */
 export function registerCoursesProxyRoutes(app: FastifyInstance, deps: CoursesProxyDeps): void {
+  // Story 2.2: the first proxy route in this codebase that must forward query-string
+  // parameters, not just a bare path. request.url already includes the exact query
+  // string Fastify parsed from the incoming request — forwarded as-is rather than
+  // manually reconstructed from request.query (which could reintroduce an encoding bug).
+  app.get("/courses", { preHandler: requireAuth }, async (request, reply) => {
+    const result = await deps.forwardToCourses("GET", request.url, { headers: trustedHeaders(request) });
+    reply.code(result.status).send(result.body);
+  });
+
   app.post("/courses", { preHandler: requireAuth }, async (request, reply) => {
     const result = await deps.forwardToCourses("POST", "/courses", { body: request.body, headers: trustedHeaders(request) });
     reply.code(result.status).send(result.body);

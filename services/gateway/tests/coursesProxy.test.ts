@@ -218,3 +218,48 @@ describe("GET /courses/:id", () => {
     await app.close();
   });
 });
+
+describe("GET /courses (catalog search)", () => {
+  it("returns 401 with no token and never calls courses", async () => {
+    const forwardToCourses = vi.fn();
+    const app = buildApp(createTestAppDeps({ forwardToCourses }));
+
+    const response = await app.inject({ method: "GET", url: "/courses?subject=Math" });
+
+    expect(response.statusCode).toBe(401);
+    expect(forwardToCourses).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("forwards the exact query string the client sent, not just the bare path", async () => {
+    const forwardToCourses = vi.fn().mockResolvedValue({ status: 200, body: [] });
+    const app = buildApp(createTestAppDeps({ forwardToCourses }));
+    await app.ready();
+    const token = app.jwt.sign({ sub: "u1", role: "student", typ: "access" });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/courses?subject=Math&level=beginner&q=algebra",
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(forwardToCourses).toHaveBeenCalledWith("GET", "/courses?subject=Math&level=beginner&q=algebra", {
+      headers: { "x-user-id": "u1", "x-user-role": "student" },
+    });
+    await app.close();
+  });
+
+  it("forwards a bare /courses request with no query string too", async () => {
+    const forwardToCourses = vi.fn().mockResolvedValue({ status: 200, body: [] });
+    const app = buildApp(createTestAppDeps({ forwardToCourses }));
+    await app.ready();
+    const token = app.jwt.sign({ sub: "u1", role: "student", typ: "access" });
+
+    const response = await app.inject({ method: "GET", url: "/courses", headers: { authorization: `Bearer ${token}` } });
+
+    expect(response.statusCode).toBe(200);
+    expect(forwardToCourses).toHaveBeenCalledWith("GET", "/courses", { headers: { "x-user-id": "u1", "x-user-role": "student" } });
+    await app.close();
+  });
+});
