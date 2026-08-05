@@ -5,11 +5,13 @@ import { registerErrorHandler, type Logger } from "@usavvy/service-kernel";
 import type { BinaryProxyOptions, BinaryProxyResult, ProxyOptions, ProxyResult } from "./coreClient.js";
 import { registerJwtPlugin } from "./authPlugin.js";
 import { registerAuthProxyRoutes } from "./authProxy.js";
+import { registerCoursesProxyRoutes } from "./coursesProxy.js";
 
 export interface BuildAppDeps {
   fetchCoreHealth: () => Promise<DownstreamHealth>;
   forwardToCore: (method: string, path: string, options?: ProxyOptions) => Promise<ProxyResult>;
   forwardBinaryToCore: (method: string, path: string, options?: BinaryProxyOptions) => Promise<BinaryProxyResult>;
+  forwardToCourses: (method: string, path: string, options?: ProxyOptions) => Promise<ProxyResult>;
   corsOrigin: string;
   jwtSecret: string;
   logger: Logger;
@@ -36,6 +38,7 @@ export function buildApp(deps: BuildAppDeps) {
   });
 
   registerAuthProxyRoutes(app, { forwardToCore: deps.forwardToCore, forwardBinaryToCore: deps.forwardBinaryToCore });
+  registerCoursesProxyRoutes(app, { forwardToCourses: deps.forwardToCourses });
 
   return app;
 }

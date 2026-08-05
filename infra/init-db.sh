@@ -9,3 +9,8 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" <<-EOSQL
 EOSQL
 
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname usavvy_core -c 'CREATE EXTENSION IF NOT EXISTS vector;'
+
+# Story 2.1 (Epic 2 start): courses (Course/Module/Topic/Concept, AD-14).
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" <<-EOSQL
+  CREATE DATABASE usavvy_courses;
+EOSQL

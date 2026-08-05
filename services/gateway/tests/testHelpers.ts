@@ -9,6 +9,7 @@ export function createTestAppDeps(overrides: Partial<BuildAppDeps> = {}): BuildA
     forwardBinaryToCore: vi
       .fn()
       .mockResolvedValue({ status: 200, isBinary: true, body: Buffer.from(""), contentType: "application/pdf", contentDisposition: undefined }),
+    forwardToCourses: vi.fn().mockResolvedValue({ status: 200, body: {} }),
     corsOrigin: "http://localhost:5173",
     jwtSecret: "test-secret",
     logger: createLogger("test"),
