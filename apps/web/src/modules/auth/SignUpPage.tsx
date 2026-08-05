@@ -15,6 +15,9 @@ export function SignUpPage() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
+    // Review finding: the disabled button attribute alone leaves a brief window (before
+    // React commits the re-render) where a fast double-click/double-Enter fires twice.
+    if (submitting) return;
     setServerError(undefined);
     const formData = new FormData(event.currentTarget);
     const email = String(formData.get("email") ?? "");

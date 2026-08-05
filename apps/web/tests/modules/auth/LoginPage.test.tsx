@@ -47,6 +47,10 @@ describe("LoginPage", () => {
 
     expect(screen.getByRole("button", { name: "Logging in…" })).toBeDisabled();
 
+    // Review finding: resolving without awaiting the resulting state-update chain left a
+    // dangling promise whose effects landed after the test returned (act()
+    // warnings/flakiness depending on timing relative to cleanup()).
     resolveFetch({ ok: true, json: () => Promise.resolve({ accessToken: "a", refreshToken: "b", user: { id: "u1", email: "e", role: "student" } }) });
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Logging in…" })).not.toBeInTheDocument());
   });
 });

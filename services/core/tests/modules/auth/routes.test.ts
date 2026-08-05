@@ -5,12 +5,13 @@ import { buildApp } from "../../../src/app.js";
 import { createDb } from "../../../src/db/client.js";
 import { emailVerificationTokens, users } from "../../../src/db/schema.js";
 import { loadCoreConfig } from "../../../src/config.js";
-import { createTestAppDeps } from "../../testHelpers.js";
+import { createTestAppDeps, TEST_INTERNAL_SECRET } from "../../testHelpers.js";
 
 const config = loadCoreConfig(process.env);
 const sql = postgres(config.databaseUrl);
 const db = createDb(sql);
 const createdEmails: string[] = [];
+const internalHeaders = { "x-internal-secret": TEST_INTERNAL_SECRET };
 
 afterEach(async () => {
   while (createdEmails.length > 0) {
@@ -39,7 +40,12 @@ describe("POST /auth/signup", () => {
     const app = buildApp(createTestAppDeps({ db }));
     const email = uniqueEmail("signup");
 
-    const response = await app.inject({ method: "POST", url: "/auth/signup", payload: { email, password: "a-long-enough-password" } });
+    const response = await app.inject({
+      method: "POST",
+      url: "/auth/signup",
+      headers: internalHeaders,
+      payload: { email, password: "a-long-enough-password" },
+    });
 
     expect(response.statusCode).toBe(201);
     expect(response.json()).toMatchObject({ userId: expect.any(String) });
@@ -49,7 +55,27 @@ describe("POST /auth/signup", () => {
   it("returns 400 with a VALIDATION_ERROR envelope for a short password", async () => {
     const app = buildApp(createTestAppDeps({ db }));
 
-    const response = await app.inject({ method: "POST", url: "/auth/signup", payload: { email: "x@example.com", password: "short" } });
+    const response = await app.inject({
+      method: "POST",
+      url: "/auth/signup",
+      headers: internalHeaders,
+      payload: { email: "x@example.com", password: "short" },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ error: { code: "VALIDATION_ERROR" } });
+    await app.close();
+  });
+
+  it("returns 400 for a password over the maximum length", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/auth/signup",
+      headers: internalHeaders,
+      payload: { email: "x@example.com", password: "a".repeat(129) },
+    });
 
     expect(response.statusCode).toBe(400);
     expect(response.json()).toMatchObject({ error: { code: "VALIDATION_ERROR" } });
@@ -59,12 +85,33 @@ describe("POST /auth/signup", () => {
   it("returns 409 for a duplicate email", async () => {
     const app = buildApp(createTestAppDeps({ db }));
     const email = uniqueEmail("dup");
-    await app.inject({ method: "POST", url: "/auth/signup", payload: { email, password: "a-long-enough-password" } });
+    await app.inject({ method: "POST", url: "/auth/signup", headers: internalHeaders, payload: { email, password: "a-long-enough-password" } });
 
-    const response = await app.inject({ method: "POST", url: "/auth/signup", payload: { email, password: "another-password" } });
+    const response = await app.inject({
+      method: "POST",
+      url: "/auth/signup",
+      headers: internalHeaders,
+      payload: { email, password: "another-password" },
+    });
 
     expect(response.statusCode).toBe(409);
     expect(response.json()).toMatchObject({ error: { code: "EMAIL_ALREADY_REGISTERED" } });
+    await app.close();
+  });
+
+  it("registers case/whitespace-varying forms of the same email as a duplicate", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+    const email = uniqueEmail("case");
+    await app.inject({ method: "POST", url: "/auth/signup", headers: internalHeaders, payload: { email, password: "a-long-enough-password" } });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/auth/signup",
+      headers: internalHeaders,
+      payload: { email: ` ${email.toUpperCase()} `, password: "another-password" },
+    });
+
+    expect(response.statusCode).toBe(409);
     await app.close();
   });
 });
@@ -73,9 +120,14 @@ describe("POST /auth/login", () => {
   it("returns 403 EMAIL_NOT_VERIFIED for an unverified account", async () => {
     const app = buildApp(createTestAppDeps({ db }));
     const email = uniqueEmail("login-unverified");
-    await app.inject({ method: "POST", url: "/auth/signup", payload: { email, password: "a-long-enough-password" } });
+    await app.inject({ method: "POST", url: "/auth/signup", headers: internalHeaders, payload: { email, password: "a-long-enough-password" } });
 
-    const response = await app.inject({ method: "POST", url: "/auth/login", payload: { email, password: "a-long-enough-password" } });
+    const response = await app.inject({
+      method: "POST",
+      url: "/auth/login",
+      headers: internalHeaders,
+      payload: { email, password: "a-long-enough-password" },
+    });
 
     expect(response.statusCode).toBe(403);
     expect(response.json()).toMatchObject({ error: { code: "EMAIL_NOT_VERIFIED" } });
@@ -90,7 +142,7 @@ describe("POST /auth/verify-email and /auth/refresh", () => {
     const deps = createTestAppDeps({ db });
     const app = buildApp(deps);
     const email = uniqueEmail("verify-then-refresh");
-    await app.inject({ method: "POST", url: "/auth/signup", payload: { email, password: "a-long-enough-password" } });
+    await app.inject({ method: "POST", url: "/auth/signup", headers: internalHeaders, payload: { email, password: "a-long-enough-password" } });
 
     const sendEmailMock = deps.notificationPort.sendEmail as unknown as { mock: { calls: [{ body: string }][] } };
     const call = sendEmailMock.mock.calls[0]?.[0];
@@ -98,14 +150,29 @@ describe("POST /auth/verify-email and /auth/refresh", () => {
     expect(match?.[1]).toBeDefined();
     const rawToken = match![1];
 
-    const verifyResponse = await app.inject({ method: "POST", url: "/auth/verify-email", payload: { token: rawToken } });
+    const verifyResponse = await app.inject({ method: "POST", url: "/auth/verify-email", headers: internalHeaders, payload: { token: rawToken } });
     expect(verifyResponse.statusCode).toBe(200);
     const verifyBody = verifyResponse.json();
     expect(verifyBody).toMatchObject({ accessToken: expect.any(String), refreshToken: expect.any(String), user: { email } });
 
-    const refreshResponse = await app.inject({ method: "POST", url: "/auth/refresh", payload: { refreshToken: verifyBody.refreshToken } });
+    const refreshResponse = await app.inject({
+      method: "POST",
+      url: "/auth/refresh",
+      headers: internalHeaders,
+      payload: { refreshToken: verifyBody.refreshToken },
+    });
     expect(refreshResponse.statusCode).toBe(200);
     expect(refreshResponse.json()).toMatchObject({ accessToken: expect.any(String), refreshToken: expect.any(String) });
+
+    // Review finding: access and refresh tokens must be distinguishable — a freshly
+    // issued access token must not itself be usable as a refresh token.
+    const misuseResponse = await app.inject({
+      method: "POST",
+      url: "/auth/refresh",
+      headers: internalHeaders,
+      payload: { refreshToken: verifyBody.accessToken },
+    });
+    expect(misuseResponse.statusCode).toBe(401);
 
     await app.close();
   });
@@ -113,7 +180,12 @@ describe("POST /auth/verify-email and /auth/refresh", () => {
   it("returns 401 for an unknown refresh token", async () => {
     const app = buildApp(createTestAppDeps({ db }));
 
-    const response = await app.inject({ method: "POST", url: "/auth/refresh", payload: { refreshToken: "not-a-real-token" } });
+    const response = await app.inject({
+      method: "POST",
+      url: "/auth/refresh",
+      headers: internalHeaders,
+      payload: { refreshToken: "not-a-real-token" },
+    });
 
     expect(response.statusCode).toBe(401);
     expect(response.json()).toMatchObject({ error: { code: "INVALID_REFRESH_TOKEN" } });
@@ -125,7 +197,7 @@ describe("POST /auth/google", () => {
   it("returns 503 when GOOGLE_CLIENT_ID is not configured", async () => {
     const app = buildApp(createTestAppDeps({ db, googleClientId: undefined }));
 
-    const response = await app.inject({ method: "POST", url: "/auth/google", payload: { idToken: "whatever" } });
+    const response = await app.inject({ method: "POST", url: "/auth/google", headers: internalHeaders, payload: { idToken: "whatever" } });
 
     expect(response.statusCode).toBe(503);
     expect(response.json()).toMatchObject({ error: { code: "GOOGLE_OAUTH_NOT_CONFIGURED" } });

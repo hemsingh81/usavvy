@@ -4,6 +4,8 @@ import type { BuildAppDeps } from "../src/app.js";
 import type { Db } from "../src/db/client.js";
 import type { NotificationPort } from "../src/modules/notification/index.js";
 
+export const TEST_INTERNAL_SECRET = "test-internal-secret";
+
 export function createMockNotificationPort(): NotificationPort {
   return {
     sendEmail: vi.fn().mockResolvedValue({ success: true }),
@@ -15,7 +17,8 @@ export function createMockNotificationPort(): NotificationPort {
  * Builds a full BuildAppDeps for route-level tests that don't touch the database
  * (e.g. /health). Tests that exercise auth/users routes use the real Postgres
  * container instead (see tests/db/schema.test.ts's precedent) rather than mocking
- * Drizzle's query builder.
+ * Drizzle's query builder. Non-/health routes require the `x-internal-secret` header
+ * (TEST_INTERNAL_SECRET) — see app.ts's review-finding fix.
  */
 export function createTestAppDeps(overrides: Partial<BuildAppDeps> = {}): BuildAppDeps {
   return {
@@ -24,6 +27,7 @@ export function createTestAppDeps(overrides: Partial<BuildAppDeps> = {}): BuildA
     db: undefined as unknown as Db,
     notificationPort: createMockNotificationPort(),
     jwtSecret: "test-secret",
+    internalServiceSecret: TEST_INTERNAL_SECRET,
     googleClientId: undefined,
     logger: createLogger("test"),
     ...overrides,

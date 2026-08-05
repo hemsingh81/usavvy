@@ -4,7 +4,7 @@ baseline_commit: 23e85cd
 
 # Story 1.1: Sign Up & Log In with Email Verification
 
-Status: review
+Status: done
 
 *(Epic 1, FR-A-1. First real auth story — wires JWT + RBAC end to end per the architecture spine's own "walking-skeleton delivery direction," and is the first story to touch a real database table, so it also wires Drizzle for real.)*
 
@@ -73,6 +73,38 @@ so that I can securely access my account before starting to learn.
   - [x] `packages/config/tests/rbac.test.ts` — `can()` guard, including a role with no matching matrix entry denying by default (never fail-open)
   - [x] `services/gateway/tests/*.test.ts` — JWT verify preHandler (valid/expired/missing token), trusted-header forwarding, proxy routes
   - [x] `apps/web/tests/modules/auth/*.test.tsx` — sign-up/login forms (success + inline error states), verify-email landing page's three states
+
+### Review Findings (2026-08-05)
+
+Three-layer adversarial review (Blind Hunter, Edge Case Hunter, Acceptance Auditor) against the diff since `baseline_commit`. Claims verified by reading the actual code and checking real call sites (e.g. confirmed `core` binds `0.0.0.0`, confirmed Fastify's default 1MB body limit, confirmed `google-auth-library`'s `email_verified` claim and Drizzle's `.for("update")` row-lock API) rather than trusted as-is.
+
+- [x] [Review][Patch] Gateway↔core trust boundary is asserted in a comment ("core isn't publicly bound") but never enforced — `core` binds `0.0.0.0` with no CORS, no shared secret, no network isolation; anyone who can reach `core`'s port directly can forge `x-user-id`/`x-user-role` and impersonate any user/role with zero authentication [services/core/src/modules/users/routes.ts, services/gateway/src/authProxy.ts]
+- [x] [Review][Patch] Google OAuth never checks the `email_verified` claim — an unverified Google email would be trusted for account creation/linking, a known account-takeover vector [services/core/src/modules/auth/service.ts:~135]
+- [x] [Review][Patch] Login has a timing side-channel undermining its own "never leak which case" comment — `argon2.verify` is skipped entirely when the user/password hash is absent, making the response measurably faster [services/core/src/modules/auth/service.ts:~68]
+- [x] [Review][Patch] No email normalization — `User@Example.com` and `user@example.com` can register as distinct accounts; case-mismatched login fails confusingly [services/core/src/modules/auth/service.ts]
+- [x] [Review][Patch] No maximum password length on signup — unbounded input passed into `argon2.hash` [services/core/src/modules/auth/routes.ts]
+- [x] [Review][Patch] `useAuth.tsx`'s in-memory-storage comment overstates XSS protection — live XSS can read React state as easily as `localStorage` [apps/web/src/modules/auth/useAuth.tsx]
+- [x] [Review][Patch] `verifyEmail`'s token lookup has no row lock — two concurrent requests with the same still-unused token can both pass the not-yet-used check [services/core/src/modules/auth/service.ts:~85]
+- [x] [Review][Patch] `GoogleSignInButton` only tests the "not configured" branch — the configured/success/error callback path is untested [apps/web/tests/modules/auth/GoogleSignInButton.test.tsx]
+- [x] [Review][Patch] `LoginPage.test.tsx`'s in-flight test doesn't await the resulting state-update chain — dangling promise, a source of flakiness [apps/web/tests/modules/auth/LoginPage.test.tsx]
+- [x] [Review][Patch] `db/migrate.ts` uses raw `console.log` instead of the project's `createLogger` convention [services/core/src/db/migrate.ts]
+- [x] [Review][Patch] Access and refresh JWTs are structurally indistinguishable (no `typ` claim) — currently safe only because token hashes happen not to collide, not by design [services/core/src/modules/auth/service.ts, routes.ts]
+- [x] [Review][Patch] No catch-all route — an unmatched URL blank-screens instead of showing a distinguishable state (AD-17) [apps/web/src/app/App.tsx]
+- [x] [Review][Patch] No reentrancy guard against rapid double-submit on sign-up/login beyond the `disabled` attribute's render-timing window [apps/web/src/modules/auth/LoginPage.tsx, SignUpPage.tsx]
+- [x] [Review][Patch] `VerifyEmailPage` doesn't guard against the URL's token changing while a request for a previous token is still in flight [apps/web/src/modules/auth/VerifyEmailPage.tsx]
+- [x] [Review][Patch] Neither `core` nor `gateway` registers a `setNotFoundHandler` — unmatched routes bypass the `{error:{code,message}}` envelope every other failure uses [services/core/src/app.ts, services/gateway/src/app.ts]
+- [x] [Review][Patch] `argon2.verify` isn't wrapped in try/catch — a corrupt stored hash would surface as a 500 instead of the intended 401 [services/core/src/modules/auth/service.ts]
+- [x] [Review][Patch] `googleAuth`'s insert/update paths lack the unique-violation handling `signup()` already has, so a concurrent Google sign-in race throws an unhandled 500 instead of a mapped conflict [services/core/src/modules/auth/service.ts]
+- [x] [Review][Patch] The `version` optimistic-concurrency column is never incremented on any user-row write, contradicting the Dev Notes' own stated Consistency Convention [services/core/src/db/schema.ts, modules/auth/service.ts]
+- [x] [Review][Patch] Google ID-token verification has no explicit timeout, deviating from this story's own stated network-call discipline (applied everywhere else) [services/core/src/modules/auth/service.ts:~130]
+- [x] [Review][Patch] `googleAuth`'s new-user and existing-email-linking paths have zero test coverage — a Testing Requirements gap [services/core/tests/modules/auth/service.test.ts]
+
+- [x] [Review][Defer] No rate limiting on `/auth/*` — already an explicit, documented scope decision in this story's own Dev Notes (NFR-18 scopes rate-limiting to generation endpoints); real, but re-litigating a decision already made isn't this review's job
+- [x] [Review][Defer] No logout/revoke endpoint — the issued refresh token stays valid for its full 30-day lifetime regardless of client-side logout; real gap, but no AC/task in this story or Epic 1's story list calls for it — recommend a future story
+- [x] [Review][Defer] No resend-verification or forgot-password endpoint — a learner who loses the one 24h verification email is stuck; real gap, not in this story's ACs — recommend a future story
+- [x] [Review][Defer] `createAuthApi().refresh()` exists and is tested but isn't wired into `useAuth`'s exposed context (no auto-refresh-on-expiry) — no current UI path calls a protected endpoint after initial auth, so nothing exercises the gap yet; the right retry policy is a design choice for whenever a protected page exists
+- [x] [Review][Defer] No refresh-token-reuse detection (stolen-token signal) — a natural extension of the single-active-refresh-token MVP simplification already documented in Dev Notes, not a new gap
+- [x] [Review][Defer] No expired/used verification-token cleanup — needs `JobQueuePort` (AD-15), entirely unwired in this story; genuine follow-up once background jobs exist
 
 ## Dev Notes
 
@@ -197,6 +229,7 @@ apps/web/
 - 2026-08-05: Checkpoint 1 — Drizzle schema (`users`, `email_verification_tokens`), RBAC seed + `can()` guard, argon2/`@fastify/jwt` wiring, `core`'s auth module (signup/login/verify-email/refresh/google) and users module (`/me`), shared `AppError`/error-mapper. 96 tests green.
 - 2026-08-05: Checkpoint 2 — `gateway`'s JWT verify `preHandler` + trusted-header forwarding + `/auth/*` proxy. Fixed a real ESM bug (`PostgresError` named import) and a Story 1.0 gap (mock notification adapter not logging email body) found by actually restarting the dev servers. Full manual smoke test through the live gateway→core chain. 107 tests green.
 - 2026-08-05: Checkpoint 3 — `apps/web`'s auth UI: resolved `EXPERIENCE.md`'s Radix UI `[ASSUMPTION]`, sign-up/login/verify-email pages, Google Sign-In, `useAuth`. Manual browser testing (not just the test suite) surfaced a real React 19 StrictMode double-invoke bug in `VerifyEmailPage` that silently discarded a successful verification — fixed with the standard mounted-ref pattern and locked in with a StrictMode-wrapped regression test. 134 tests green, full flow (signup → verify → login → /me) confirmed working in a real browser. Status → `review`.
+- 2026-08-05: Adversarial code review (Blind Hunter + Edge Case Hunter + Acceptance Auditor) run against the diff since `baseline_commit`. 20 patch, 6 defer, 0 decision-needed, 0 dismissed as pure noise (3 findings judged false-positive/already-intended and excluded before this count). All 20 patches applied, most significantly: a shared internal secret closing the previously-unenforced gateway↔core trust boundary (core bound `0.0.0.0` and trusted `x-user-id`/`x-user-role` with zero authentication), a Google `email_verified` check (account-takeover vector), a `typ` claim distinguishing access from refresh JWTs, email normalization, a login timing side-channel fix, a `verifyEmail` row lock, the `version` optimistic-concurrency column now actually incrementing, and full mocked test coverage for `googleAuth`'s new-user/linking paths and `GoogleSignInButton`'s interactive path. Every fix reverified live against the running stack (curl + real browser), not just unit-tested — confirmed core now rejects forged headers with no internal secret, confirmed an access token is rejected at `/auth/refresh` and a refresh token is rejected at `/me`. 157 tests green (up from 134), `tsc --noEmit`/`eslint .` clean. Status → `done`.
 
 ## Dev Agent Record
 
@@ -210,6 +243,7 @@ Claude Sonnet 5
 
 - **Tasks 1–5 (backend: Drizzle, RBAC, JWT, auth, users):** `db.transaction()` used for `verifyEmail` (mark-used + mark-verified atomically). Auth business logic in `service.ts` stays Fastify-free (testable directly against the real Postgres container, same integration-test philosophy as Story 1.0's `db.test.ts`); JWT sign/verify lives in `routes.ts` since it needs the `app.jwt` decorator. Added a shared `AppError`/`registerErrorHandler` to `packages/service-kernel` and an `ErrorEnvelope`/`MeResponse`/`AuthSessionResponse` DTO set to `packages/shared-types` — genuinely cross-service contracts (every service's error shape; `/me` and session responses gateway proxies verbatim), not story-local additions. `noUncheckedIndexedAccess` (root tsconfig) required explicit undefined-checks on every `.returning()` call — caught at typecheck time, not runtime. 96 tests green across the touched workspaces (up from 54 after Story 1.0), `tsc --noEmit`/`eslint .` clean.
 - **Final AC verification (all three confirmed live in a real browser/via curl against the running stack, not just unit-tested):** AC #1 — signed up through the real form, confirmed the account is unverified and `POST /auth/login` returns `403 EMAIL_NOT_VERIFIED` until the link is followed. AC #2 — `/auth/google` correctly returns `503 GOOGLE_OAUTH_NOT_CONFIGURED` when unset (no Google Cloud OAuth client exists to test the real credential-verification path against; the button correctly doesn't render either, confirmed in-browser) — the account create/link/pre-verified logic itself is covered by `service.test.ts`'s tests, which exercise `google-auth-library`'s real `verifyIdToken` rejecting a fabricated token. AC #3 — followed the real verification link from the mock-logged email in a live browser, landed on "Email verified" with a working session, confirmed `/me` returns the verified user. 134 tests green across all touched workspaces, `tsc --noEmit`/`eslint .` clean, no regressions in Story 1.0's existing tests.
+- **Code review patch round:** the internal-secret fix required threading a new `preHandler` hook through `core`'s `app.ts` — discovered along the way that Fastify runs the full hook chain (including custom `preHandler`s) *before* falling back to `setNotFoundHandler`, so the secret check had to explicitly skip `request.is404`-flagged requests, verified via a minimal reproduction script before trusting the fix. Also discovered mid-patch that `services/gateway/tsconfig.json` (and `core`'s) only `include`s `src/`, not `tests/` — `tsc --noEmit` silently never typechecked any test file this whole story, which is how a wrong `createCoreClient()` call arity in `coreClient.test.ts` went unnoticed until actually running vitest; flagging as a pre-existing gap (not fixed here — a project-wide tsconfig decision, out of scope for this patch round) rather than silently working around it. `googleAuth`'s new mocked tests needed `vi.hoisted()` (a plain `const` referenced inside `vi.mock`'s factory doesn't survive Vitest's hoisting) and a real `class` (not an arrow-function `mockImplementation`) since production code calls `OAuth2Client` with `new`. 157 tests green, `tsc --noEmit`/`eslint .` clean, every fix reverified live (curl + real browser) after the automated suite passed, not just trusted from green tests alone.
 
 ### File List
 
@@ -286,3 +320,24 @@ Claude Sonnet 5
 **Bugs found only via manual browser testing (not caught by the test suite until reproduced and regression-tested):**
 - `services/core/src/modules/auth/service.ts`'s `PostgresError` import (see Task 6 entry above).
 - `VerifyEmailPage.tsx`: React 19 StrictMode's dev-only double-invoke of `useEffect` fired the one-time-use `verify-email` mutation twice — the first call succeeded server-side, but the second (correctly rejected as already-used) call clobbered the UI state with a false "Verification failed". A dedup ref alone wasn't sufficient, since the naive `cancelled`-flag cleanup from the *first* (StrictMode-simulated) invocation discarded the only real response. Fixed with the standard mounted-ref pattern (see code comment) and locked in with a StrictMode-wrapped regression test.
+
+**Code review patch round (2026-08-05):**
+- `packages/service-kernel/src/timeout.ts` (new — `withTimeout`, extracted from `db.ts`), `packages/service-kernel/src/db.ts` (updated — imports it instead of a local copy), `packages/service-kernel/src/index.ts` (updated), `packages/service-kernel/tests/timeout.test.ts` (new)
+- `services/core/src/config.ts`, `services/gateway/src/config.ts` (updated — `INTERNAL_SERVICE_SECRET`), both `tests/config.test.ts` (updated)
+- `services/core/src/app.ts` (updated — internal-secret `preHandler` guard exempting `/health` and 404s, `setNotFoundHandler`)
+- `services/core/src/main.ts` (updated — wires `internalServiceSecret`)
+- `services/core/tests/app.test.ts` (new — trust-boundary + 404 envelope tests)
+- `services/gateway/src/coreClient.ts` (updated — sends `x-internal-secret` on every forwarded request), `services/gateway/src/main.ts` (updated), `services/gateway/tests/coreClient.test.ts` (updated)
+- `services/gateway/src/authPlugin.ts` (updated — `typ: "access"` check), `services/gateway/tests/authPlugin.test.ts` (updated)
+- `services/core/src/modules/auth/service.ts` (updated — `email_verified` check, timing-normalized `login`, email normalization, `verifyEmail` row lock via `.for("update")`, `typ` claim on `refreshSession`, `googleAuth` unique-violation handling, `version` bump on every user-row write, `withTimeout` on `verifyIdToken`)
+- `services/core/src/modules/auth/routes.ts` (updated — `typ` claim on issued tokens, max password length, trimmed/lowercased email field)
+- `services/core/tests/modules/auth/service.test.ts` (updated — `typ` claim in refresh tests, new refresh-typ-mismatch test; `googleAuth` describe block removed, moved to its own file)
+- `services/core/tests/modules/auth/googleAuth.test.ts` (new — mocked `google-auth-library`, covers new-user/linking/unverified-email/invalid-token paths)
+- `services/core/tests/modules/auth/routes.test.ts`, `services/core/tests/modules/users/routes.test.ts` (updated — `x-internal-secret` header on every request, new duplicate-email-normalization and typ-mismatch/missing-secret tests)
+- `services/core/tests/testHelpers.ts` (updated — `internalServiceSecret`, exported `TEST_INTERNAL_SECRET`)
+- `services/core/src/db/migrate.ts` (updated — `createLogger` instead of `console.log`)
+- `apps/web/src/modules/auth/useAuth.tsx` (updated — corrected the in-memory-storage comment's XSS claim)
+- `apps/web/src/modules/auth/LoginPage.tsx`, `SignUpPage.tsx` (updated — double-submit reentrancy guard), `apps/web/tests/modules/auth/LoginPage.test.tsx` (updated — awaits the in-flight test's resulting state update)
+- `apps/web/src/modules/auth/VerifyEmailPage.tsx` (updated — guards against a stale in-flight request for a since-changed token)
+- `apps/web/src/app/App.tsx` (updated — catch-all `NotFoundPage` route), `apps/web/tests/app/App.test.tsx` (updated)
+- `apps/web/src/modules/auth/GoogleSignInButton.tsx` unchanged; `apps/web/tests/modules/auth/GoogleSignInButton.test.tsx` (rewritten — mocks `@react-oauth/google` to cover the configured/success/error paths)

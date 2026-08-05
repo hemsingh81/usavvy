@@ -22,7 +22,7 @@ describe("requireAuth / trustedHeaders", () => {
     const wrongApp = Fastify();
     registerJwtPlugin(wrongApp, "a-different-secret");
     await wrongApp.ready();
-    const token = wrongApp.jwt.sign({ sub: "u1", role: "student" });
+    const token = wrongApp.jwt.sign({ sub: "u1", role: "student", typ: "access" });
 
     const response = await app.inject({ method: "GET", url: "/protected", headers: { authorization: `Bearer ${token}` } });
 
@@ -34,7 +34,7 @@ describe("requireAuth / trustedHeaders", () => {
   it("returns 401 for an expired token", async () => {
     const app = buildTestApp("secret");
     await app.ready();
-    const token = app.jwt.sign({ sub: "u1", role: "student" }, { expiresIn: "-1s" });
+    const token = app.jwt.sign({ sub: "u1", role: "student", typ: "access" }, { expiresIn: "-1s" });
 
     const response = await app.inject({ method: "GET", url: "/protected", headers: { authorization: `Bearer ${token}` } });
 
@@ -42,15 +42,26 @@ describe("requireAuth / trustedHeaders", () => {
     await app.close();
   });
 
-  it("sets x-user-id/x-user-role from the verified payload on a valid token", async () => {
+  it("sets x-user-id/x-user-role from the verified payload on a valid access token", async () => {
     const app = buildTestApp("secret");
     await app.ready();
-    const token = app.jwt.sign({ sub: "u1", role: "student" });
+    const token = app.jwt.sign({ sub: "u1", role: "student", typ: "access" });
 
     const response = await app.inject({ method: "GET", url: "/protected", headers: { authorization: `Bearer ${token}` } });
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ "x-user-id": "u1", "x-user-role": "student" });
+    await app.close();
+  });
+
+  it("rejects a valid, unexpired refresh token presented as an access credential (review finding: tokens were structurally indistinguishable)", async () => {
+    const app = buildTestApp("secret");
+    await app.ready();
+    const refreshToken = app.jwt.sign({ sub: "u1", role: "student", typ: "refresh" });
+
+    const response = await app.inject({ method: "GET", url: "/protected", headers: { authorization: `Bearer ${refreshToken}` } });
+
+    expect(response.statusCode).toBe(401);
     await app.close();
   });
 });

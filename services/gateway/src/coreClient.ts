@@ -24,7 +24,7 @@ const PROXY_TIMEOUT_MS = 5000;
  * this interface, never on a raw `fetch` scattered per call site. A failed call (network
  * error or non-ok response) maps to "unreachable" rather than throwing (AD-17).
  */
-export function createCoreClient(coreServiceUrl: string, logger: Logger): CoreClient {
+export function createCoreClient(coreServiceUrl: string, logger: Logger, internalServiceSecret: string): CoreClient {
   return {
     async fetchHealth(): Promise<DownstreamHealth> {
       try {
@@ -45,7 +45,9 @@ export function createCoreClient(coreServiceUrl: string, logger: Logger): CoreCl
       try {
         const response = await fetch(`${coreServiceUrl}${path}`, {
           method,
-          headers: { "content-type": "application/json", ...options?.headers },
+          // Review finding: core's trust in x-user-id/x-user-role was previously
+          // unenforced — this header proves the request actually came from gateway.
+          headers: { "content-type": "application/json", "x-internal-secret": internalServiceSecret, ...options?.headers },
           signal: AbortSignal.timeout(PROXY_TIMEOUT_MS),
           ...(options?.body !== undefined ? { body: JSON.stringify(options.body) } : {}),
         });

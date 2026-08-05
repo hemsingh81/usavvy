@@ -5,7 +5,7 @@ import { buildApp } from "./app.js";
 
 const config = loadGatewayConfig(process.env);
 const logger = createLogger("gateway");
-const coreClient = createCoreClient(config.coreServiceUrl, logger);
+const coreClient = createCoreClient(config.coreServiceUrl, logger, config.internalServiceSecret);
 
 const app = buildApp({
   fetchCoreHealth: () => coreClient.fetchHealth(),

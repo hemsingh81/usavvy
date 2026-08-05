@@ -26,10 +26,14 @@ export interface AuthProviderProps {
 
 /**
  * MVP scope decision (documented, not a silent gap): the access AND refresh tokens
- * live in memory only, never `localStorage` (an XSS-exfiltrable long-lived token in
- * `localStorage` is a real, avoidable risk). A hard page refresh currently logs the
- * learner out — acceptable for now since nothing sensitive is reachable yet (the
- * Board doesn't exist). Revisit once real session persistence is needed.
+ * live in memory only, never `localStorage`. This doesn't defend against XSS itself —
+ * live XSS can read in-memory React state as easily as `localStorage` (review
+ * finding: an earlier version of this comment overstated the protection). What it
+ * does avoid is a long-lived credential sitting in a location that persists across
+ * reloads and is readable by any script on the page indefinitely, not just during an
+ * active XSS window. A hard page refresh currently logs the learner out — acceptable
+ * for now since nothing sensitive is reachable yet (the Board doesn't exist). Revisit
+ * once real session persistence is needed.
  */
 export function AuthProvider({ apiUrl, children }: AuthProviderProps) {
   const api = useMemo(() => createAuthApi(apiUrl), [apiUrl]);

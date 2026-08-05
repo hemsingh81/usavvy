@@ -9,12 +9,18 @@ describe("loadCoreConfig", () => {
     expect(cfg.databaseUrl).toBe("postgres://usavvy:usavvy@localhost:5433/usavvy_core");
     expect(cfg.storageEndpoint).toBe("http://localhost:8333");
     expect(cfg.jwtSecret).toBe("usavvy-dev-only-jwt-secret-do-not-use-in-production");
+    expect(cfg.internalServiceSecret).toBe("usavvy-dev-only-internal-secret-do-not-use-in-production");
     expect(cfg.googleClientId).toBeUndefined();
   });
 
-  it("reads JWT_SECRET and GOOGLE_CLIENT_ID from the given env object", () => {
-    const cfg = loadCoreConfig({ JWT_SECRET: "a-real-secret", GOOGLE_CLIENT_ID: "abc.apps.googleusercontent.com" });
+  it("reads JWT_SECRET, INTERNAL_SERVICE_SECRET, and GOOGLE_CLIENT_ID from the given env object", () => {
+    const cfg = loadCoreConfig({
+      JWT_SECRET: "a-real-secret",
+      INTERNAL_SERVICE_SECRET: "a-real-internal-secret",
+      GOOGLE_CLIENT_ID: "abc.apps.googleusercontent.com",
+    });
     expect(cfg.jwtSecret).toBe("a-real-secret");
+    expect(cfg.internalServiceSecret).toBe("a-real-internal-secret");
     expect(cfg.googleClientId).toBe("abc.apps.googleusercontent.com");
   });
 

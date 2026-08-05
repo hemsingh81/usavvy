@@ -5,6 +5,7 @@ import { AppError } from "@usavvy/service-kernel";
 export interface JwtPayload {
   sub: string;
   role: string;
+  typ: "access" | "refresh";
 }
 
 /** AD-7: gateway is the one place a client-presented JWT is verified. */
@@ -19,8 +20,14 @@ export function registerJwtPlugin(app: FastifyInstance, jwtSecret: string): void
  */
 export async function requireAuth(request: FastifyRequest): Promise<void> {
   try {
-    await request.jwtVerify();
+    await request.jwtVerify<JwtPayload>();
   } catch {
+    throw new AppError("UNAUTHENTICATED", "authentication required", 401);
+  }
+  // Review finding: access and refresh tokens were structurally indistinguishable —
+  // without this check, a stolen refresh token could be replayed directly as an
+  // access credential here instead of only at /auth/refresh.
+  if ((request.user as JwtPayload).typ !== "access") {
     throw new AppError("UNAUTHENTICATED", "authentication required", 401);
   }
 }

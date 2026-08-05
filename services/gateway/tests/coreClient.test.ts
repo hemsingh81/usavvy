@@ -14,7 +14,7 @@ describe("createCoreClient().fetchHealth", () => {
     } as unknown as Response);
     vi.stubGlobal("fetch", fetchMock);
 
-    const client = createCoreClient("http://localhost:3001", createLogger("test"));
+    const client = createCoreClient("http://localhost:3001", createLogger("test"), "the-internal-secret");
     const result = await client.fetchHealth();
 
     expect(result).toEqual({ status: "ok", db: true, storage: true });
@@ -25,7 +25,7 @@ describe("createCoreClient().fetchHealth", () => {
     const fetchMock = vi.fn().mockRejectedValue(new Error("ECONNREFUSED"));
     vi.stubGlobal("fetch", fetchMock);
 
-    const client = createCoreClient("http://localhost:3001", createLogger("test"));
+    const client = createCoreClient("http://localhost:3001", createLogger("test"), "the-internal-secret");
     const result = await client.fetchHealth();
 
     expect(result).toEqual({ status: "unreachable" });
@@ -35,7 +35,7 @@ describe("createCoreClient().fetchHealth", () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 500, json: () => Promise.resolve({}) } as unknown as Response);
     vi.stubGlobal("fetch", fetchMock);
 
-    const client = createCoreClient("http://localhost:3001", createLogger("test"));
+    const client = createCoreClient("http://localhost:3001", createLogger("test"), "the-internal-secret");
     const result = await client.fetchHealth();
 
     expect(result).toEqual({ status: "unreachable" });
@@ -54,7 +54,7 @@ describe("createCoreClient().forward", () => {
     } as unknown as Response);
     vi.stubGlobal("fetch", fetchMock);
 
-    const client = createCoreClient("http://localhost:3001", createLogger("test"));
+    const client = createCoreClient("http://localhost:3001", createLogger("test"), "the-internal-secret");
     const result = await client.forward("POST", "/auth/signup", { body: { email: "a@example.com", password: "x" } });
 
     expect(result).toEqual({ status: 201, body: { userId: "abc" } });
@@ -72,7 +72,7 @@ describe("createCoreClient().forward", () => {
     const fetchMock = vi.fn().mockResolvedValue({ status: 200, json: () => Promise.resolve({ id: "u1" }) } as unknown as Response);
     vi.stubGlobal("fetch", fetchMock);
 
-    const client = createCoreClient("http://localhost:3001", createLogger("test"));
+    const client = createCoreClient("http://localhost:3001", createLogger("test"), "the-internal-secret");
     await client.forward("GET", "/me", { headers: { "x-user-id": "u1", "x-user-role": "student" } });
 
     const [, callOptions] = fetchMock.mock.calls[0] as [string, RequestInit];
@@ -84,9 +84,20 @@ describe("createCoreClient().forward", () => {
     const fetchMock = vi.fn().mockRejectedValue(new Error("ECONNREFUSED"));
     vi.stubGlobal("fetch", fetchMock);
 
-    const client = createCoreClient("http://localhost:3001", createLogger("test"));
+    const client = createCoreClient("http://localhost:3001", createLogger("test"), "the-internal-secret");
     const result = await client.forward("POST", "/auth/login", { body: {} });
 
     expect(result).toEqual({ status: 503, body: { error: { code: "CORE_UNREACHABLE", message: "unable to reach core service" } } });
+  });
+
+  it("sends x-internal-secret on every forwarded request (review finding: core's trust boundary was previously unenforced)", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ status: 200, json: () => Promise.resolve({}) } as unknown as Response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createCoreClient("http://localhost:3001", createLogger("test"), "the-internal-secret");
+    await client.forward("POST", "/auth/login", { body: {} });
+
+    const [, callOptions] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(callOptions.headers).toEqual(expect.objectContaining({ "x-internal-secret": "the-internal-secret" }));
   });
 });

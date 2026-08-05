@@ -47,4 +47,12 @@ describe("App", () => {
 
     expect(screen.getByRole("heading", { name: "Log in" })).toBeInTheDocument();
   });
+
+  it("renders a distinguishable not-found state instead of blank-screening on an unknown route (review finding)", () => {
+    window.history.pushState({}, "", "/this-route-does-not-exist");
+
+    render(<App />);
+
+    expect(screen.getByRole("heading", { name: "Page not found" })).toBeInTheDocument();
+  });
 });

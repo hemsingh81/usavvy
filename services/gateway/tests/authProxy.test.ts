@@ -42,7 +42,7 @@ describe("GET /me", () => {
     const forwardToCore = vi.fn().mockResolvedValue({ status: 200, body: { id: "u1", email: "a@example.com", emailVerified: true, role: "student" } });
     const app = buildApp(createTestAppDeps({ forwardToCore }));
     await app.ready();
-    const token = app.jwt.sign({ sub: "u1", role: "student" });
+    const token = app.jwt.sign({ sub: "u1", role: "student", typ: "access" });
 
     const response = await app.inject({ method: "GET", url: "/me", headers: { authorization: `Bearer ${token}` } });
 

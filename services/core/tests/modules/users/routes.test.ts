@@ -5,12 +5,13 @@ import { buildApp } from "../../../src/app.js";
 import { createDb } from "../../../src/db/client.js";
 import { users } from "../../../src/db/schema.js";
 import { loadCoreConfig } from "../../../src/config.js";
-import { createTestAppDeps } from "../../testHelpers.js";
+import { createTestAppDeps, TEST_INTERNAL_SECRET } from "../../testHelpers.js";
 
 const config = loadCoreConfig(process.env);
 const sql = postgres(config.databaseUrl);
 const db = createDb(sql);
 const createdEmails: string[] = [];
+const internalHeaders = { "x-internal-secret": TEST_INTERNAL_SECRET };
 
 afterEach(async () => {
   while (createdEmails.length > 0) {
@@ -30,17 +31,21 @@ describe("GET /me", () => {
     createdEmails.push(email);
     const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
 
-    const response = await app.inject({ method: "GET", url: "/me", headers: { "x-user-id": user!.id, "x-user-role": "student" } });
+    const response = await app.inject({
+      method: "GET",
+      url: "/me",
+      headers: { ...internalHeaders, "x-user-id": user!.id, "x-user-role": "student" },
+    });
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ id: user!.id, email, emailVerified: true, role: "student" });
     await app.close();
   });
 
-  it("returns 401 when the trusted headers are missing", async () => {
+  it("returns 401 when the trusted headers are missing (even with a valid internal secret)", async () => {
     const app = buildApp(createTestAppDeps({ db }));
 
-    const response = await app.inject({ method: "GET", url: "/me" });
+    const response = await app.inject({ method: "GET", url: "/me", headers: internalHeaders });
 
     expect(response.statusCode).toBe(401);
     expect(response.json()).toMatchObject({ error: { code: "UNAUTHENTICATED" } });
@@ -53,8 +58,20 @@ describe("GET /me", () => {
     const response = await app.inject({
       method: "GET",
       url: "/me",
-      headers: { "x-user-id": "00000000-0000-0000-0000-000000000000", "x-user-role": "not-a-real-role" },
+      headers: { ...internalHeaders, "x-user-id": "00000000-0000-0000-0000-000000000000", "x-user-role": "not-a-real-role" },
     });
+
+    expect(response.statusCode).toBe(401);
+    await app.close();
+  });
+
+  it("returns 401 when the internal secret is missing, even with otherwise-valid trusted headers (review finding: unenforced trust boundary)", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+    const email = `users-routes-nosecret-${Date.now()}@example.com`;
+    createdEmails.push(email);
+    const [user] = await db.insert(users).values({ email, emailVerifiedAt: new Date() }).returning();
+
+    const response = await app.inject({ method: "GET", url: "/me", headers: { "x-user-id": user!.id, "x-user-role": "student" } });
 
     expect(response.statusCode).toBe(401);
     await app.close();

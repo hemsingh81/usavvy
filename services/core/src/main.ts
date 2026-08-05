@@ -23,6 +23,7 @@ const app = buildApp({
   db,
   notificationPort,
   jwtSecret: config.jwtSecret,
+  internalServiceSecret: config.internalServiceSecret,
   googleClientId: config.googleClientId,
   logger,
 });

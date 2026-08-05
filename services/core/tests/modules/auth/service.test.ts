@@ -6,7 +6,7 @@ import { createDb, type Db } from "../../../src/db/client.js";
 import { emailVerificationTokens, users } from "../../../src/db/schema.js";
 import { loadCoreConfig } from "../../../src/config.js";
 import { createMockNotificationPort } from "../../testHelpers.js";
-import { googleAuth, login, persistRefreshTokenHash, refreshSession, signup, verifyEmail } from "../../../src/modules/auth/service.js";
+import { login, persistRefreshTokenHash, refreshSession, signup, verifyEmail } from "../../../src/modules/auth/service.js";
 import { hashToken } from "../../../src/modules/auth/tokens.js";
 
 // Integration tests against the real docker-compose Postgres (AD-11), same rationale
@@ -174,7 +174,7 @@ describe("refreshSession", () => {
     createdEmails.push(email);
     await persistRefreshTokenHash(db, user!.id, hashToken("a-refresh-token"));
 
-    const verify = () => ({ sub: user!.id });
+    const verify = () => ({ sub: user!.id, typ: "refresh" as const });
     const summary = await refreshSession(db, verify, { refreshToken: "a-refresh-token" });
     expect(summary.id).toBe(user!.id);
   });
@@ -189,13 +189,26 @@ describe("refreshSession", () => {
     });
   });
 
+  it("rejects a token that verifies but has typ 'access' instead of 'refresh' (review finding: tokens were structurally indistinguishable)", async () => {
+    const email = uniqueEmail("refresh-wrong-typ");
+    const [user] = await db.insert(users).values({ email, passwordHash: await argon2.hash("x"), emailVerifiedAt: new Date() }).returning();
+    createdEmails.push(email);
+    await persistRefreshTokenHash(db, user!.id, hashToken("an-access-token-string"));
+
+    const verify = () => ({ sub: user!.id, typ: "access" as const });
+    await expect(refreshSession(db, verify, { refreshToken: "an-access-token-string" })).rejects.toMatchObject({
+      code: "INVALID_REFRESH_TOKEN",
+      statusCode: 401,
+    });
+  });
+
   it("rejects a token that verifies but no longer matches the stored hash (already rotated)", async () => {
     const email = uniqueEmail("refresh-rotated");
     const [user] = await db.insert(users).values({ email, passwordHash: await argon2.hash("x"), emailVerifiedAt: new Date() }).returning();
     createdEmails.push(email);
     await persistRefreshTokenHash(db, user!.id, hashToken("current-token"));
 
-    const verify = () => ({ sub: user!.id });
+    const verify = () => ({ sub: user!.id, typ: "refresh" as const });
     await expect(refreshSession(db, verify, { refreshToken: "a-stale-rotated-token" })).rejects.toMatchObject({
       code: "INVALID_REFRESH_TOKEN",
       statusCode: 401,
@@ -203,11 +216,6 @@ describe("refreshSession", () => {
   });
 });
 
-describe("googleAuth", () => {
-  it("rejects an unparseable/invalid ID token", async () => {
-    await expect(googleAuth(db, "some-client-id.apps.googleusercontent.com", { idToken: "not-a-real-jwt" })).rejects.toMatchObject({
-      code: "INVALID_GOOGLE_TOKEN",
-      statusCode: 401,
-    });
-  });
-});
+// googleAuth's tests live in googleAuth.test.ts — they need google-auth-library mocked
+// to exercise the new-user/linking success paths (review finding), which doesn't mix
+// well with this file's real-network style for the other functions.

@@ -17,6 +17,12 @@ const coreEnvSchema = baseServiceEnvSchema.extend({
   // deployment; must be overridden alongside gateway's own JWT_SECRET (same value,
   // symmetric secret, AD-7).
   JWT_SECRET: z.string().min(1).default("usavvy-dev-only-jwt-secret-do-not-use-in-production"),
+  // Review finding: core bound 0.0.0.0 and trusted x-user-id/x-user-role headers
+  // unconditionally with no compensating control — anything on the host's network
+  // that could reach core's port could forge them and impersonate any user/role.
+  // This must match gateway's own INTERNAL_SERVICE_SECRET exactly (same dev default,
+  // override both together).
+  INTERNAL_SERVICE_SECRET: z.string().min(1).default("usavvy-dev-only-internal-secret-do-not-use-in-production"),
   // No dev default, unlike everything else above: Google OAuth needs a real registered
   // client id even in dev — a `mock` adapter can't stand in for it. Optional so the
   // rest of the service (and the email+password path) works with zero external setup.
@@ -29,6 +35,7 @@ export interface CoreConfig {
   storageEndpoint: string;
   notificationAdapter: z.infer<typeof notificationAdapterSchema>;
   jwtSecret: string;
+  internalServiceSecret: string;
   googleClientId: string | undefined;
 }
 
@@ -40,6 +47,7 @@ export function loadCoreConfig(env: Record<string, string | undefined>): CoreCon
     storageEndpoint: parsed.STORAGE_ENDPOINT,
     notificationAdapter: parsed.NOTIFICATION_ADAPTER,
     jwtSecret: parsed.JWT_SECRET,
+    internalServiceSecret: parsed.INTERNAL_SERVICE_SECRET,
     googleClientId: parsed.GOOGLE_CLIENT_ID,
   };
 }

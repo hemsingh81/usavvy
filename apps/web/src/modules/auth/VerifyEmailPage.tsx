@@ -45,12 +45,17 @@ export function VerifyEmailPage() {
     }
     requestedTokenRef.current = token;
 
+    // Review finding: if the URL's token changes while a request for a previous token
+    // is still in flight, only apply a result while it's still the current token —
+    // `requestedTokenRef` may have moved on to a newer one by the time this settles.
+    const isStillCurrent = () => isMountedRef.current && requestedTokenRef.current === token;
+
     verifyEmail(token)
       .then(() => {
-        if (isMountedRef.current) setView({ kind: "success" });
+        if (isStillCurrent()) setView({ kind: "success" });
       })
       .catch((error: unknown) => {
-        if (!isMountedRef.current) return;
+        if (!isStillCurrent()) return;
         setView({ kind: "error", message: error instanceof AuthApiError ? error.message : "verification failed" });
       });
   }, [searchParams, verifyEmail]);
