@@ -41,9 +41,9 @@ so that I can build a custom course without needing a file to upload.
   - [x] New route `POST /uploads/url-import` (JSON body `{ customCourseId?, url, copyrightAttested }`; auth-only)
   - [x] Tests (mock `fetch` — never call a real external URL in a test): valid HTML page imported and stored; a network-error/timeout fetch rejected with "unreachable"; a 401/403 response rejected with "access denied"; a 404/500 response rejected with "content could not be retrieved"; a page whose extracted text is below the minimum rejected with the same "not enough content" message pasted-text uses; a rejected import leaves zero rows and never calls `StoragePort`/`JobQueuePort` (spy-verified); counts toward the same `customCourseId`'s 10-file limit
 
-- [ ] **Task 4: `services/gateway` — new proxy routes** (AC: #1, #2, #3, #4)
-  - [ ] `POST /uploads/paste-text`, `POST /uploads/url-import` — both plain JSON forwards via the EXISTING `forward()` method on `ingestionClient.ts` (no new multipart handling needed, unlike Story 2.7's file-upload route — these are ordinary JSON bodies), `requireAuth`, matching every other JSON proxy route's exact shape in this codebase
-  - [ ] Tests: 401 without auth for both new routes; both forward body + trusted headers correctly
+- [x] **Task 4: `services/gateway` — new proxy routes** (AC: #1, #2, #3, #4)
+  - [x] `POST /uploads/paste-text`, `POST /uploads/url-import` — both plain JSON forwards via the EXISTING `forward()` method on `ingestionClient.ts` (no new multipart handling needed, unlike Story 2.7's file-upload route — these are ordinary JSON bodies), `requireAuth`, matching every other JSON proxy route's exact shape in this codebase
+  - [x] Tests: 401 without auth for both new routes; both forward body + trusted headers correctly
 
 - [ ] **Task 5: `apps/web` — paste-text and URL-import UI** (AC: #1, #2, #3, #4)
   - [ ] Extend `packages/shared-types/src/uploads.ts`: `pasteTextInputSchema = z.object({ customCourseId: z.uuid().optional(), text: z.string(), copyrightAttested: z.boolean() })`, `urlImportInputSchema = z.object({ customCourseId: z.uuid().optional(), url: z.url(), copyrightAttested: z.boolean() })`

@@ -30,4 +30,16 @@ export function registerIngestionProxyRoutes(app: FastifyInstance, deps: Ingesti
     const result = await deps.forwardToIngestion("GET", request.url, { headers: trustedHeaders(request) });
     reply.code(result.status).send(result.body);
   });
+
+  // Story 2.8 (FR-C-8): plain JSON forwards, unlike /uploads above — no multipart body
+  // to relay, matching every other JSON proxy route's exact shape in this codebase.
+  app.post("/uploads/paste-text", { preHandler: requireAuth }, async (request, reply) => {
+    const result = await deps.forwardToIngestion("POST", "/uploads/paste-text", { body: request.body, headers: trustedHeaders(request) });
+    reply.code(result.status).send(result.body);
+  });
+
+  app.post("/uploads/url-import", { preHandler: requireAuth }, async (request, reply) => {
+    const result = await deps.forwardToIngestion("POST", "/uploads/url-import", { body: request.body, headers: trustedHeaders(request) });
+    reply.code(result.status).send(result.body);
+  });
 }

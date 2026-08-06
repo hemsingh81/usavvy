@@ -100,3 +100,75 @@ describe("GET /uploads", () => {
     await app.close();
   });
 });
+
+describe("POST /uploads/paste-text", () => {
+  it("returns 401 with no token and never calls ingestion", async () => {
+    const forwardToIngestion = vi.fn();
+    const app = buildApp(createTestAppDeps({ forwardToIngestion }));
+
+    const response = await app.inject({ method: "POST", url: "/uploads/paste-text", payload: { text: "hello", copyrightAttested: true } });
+
+    expect(response.statusCode).toBe(401);
+    expect(forwardToIngestion).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("forwards the body and trusted headers derived from a valid token", async () => {
+    const forwardToIngestion = vi.fn().mockResolvedValue({ status: 201, body: { id: "d1", status: "queued" } });
+    const app = buildApp(createTestAppDeps({ forwardToIngestion }));
+    await app.ready();
+    const token = app.jwt.sign({ sub: "u1", role: "student", typ: "access" });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/uploads/paste-text",
+      headers: { authorization: `Bearer ${token}` },
+      payload: { text: "hello world", copyrightAttested: true },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(forwardToIngestion).toHaveBeenCalledWith("POST", "/uploads/paste-text", {
+      body: { text: "hello world", copyrightAttested: true },
+      headers: { "x-user-id": "u1", "x-user-role": "student" },
+    });
+    await app.close();
+  });
+});
+
+describe("POST /uploads/url-import", () => {
+  it("returns 401 with no token and never calls ingestion", async () => {
+    const forwardToIngestion = vi.fn();
+    const app = buildApp(createTestAppDeps({ forwardToIngestion }));
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/uploads/url-import",
+      payload: { url: "https://example.com", copyrightAttested: true },
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(forwardToIngestion).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("forwards the body and trusted headers derived from a valid token", async () => {
+    const forwardToIngestion = vi.fn().mockResolvedValue({ status: 201, body: { id: "d1", status: "queued" } });
+    const app = buildApp(createTestAppDeps({ forwardToIngestion }));
+    await app.ready();
+    const token = app.jwt.sign({ sub: "u1", role: "student", typ: "access" });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/uploads/url-import",
+      headers: { authorization: `Bearer ${token}` },
+      payload: { url: "https://example.com/article", copyrightAttested: true },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(forwardToIngestion).toHaveBeenCalledWith("POST", "/uploads/url-import", {
+      body: { url: "https://example.com/article", copyrightAttested: true },
+      headers: { "x-user-id": "u1", "x-user-role": "student" },
+    });
+    await app.close();
+  });
+});
