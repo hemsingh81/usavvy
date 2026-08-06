@@ -13,8 +13,19 @@ export async function createPgBossJobQueueAdapter(databaseUrl: string, logger: L
   boss.on("error", (error: Error) => logger.error("job queue error", { reason: error.message }));
   await boss.start();
 
+  // pg-boss v12 requires a queue to exist before send() — unlike older versions, it no
+  // longer creates one implicitly. createQueue is idempotent; tracked per-name so a
+  // hot path doesn't re-issue the (safe but pointless) call on every single enqueue.
+  const ensuredQueues = new Set<string>();
+  async function ensureQueue(jobName: string): Promise<void> {
+    if (ensuredQueues.has(jobName)) return;
+    await boss.createQueue(jobName);
+    ensuredQueues.add(jobName);
+  }
+
   return {
     async enqueue(jobName, payload) {
+      await ensureQueue(jobName);
       const jobId = await boss.send(jobName, payload);
       if (!jobId) {
         throw new Error(`job queue failed to enqueue job "${jobName}"`);

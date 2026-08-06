@@ -70,7 +70,7 @@ development_status:
   2-4-course-customisation-before-start: done
   2-5-optional-placement-check: done
   2-6-version-catalog-courses: done
-  2-7-upload-learner-content-with-copyright-attestation: ready-for-dev
+  2-7-upload-learner-content-with-copyright-attestation: review
   2-8-paste-text-and-public-url-import: backlog
   2-9-ingestion-pipeline-parse-ocr-fallback-structure-detection-and-chunking: backlog
   2-10-content-safety-scan-during-ingestion: backlog

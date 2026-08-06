@@ -4,7 +4,7 @@ baseline_commit: 1061386e3f42ab5e6a1786649b64d4115f5a1e4c
 
 # Story 2.7: Upload learner content with copyright attestation
 
-Status: ready-for-dev
+Status: review
 
 *(Epic 2, FR-C-7/FR-C-12. This is the first story to need a real `services/ingestion` (AD-1 scaffold-on-demand, AD-14 owns `UploadedDocument`/`ContentChunk`), the first to need a REAL `StoragePort` implementation (AD-6 — until now only `pingStorage`'s health-check ping existed), and the first to need a REAL `JobQueuePort` implementation (AD-15 — until now only an empty placeholder). It does NOT build the ingestion pipeline itself (parsing/OCR/chunking/embedding/outline — Stories 2.9-2.12) or the outline review screen (Story 2.13) — only accepting, validating, storing, and queueing an upload, per its own four ACs.)*
 
@@ -58,16 +58,16 @@ so that I can turn my own material into a custom course that stays private to me
   - [x] New `src/ingestionProxy.ts`: `POST /uploads` (`requireAuth`), `GET /uploads` (`requireAuth`, forwards the `customCourseId` query param)
   - [x] `services/gateway/tests/ingestionProxy.test.ts`: 401 without auth; a multipart POST forwards the raw body/content-type/boundary and trusted headers correctly (mock the client); GET forwards the query param
 
-- [ ] **Task 5: `apps/web` — upload UI** (AC: #1, #2, #3, #4)
-  - [ ] New `packages/shared-types/src/uploads.ts`: `uploadedDocumentResponseSchema` (id, customCourseId, fileName, fileType, fileSizeBytes, status, createdAt), barrel-exported
-  - [ ] New `apps/web/src/modules/uploads/api.ts`: `uploadFile(accessToken, customCourseId: string | undefined, file: File, copyrightAttested: boolean): Promise<UploadedDocumentResponse>` (builds a `FormData`, does NOT use the shared `apiRequest` JSON helper — a new small multipart-aware fetch wrapper, since `FormData` must not be JSON-stringified or have its `content-type` set manually, the browser sets the boundary itself); `listUploads(accessToken, customCourseId)`
-  - [ ] New `apps/web/src/modules/uploads/UploadPage.tsx`: a copyright-attestation checkbox (unchecked by default — AC #4), a `<input type="file" multiple accept=".pdf,.docx,.pptx,.txt,.md">`, and an "Upload" action that loops over every selected file, calling `uploadFile` once per file **sequentially** (not `Promise.all` — needed so the running per-batch file count used for the 10-file check is accurate file-to-file, and so the first-file-mints-`customCourseId` response is available before the second file's request is sent), showing each file's individual accepted/rejected result (AC #2 — one bad file doesn't block the others) and a running "X of 10 files" count; disables further selection once 10 files are reached (AC #3, client-side pre-check as a UX nicety — the server is still the authority and re-checked on every request)
-  - [ ] Tests: `UploadPage.test.tsx` — attestation checkbox blocks submission with no fetch call when unchecked; a mixed batch (one oversized, one valid) shows both a per-file error and a per-file success; hitting 10 accepted files disables adding more
+- [x] **Task 5: `apps/web` — upload UI** (AC: #1, #2, #3, #4)
+  - [x] New `packages/shared-types/src/uploads.ts`: `uploadedDocumentResponseSchema` (id, customCourseId, fileName, fileType, fileSizeBytes, status, createdAt), barrel-exported
+  - [x] New `apps/web/src/modules/uploads/api.ts`: `uploadFile(accessToken, customCourseId: string | undefined, file: File, copyrightAttested: boolean): Promise<UploadedDocumentResponse>` (builds a `FormData`, does NOT use the shared `apiRequest` JSON helper — a new small multipart-aware fetch wrapper, since `FormData` must not be JSON-stringified or have its `content-type` set manually, the browser sets the boundary itself); `listUploads(accessToken, customCourseId)`
+  - [x] New `apps/web/src/modules/uploads/UploadPage.tsx`: a copyright-attestation checkbox (unchecked by default — AC #4), a `<input type="file" multiple accept=".pdf,.docx,.pptx,.txt,.md">`, and an "Upload" action that loops over every selected file, calling `uploadFile` once per file **sequentially** (not `Promise.all` — needed so the running per-batch file count used for the 10-file check is accurate file-to-file, and so the first-file-mints-`customCourseId` response is available before the second file's request is sent), showing each file's individual accepted/rejected result (AC #2 — one bad file doesn't block the others) and a running "X of 10 files" count; disables further selection once 10 files are reached (AC #3, client-side pre-check as a UX nicety — the server is still the authority and re-checked on every request)
+  - [x] Tests: `UploadPage.test.tsx` — attestation checkbox blocks submission with no fetch call when unchecked; a mixed batch (one oversized, one valid) shows both a per-file error and a per-file success; hitting 10 accepted files disables adding more
 
-- [ ] **Task 6: Root workspace wiring**
-  - [ ] `package.json`'s root `dev` script: add `ingestion` to the `concurrently` command (`-n gateway,core,courses,ingestion,web ... "pnpm --filter @usavvy/ingestion dev"`)
+- [x] **Task 6: Root workspace wiring**
+  - [x] `package.json`'s root `dev` script: add `ingestion` to the `concurrently` command (`-n gateway,core,courses,ingestion,web ... "pnpm --filter @usavvy/ingestion dev"`)
 
-- [ ] **Task 7: Tests mirroring `src/` 1:1** (AD-8) — consolidates the per-task test lists above; no additional test files beyond what Tasks 1-5 already name
+- [x] **Task 7: Tests mirroring `src/` 1:1** (AD-8) — consolidates the per-task test lists above; no additional test files beyond what Tasks 1-5 already name
 
 ## Dev Notes
 
@@ -129,12 +129,50 @@ Counting `/Type /Page` object markers in the raw bytes is a well-known, cheap ap
 
 ### Agent Model Used
 
+Claude Sonnet 5
+
 ### Debug Log References
+
+- Live-verification-only bug (not caught by unit/integration tests, since those use the mock `JobQueuePort`): pg-boss v12 requires a queue to exist (`boss.createQueue(name)`) before `send()` — unlike older pg-boss versions, it no longer creates one implicitly. `enqueue()` failed with "Queue ingest-document does not exist" on the very first real upload against a live pg-boss instance. Fixed by having the adapter ensure the queue exists (idempotent, tracked per-name so it's not re-issued on every call) before every `send()`. Proven via the standard fail-then-pass cycle: reverted the `ensureQueue` call, confirmed the new regression test failed with exactly this predicted gap, restored it, confirmed all 3 `pgboss.test.ts` tests pass.
+- SeaweedFS's S3 gateway returned 403 on the very first `putObject` because the `uploads` bucket didn't exist yet — S3-compatible stores require a bucket to be created before objects can be written to it. Created it manually (`PUT http://localhost:8333/uploads/`) for this session's live verification; documented as a one-time local dev-environment setup step (not a code bug — no automated bucket-creation step exists anywhere in this codebase for SeaweedFS, matching AD-11's "local dev environment, hand-provisioned as needed" pattern already applied to the per-service Postgres databases in `init-db.sh`).
 
 ### Completion Notes List
 
+- All 7 tasks implemented and tested. `packages/service-kernel` gained its first REAL `StoragePort` (SeaweedFS adapter, unauthenticated `fetch` PUT/GET/DELETE — matches `pingStorage`'s existing precedent against the same endpoint) and `JobQueuePort` (pg-boss) implementations, replacing a health-check-only helper and an empty placeholder respectively — both follow `core`'s `NotificationPort` port/mock/factory DI-seam shape exactly.
+- New `services/ingestion` (first scaffolded this session) owns `UploadedDocument` (AD-14), with its own `usavvy_ingestion` database. `uploadDocument` validates copyright attestation (checked FIRST, before any I/O — AC #4), file extension, 50 MB size limit, the 10-file-per-`customCourseId` limit, and (PDF only) a regex-based 300-page approximation, then stores the file via `StoragePort` and enqueues an `ingest-document` job via `JobQueuePort` — no consumer exists yet (Story 2.9's job).
+- `customCourseId` is a bare, ingestion-scoped uuid (via `node:crypto`'s `randomUUID`, not the schema's `uuidv7()` SQL default, since it's minted in application code before any row exists) — NOT yet a real `courses` row; see Dev Notes on why building one now would be premature ahead of Story 2.13's actual outline-review step.
+- `services/gateway` gained its first REQUEST-direction binary/multipart proxy (`ingestionClient.ts`'s `forwardMultipart`, the mirror image of core's own `forwardBinary`) — a custom, non-parsing `addContentTypeParser("multipart/form-data", ...)` buffers the raw bytes so gateway can forward them byte-for-byte (boundary included) without ever needing `@fastify/multipart` itself.
+- `apps/web`'s new `UploadPage` loops sequentially (not `Promise.all`) over every selected file — this is the mechanism satisfying AC #2's "other valid files in the same batch are still accepted" (a client-side loop of independent single-file requests, not a server-side multi-file batch endpoint), and shows a running per-file accepted/rejected list plus a "X of 10" count that disables further selection at the limit (client-side UX nicety; the server re-checks every request regardless).
+- Live-verified end-to-end through the real gateway → ingestion → SeaweedFS/pg-boss chain with a hand-signed JWT: a valid attested upload is accepted, stored, and queued; `GET /uploads` lists it back; an unattested upload and an unsupported file type are both rejected with AC #2/#4's specific messages; a request with no token is rejected 401. Found and fixed two real environment/library-version bugs in the process (see Debug Log References). Test data cleaned up afterward.
+- Full monorepo regression: 869 tests passing across all 8 workspaces (18 config + 177 shared-types + 26 service-kernel + 219 web + 102 gateway + 20 ingestion + 200 core + 107 courses), `tsc --noEmit` and `eslint .` both clean.
+
 ### File List
+
+- `packages/service-kernel/src/storage/{port,seaweedfs,mock,factory,ping}.ts` (ping.ts moved from `src/storage.ts`, others new)
+- `packages/service-kernel/tests/storage/{ping,seaweedfs,mock,factory}.test.ts` (ping.test.ts moved from `tests/storage.test.ts`, others new)
+- `packages/service-kernel/src/jobqueue/{port,pgboss,mock,factory}.ts` (new; replaces the placeholder `src/jobqueue/index.ts`)
+- `packages/service-kernel/tests/jobqueue/{pgboss,mock,factory}.test.ts` (new)
+- `packages/service-kernel/src/index.ts` (modified — new port/adapter/mock exports)
+- `packages/service-kernel/package.json` (modified — added `pg-boss` dependency)
+- `packages/shared-types/src/uploads.ts` (new — `uploadedDocumentResponseSchema`, `listUploadsQuerySchema`)
+- `packages/shared-types/tests/uploads.test.ts` (new)
+- `packages/shared-types/src/index.ts` (modified — barrel exports)
+- `services/ingestion/**` (new service: `package.json`, `tsconfig.json`, `drizzle.config.ts`, `src/{config,app,main}.ts`, `src/db/{schema,client,migrate}.ts`, `src/modules/uploads/{service,routes,index}.ts`, `drizzle/0000_unique_whistler.sql`, `tests/testHelpers.ts`, `tests/modules/uploads/{service,routes}.test.ts`)
+- `infra/init-db.sh` (modified — `CREATE DATABASE usavvy_ingestion`)
+- `services/gateway/src/config.ts` (modified — `INGESTION_SERVICE_URL`)
+- `services/gateway/src/ingestionClient.ts` (new)
+- `services/gateway/src/ingestionProxy.ts` (new)
+- `services/gateway/src/app.ts` (modified — multipart content-type parser, ingestion proxy registration)
+- `services/gateway/src/main.ts` (modified — ingestion client wiring)
+- `services/gateway/tests/testHelpers.ts` (modified — ingestion dep defaults)
+- `services/gateway/tests/ingestionProxy.test.ts` (new)
+- `apps/web/src/modules/uploads/{api,UploadPage,index}.ts(x)` (new)
+- `apps/web/src/shared/apiClient.ts` (modified — exported `throwForErrorResponse` for reuse)
+- `apps/web/src/app/App.tsx` (modified — `/upload-content` route)
+- `apps/web/tests/modules/uploads/UploadPage.test.tsx` (new)
+- `package.json` (modified — root `dev` script includes `ingestion`)
 
 ## Change Log
 
 - 2026-08-06: Story drafted (create-story) for Epic 2, Story 2.7. Status → ready-for-dev.
+- 2026-08-06: Implemented Upload learner content with copyright attestation (Tasks 1-7): real StoragePort/JobQueuePort in service-kernel, new services/ingestion, gateway multipart passthrough proxy, apps/web upload UI. Found and fixed two live-environment bugs (pg-boss v12 queue-creation requirement; SeaweedFS bucket provisioning) during end-to-end verification. Status → review.

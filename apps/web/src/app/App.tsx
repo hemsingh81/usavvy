@@ -6,6 +6,7 @@ import { NotificationsProvider } from "./useNotifications.js";
 import { AppHeader } from "./AppHeader.js";
 import { AuthProvider, LoginPage, SignUpPage, VerifyEmailPage } from "../modules/auth/index.js";
 import { CatalogPage, CourseDetailPage, CustomizePage, PlacementCheckPage } from "../modules/courses/index.js";
+import { UploadPage } from "../modules/uploads/index.js";
 import {
   AccountDeletionPage,
   ActivityHistoryPage,
@@ -68,6 +69,7 @@ export function App() {
               <Route path="/courses/:id" element={<CourseDetailPage />} />
               <Route path="/courses/:id/customize" element={<CustomizePage />} />
               <Route path="/courses/:id/placement-check" element={<PlacementCheckPage />} />
+              <Route path="/upload-content" element={<UploadPage />} />
               <Route path="*" element={<NotFoundPage />} />
             </Routes>
           </BrowserRouter>

@@ -22,7 +22,7 @@ interface Schema<T> {
 // Review finding: apiRequest and apiRequestBlob previously duplicated this exact
 // try/catch → parse-error-envelope → throw block verbatim. Shared here since both now
 // need it identically.
-async function throwForErrorResponse(response: Response): Promise<never> {
+export async function throwForErrorResponse(response: Response): Promise<never> {
   const json: unknown = await response.json().catch(() => undefined);
   const parsedError = errorEnvelopeSchema.safeParse(json);
   if (parsedError.success) {
