@@ -8,6 +8,10 @@ export const uploadedDocumentResponseSchema = z.object({
   fileType: z.string(),
   fileSizeBytes: z.number(),
   status: z.string(),
+  // Story 2.11 (FR-C-11), AC #2: the specific reason behind a "failed"/"blocked"
+  // status — null otherwise. Already populated in the DB by Stories 2.9/2.10; this was
+  // the field's first exposure through the API.
+  failureReason: z.string().nullable(),
   createdAt: z.string(),
 });
 

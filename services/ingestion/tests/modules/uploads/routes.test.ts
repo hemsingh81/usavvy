@@ -186,6 +186,65 @@ describe("GET /uploads", () => {
   });
 });
 
+describe("DELETE /uploads/:id", () => {
+  it("rejects without the internal service secret", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+
+    const response = await app.inject({
+      method: "DELETE",
+      url: "/uploads/019fd450-b7cb-7a32-b021-42788045c71f",
+      headers: { "x-user-id": OWNER_ID, "x-user-role": "student" },
+    });
+
+    expect(response.statusCode).toBe(401);
+  });
+
+  it("rejects a malformed id", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+
+    const response = await app.inject({ method: "DELETE", url: "/uploads/not-a-uuid", headers: learnerHeaders });
+
+    expect(response.statusCode).toBe(400);
+  });
+
+  it("returns 404 for a document the caller doesn't own", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+
+    const response = await app.inject({
+      method: "DELETE",
+      url: "/uploads/019fd450-b7cb-7a32-b021-42788045c71f",
+      headers: learnerHeaders,
+    });
+
+    expect(response.statusCode).toBe(404);
+  });
+
+  it("removes the caller's own document, and it no longer appears in GET /uploads", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+    const { body, contentType } = buildMultipartBody(
+      [{ name: "copyrightAttested", value: "true" }],
+      { fieldName: "file", filename: "a.txt", contentType: "text/plain", content: Buffer.from("hi") },
+    );
+    const uploadResponse = await app.inject({
+      method: "POST",
+      url: "/uploads",
+      headers: { ...learnerHeaders, "content-type": contentType },
+      payload: body,
+    });
+    const uploaded = uploadResponse.json();
+
+    const deleteResponse = await app.inject({ method: "DELETE", url: `/uploads/${uploaded.id}`, headers: learnerHeaders });
+    expect(deleteResponse.statusCode).toBe(204);
+
+    const listResponse = await app.inject({
+      method: "GET",
+      url: `/uploads?customCourseId=${uploaded.customCourseId}`,
+      headers: learnerHeaders,
+    });
+    expect(listResponse.json()).toEqual([]);
+  });
+});
+
 const LONG_ENOUGH_TEXT = "This is a paragraph with clearly more than ten words in it for testing purposes.";
 
 describe("POST /uploads/paste-text", () => {

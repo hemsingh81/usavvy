@@ -293,6 +293,112 @@ describe("ingestDocument", () => {
     expect(chunks).toHaveLength(0);
   });
 
+  it(
+    "makes 'parsing' observable via a real DB read before storage is fetched (AC #1)",
+    async () => {
+      const storageKey = `test/${randomUUID()}.txt`;
+      const documentId = await insertDocument("txt", storageKey);
+      const storagePort = createMockStorageAdapter();
+      await storagePort.putObject(storageKey, Buffer.from("Just plain content for this test document."), "application/octet-stream");
+      const logger = createLogger("test");
+
+      const getObjectSpy = vi.spyOn(storagePort, "getObject").mockImplementation(async () => {
+        const [midFlightDocument] = await db.select().from(uploadedDocuments).where(eq(uploadedDocuments.id, documentId));
+        expect(midFlightDocument).toMatchObject({ status: "parsing" });
+        return Buffer.from("Just plain content for this test document.");
+      });
+
+      await ingestDocument({ db, storagePort, logger }, { uploadedDocumentId: documentId });
+
+      expect(getObjectSpy).toHaveBeenCalledTimes(1);
+      const [finalDocument] = await db.select().from(uploadedDocuments).where(eq(uploadedDocuments.id, documentId));
+      expect(finalDocument).toMatchObject({ status: "parsed" });
+    },
+    30_000,
+  );
+
+  it(
+    "writes 'parsing' then 'safety scan' via standalone db.update calls, in order, before the final transaction (AC #1)",
+    async () => {
+      const storageKey = `test/${randomUUID()}.txt`;
+      const documentId = await insertDocument("txt", storageKey);
+      const { storagePort, logger } = await depsWithStoredFixture(storageKey, Buffer.from("Just plain content for this test document."));
+
+      const statusUpdates: string[] = [];
+      const originalUpdate = db.update.bind(db);
+      const updateSpy = vi.spyOn(db, "update").mockImplementation((table: Parameters<typeof db.update>[0]) => {
+        const builder = originalUpdate(table);
+        const originalSet = builder.set.bind(builder);
+        return Object.assign(builder, {
+          set: (values: { status?: string }) => {
+            if (values?.status) statusUpdates.push(values.status);
+            return originalSet(values);
+          },
+        });
+      });
+
+      try {
+        await ingestDocument({ db, storagePort, logger }, { uploadedDocumentId: documentId });
+      } finally {
+        updateSpy.mockRestore();
+      }
+
+      expect(statusUpdates).toEqual(["parsing", "safety scan"]);
+    },
+    30_000,
+  );
+
+  it(
+    "reprocesses a document stuck at 'parsing' after an interrupted prior run, rather than skipping it forever (AC #1, crash-recovery)",
+    async () => {
+      const storageKey = `test/${randomUUID()}.pdf`;
+      const documentId = await insertDocument("pdf", storageKey);
+      await db.update(uploadedDocuments).set({ status: "parsing" }).where(eq(uploadedDocuments.id, documentId));
+      const { storagePort, logger } = await depsWithStoredFixture(storageKey, fixture("valid-text.pdf"));
+      const getObjectSpy = vi.spyOn(storagePort, "getObject");
+
+      await ingestDocument({ db, storagePort, logger }, { uploadedDocumentId: documentId });
+
+      expect(getObjectSpy).toHaveBeenCalled();
+      const [document] = await db.select().from(uploadedDocuments).where(eq(uploadedDocuments.id, documentId));
+      expect(document?.status).toBe("parsed");
+    },
+    30_000,
+  );
+
+  it(
+    "reprocesses a document stuck at 'safety scan' after an interrupted prior run, rather than skipping it forever (AC #1, crash-recovery)",
+    async () => {
+      const storageKey = `test/${randomUUID()}.pdf`;
+      const documentId = await insertDocument("pdf", storageKey);
+      await db.update(uploadedDocuments).set({ status: "safety scan" }).where(eq(uploadedDocuments.id, documentId));
+      const { storagePort, logger } = await depsWithStoredFixture(storageKey, fixture("valid-text.pdf"));
+      const getObjectSpy = vi.spyOn(storagePort, "getObject");
+
+      await ingestDocument({ db, storagePort, logger }, { uploadedDocumentId: documentId });
+
+      expect(getObjectSpy).toHaveBeenCalled();
+      const [document] = await db.select().from(uploadedDocuments).where(eq(uploadedDocuments.id, documentId));
+      expect(document?.status).toBe("parsed");
+    },
+    30_000,
+  );
+
+  it("skips a document that is already 'failed' without touching storage or re-processing (review finding)", async () => {
+    const storageKey = `test/${randomUUID()}.pdf`;
+    const documentId = await insertDocument("pdf", storageKey);
+    await db.update(uploadedDocuments).set({ status: "failed", failureReason: "corrupt file" }).where(eq(uploadedDocuments.id, documentId));
+    const storagePort = createMockStorageAdapter();
+    const getObjectSpy = vi.spyOn(storagePort, "getObject");
+    const logger = createLogger("test");
+
+    await ingestDocument({ db, storagePort, logger }, { uploadedDocumentId: documentId });
+
+    expect(getObjectSpy).not.toHaveBeenCalled();
+    const [document] = await db.select().from(uploadedDocuments).where(eq(uploadedDocuments.id, documentId));
+    expect(document).toMatchObject({ status: "failed", failureReason: "corrupt file" });
+  });
+
   it("skips a document that is already 'blocked' without touching storage or re-scanning (review finding)", async () => {
     const storageKey = `test/${randomUUID()}.pdf`;
     const documentId = await insertDocument("pdf", storageKey);

@@ -1,10 +1,10 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import type { z } from "zod";
-import { AppError, type JobQueuePort, type StoragePort } from "@usavvy/service-kernel";
+import { z } from "zod";
+import { AppError, type JobQueuePort, type Logger, type StoragePort } from "@usavvy/service-kernel";
 import { ROLES, type Role } from "@usavvy/config";
 import { listUploadsQuerySchema, optionalCustomCourseIdSchema, pasteTextInputSchema, urlImportInputSchema } from "@usavvy/shared-types";
 import type { Db } from "../../db/client.js";
-import { importFromUrl, importPastedText, listUploadedDocuments, uploadDocument } from "./service.js";
+import { deleteUploadedDocument, importFromUrl, importPastedText, listUploadedDocuments, uploadDocument } from "./service.js";
 
 // Duplicated from courses' own identically-named private helper (AD-9/AD-13).
 function parseOrThrow<T>(schema: z.ZodType<T>, data: unknown): T {
@@ -15,10 +15,22 @@ function parseOrThrow<T>(schema: z.ZodType<T>, data: unknown): T {
   return result.data;
 }
 
+// Duplicated from the gateway's own identically-named private id-validation pattern
+// (AD-9/AD-13) — coursesProxy.ts's `requireValidId`.
+const idSchema = z.uuid();
+function requireValidId(id: string): string {
+  const result = idSchema.safeParse(id);
+  if (!result.success) {
+    throw new AppError("VALIDATION_ERROR", "invalid id", 400);
+  }
+  return result.data;
+}
+
 export interface UploadsRouteDeps {
   db: Db;
   storagePort: StoragePort;
   jobQueuePort: JobQueuePort;
+  logger: Logger;
 }
 
 function isRole(value: string): value is Role {
@@ -93,6 +105,15 @@ export function registerUploadsRoutes(app: FastifyInstance, deps: UploadsRouteDe
     const { userId } = requireTrustedUser(request);
     const { customCourseId } = parseOrThrow(listUploadsQuerySchema, request.query);
     return listUploadedDocuments(deps.db, userId, customCourseId);
+  });
+
+  // Story 2.11 (FR-C-11), AC #3: same auth-only, any-authenticated-role gate as every
+  // other route here — this is the caller's own private data, not a privileged action.
+  app.delete("/uploads/:id", async (request, reply) => {
+    const { userId } = requireTrustedUser(request);
+    const id = requireValidId((request.params as { id: string }).id);
+    await deleteUploadedDocument(deps, userId, id);
+    reply.code(204).send();
   });
 
   // Story 2.8 (FR-C-8), AC #1: plain JSON, unlike the multipart file-upload route above

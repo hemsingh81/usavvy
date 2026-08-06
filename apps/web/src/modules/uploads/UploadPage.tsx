@@ -1,12 +1,19 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Navigate } from "react-router-dom";
 import type { UploadedDocumentResponse } from "@usavvy/shared-types";
 import { ApiError } from "../../shared/apiClient.js";
 import { getWebConfig } from "../../app/config.js";
 import { useAuth } from "../auth/index.js";
-import { importFromUrl, pasteText, uploadFile } from "./api.js";
+import { deleteUpload, importFromUrl, listUploads, pasteText, uploadFile } from "./api.js";
+import { describeIngestionStatus } from "./ingestionStatus.js";
 
 const MAX_FILES = 10;
+// Story 2.11 (FR-C-11), AC #1. This codebase's first polling UI — no react-query/swr
+// precedent exists anywhere; a plain setInterval matches every other page's existing
+// plain-fetch convention (see useNotifications.tsx) rather than adding a new dependency.
+// Exported so tests can drive fake timers by the exact real interval, not a duplicated
+// magic number.
+export const POLL_INTERVAL_MS = 4000;
 
 type FileResult = { fileName: string; kind: "success"; document: UploadedDocumentResponse } | { fileName: string; kind: "error"; message: string };
 
@@ -27,6 +34,89 @@ export function UploadPage() {
   const [busy, setBusy] = useState(false);
   const [pastedText, setPastedText] = useState("");
   const [importUrl, setImportUrl] = useState("");
+  const [documents, setDocuments] = useState<UploadedDocumentResponse[]>([]);
+  const [removeError, setRemoveError] = useState<string | undefined>(undefined);
+  const [removingIds, setRemovingIds] = useState<ReadonlySet<string>>(new Set());
+
+  const accessToken = session?.accessToken;
+
+  // Story 2.11 (FR-C-11), AC #1: fetches the durable, server-side status list once a
+  // customCourseId is known, then polls while any listed document hasn't reached a
+  // status this codebase can currently advance it past (see ingestionStatus.ts).
+  // Review finding: re-runs on every new `results` entry too, not just on
+  // accessToken/customCourseId — customCourseId is set once from the FIRST upload and
+  // never changes value for later files in the same batch, so without this dependency
+  // a fast-completing first document could stop the effect from ever fetching files
+  // #2+ into `documents` at all.
+  useEffect(() => {
+    if (!accessToken || !customCourseId) return;
+    let cancelled = false;
+    const { apiUrl } = getWebConfig();
+    let intervalId: ReturnType<typeof setInterval> | undefined;
+
+    async function fetchDocuments(): Promise<boolean> {
+      try {
+        const list = await listUploads(apiUrl, accessToken as string, customCourseId as string);
+        if (cancelled) return true;
+        setDocuments(list);
+        return list.every((document) => describeIngestionStatus(document.status, document.failureReason).isTerminal);
+      } catch {
+        // Review finding: a transient failure (dropped request, momentary 401/5xx) must
+        // NOT be treated as "all terminal" — that would permanently stop polling on a
+        // single blip. Report "not done" so the caller schedules/keeps the interval and
+        // retries on the next tick, matching AD-17's no-silent-failure discipline.
+        return false;
+      }
+    }
+
+    void fetchDocuments().then((allTerminal) => {
+      if (cancelled || allTerminal) return;
+      intervalId = setInterval(() => {
+        void fetchDocuments().then((done) => {
+          if (done && intervalId !== undefined) clearInterval(intervalId);
+        });
+      }, POLL_INTERVAL_MS);
+    });
+
+    return () => {
+      cancelled = true;
+      if (intervalId !== undefined) clearInterval(intervalId);
+    };
+  }, [accessToken, customCourseId, results.length]);
+
+  async function handleRemove(id: string): Promise<void> {
+    if (!accessToken || removingIds.has(id)) return;
+    setRemoveError(undefined);
+    setRemovingIds((current) => new Set(current).add(id));
+    try {
+      const { apiUrl } = getWebConfig();
+      await deleteUpload(apiUrl, accessToken, id);
+      dropDocument(id);
+    } catch (error) {
+      // Review finding: a 404 here means the document is already gone (e.g. a second
+      // click's request landing after the first already succeeded) — that's the
+      // outcome the learner wanted, not a failure to surface an alert for.
+      if (error instanceof ApiError && error.code === "NOT_FOUND") {
+        dropDocument(id);
+      } else {
+        setRemoveError(errorMessage(error));
+      }
+    } finally {
+      setRemovingIds((current) => {
+        const next = new Set(current);
+        next.delete(id);
+        return next;
+      });
+    }
+  }
+
+  // Review finding: removing a document only updated `documents`, leaving the
+  // client-side `results` upload log (and the `acceptedCount`/`atLimit` it drives)
+  // stale — a learner removing a file to free a limit slot saw the limit stay stuck.
+  function dropDocument(id: string): void {
+    setDocuments((current) => current.filter((document) => document.id !== id));
+    setResults((current) => current.filter((result) => !(result.kind === "success" && result.document.id === id)));
+  }
 
   if (!session) {
     return <Navigate to="/login" replace />;
@@ -200,6 +290,33 @@ export function UploadPage() {
           </li>
         ))}
       </ul>
+
+      {documents.length > 0 ? (
+        <section>
+          <h2>Your uploaded documents</h2>
+          {removeError ? <p role="alert">{removeError}</p> : null}
+          <ul>
+            {documents.map((document) => {
+              const display = describeIngestionStatus(document.status, document.failureReason);
+              return (
+                <li key={document.id}>
+                  <span>{document.fileName}</span>
+                  <span role="status">{display.stageLabel}</span>
+                  {!display.isFailure ? <progress value={display.progressPercent} max={100} /> : null}
+                  {display.isFailure ? (
+                    <span role="alert">
+                      {display.failureReason}. {display.nextStepSuggestion}
+                    </span>
+                  ) : null}
+                  <button type="button" onClick={() => void handleRemove(document.id)} disabled={removingIds.has(document.id)}>
+                    Remove
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      ) : null}
     </main>
   );
 }

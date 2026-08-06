@@ -74,7 +74,7 @@ development_status:
   2-8-paste-text-and-public-url-import: done
   2-9-ingestion-pipeline-parse-ocr-fallback-structure-detection-and-chunking: done
   2-10-content-safety-scan-during-ingestion: done
-  2-11-ingestion-status-with-progress-and-failure-reasons: backlog
+  2-11-ingestion-status-with-progress-and-failure-reasons: done
   2-12-embedding-and-ai-proposed-topic-concept-outline: backlog
   2-13-review-and-edit-the-proposed-outline: backlog
   2-14-mixed-courses-attach-personal-notes-to-a-catalog-course: backlog

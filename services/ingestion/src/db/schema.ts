@@ -34,9 +34,12 @@ export const uploadedDocuments = pgTable("uploaded_documents", {
 // ownership table (UploadedDocument, ContentChunk -> ingestion).
 export const contentChunks = pgTable("content_chunks", {
   id: uuid("id").primaryKey().default(uuidv7Default),
+  // Story 2.11 (FR-C-11), AC #3: cascade — a "blocked" document already has chunks
+  // (Story 2.10 inserts them even for a blocked document), so removing a document must
+  // remove its chunks too rather than fail on this FK.
   documentId: uuid("document_id")
     .notNull()
-    .references(() => uploadedDocuments.id),
+    .references(() => uploadedDocuments.id, { onDelete: "cascade" }),
   // Order within the document — chunking is sequential, not content-addressed.
   chunkIndex: integer("chunk_index").notNull(),
   text: text("text").notNull(),

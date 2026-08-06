@@ -17,6 +17,10 @@ export interface IngestJobDeps {
   logger: Logger;
 }
 
+// Story 2.11 (FR-C-11): only these are terminal — a document parked at any other value
+// (including the two new intermediate ones below) is eligible for (re)processing.
+const TERMINAL_STATUSES = new Set(["parsed", "blocked", "failed"]);
+
 async function parseByFileType(fileType: string, buffer: Buffer): Promise<ParsedDocument> {
   switch (fileType) {
     case "pdf":
@@ -41,6 +45,10 @@ async function parseByFileType(fileType: string, buffer: Buffer): Promise<Parsed
  * PDF pages flagged `needsOcr` (AC #2), chunks the result, and inserts `ContentChunk`
  * rows — or, on a typed parser error, marks the document `failed` with the specific
  * reason (AC #3/#4) and inserts NO chunks at all.
+ *
+ * Story 2.11 (FR-C-11), AC #1: writes two real, observable intermediate statuses
+ * ("parsing", "safety scan") as the job advances, so a learner polling the upload
+ * screen sees genuine progress rather than a frozen "queued" until the job's very end.
  */
 export async function ingestDocument(deps: IngestJobDeps, payload: Record<string, unknown>): Promise<void> {
   const uploadedDocumentId = payload.uploadedDocumentId;
@@ -61,14 +69,23 @@ export async function ingestDocument(deps: IngestJobDeps, payload: Record<string
   // Review finding: pg-boss (like any real job queue) gives at-least-once delivery —
   // a job whose earlier attempt already committed its chunks and status update can
   // still be redelivered (a lease-timeout race, a retry after an ambiguous network
-  // error, etc.). Without this check, reprocessing an already-"parsed"/"failed"
-  // document would re-run parsing and insert a full duplicate set of ContentChunk rows
-  // (no unique constraint catches this at the DB layer either) — a silent, no-error
-  // duplication. Only a "queued" document is eligible for (re)processing.
-  if (document.status !== "queued") {
+  // error, etc.). Without this check, reprocessing an already-terminal document would
+  // re-run parsing and insert a full duplicate set of ContentChunk rows (no unique
+  // constraint catches this at the DB layer either) — a silent, no-error duplication.
+  //
+  // Story 2.11: only a TERMINAL status ("parsed"/"blocked"/"failed") skips reprocessing
+  // — a document interrupted mid-job (a crash, an OOM kill, a deploy) can now be parked
+  // at a non-terminal intermediate status ("parsing"/"safety scan", written below) and
+  // MUST remain eligible for redelivery, or it would be stranded there forever. This is
+  // safe because the job produces no persisted side effects before its own final
+  // transaction — a from-scratch retry of an interrupted document is exactly as safe as
+  // retrying a "queued" one.
+  if (TERMINAL_STATUSES.has(document.status)) {
     deps.logger.info("ingest-document job skipped — document already processed", { uploadedDocumentId, status: document.status });
     return;
   }
+
+  await deps.db.update(uploadedDocuments).set({ status: "parsing" }).where(eq(uploadedDocuments.id, document.id));
 
   const buffer = await deps.storagePort.getObject(document.storageKey);
 
@@ -94,6 +111,8 @@ export async function ingestDocument(deps: IngestJobDeps, payload: Record<string
   }
 
   const chunks = chunkSections(parsed.sections);
+
+  await deps.db.update(uploadedDocuments).set({ status: "safety scan" }).where(eq(uploadedDocuments.id, document.id));
 
   // Story 2.10 (FR-C-13), AC #1: scan every chunk before it's committed. Runs inline,
   // in-memory, in the same job as the parse/chunk step (not a second queued stage) —

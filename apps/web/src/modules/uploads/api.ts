@@ -92,3 +92,21 @@ export async function listUploads(apiUrl: string, accessToken: string, customCou
   const json: unknown = await response.json().catch(() => undefined);
   return uploadedDocumentResponseSchema.array().parse(json);
 }
+
+/** Story 2.11 (FR-C-11), AC #3. A 204 response has no body to parse — a plain fetch, matching uploadFile/listUploads's own precedent for non-`apiRequest`-shaped calls. */
+export async function deleteUpload(apiUrl: string, accessToken: string, id: string): Promise<void> {
+  let response: Response;
+  try {
+    response = await fetch(`${apiUrl}/uploads/${id}`, {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+  } catch {
+    throw new ApiError("NETWORK_ERROR", "unable to reach the server");
+  }
+
+  if (!response.ok) {
+    await throwForErrorResponse(response);
+  }
+}

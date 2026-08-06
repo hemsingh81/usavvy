@@ -1,7 +1,18 @@
 import type { FastifyInstance } from "fastify";
+import { z } from "zod";
 import { AppError } from "@usavvy/service-kernel";
 import type { ProxyOptions, ProxyResult } from "./coreClient.js";
 import { requireAuth, trustedHeaders } from "./authPlugin.js";
+
+// Duplicated from coursesProxy.ts's own identically-named private helper (AD-9/AD-13).
+const idSchema = z.uuid();
+function requireValidId(id: string): string {
+  const result = idSchema.safeParse(id);
+  if (!result.success) {
+    throw new AppError("VALIDATION_ERROR", "invalid id", 400);
+  }
+  return result.data;
+}
 
 export interface IngestionProxyDeps {
   forwardToIngestion: (method: string, path: string, options?: ProxyOptions) => Promise<ProxyResult>;
@@ -40,6 +51,13 @@ export function registerIngestionProxyRoutes(app: FastifyInstance, deps: Ingesti
 
   app.post("/uploads/url-import", { preHandler: requireAuth }, async (request, reply) => {
     const result = await deps.forwardToIngestion("POST", "/uploads/url-import", { body: request.body, headers: trustedHeaders(request) });
+    reply.code(result.status).send(result.body);
+  });
+
+  // Story 2.11 (FR-C-11), AC #3.
+  app.delete("/uploads/:id", { preHandler: requireAuth }, async (request, reply) => {
+    const id = requireValidId((request.params as { id: string }).id);
+    const result = await deps.forwardToIngestion("DELETE", `/uploads/${id}`, { headers: trustedHeaders(request) });
     reply.code(result.status).send(result.body);
   });
 }

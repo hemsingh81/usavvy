@@ -11,6 +11,7 @@ describe("uploadedDocumentResponseSchema", () => {
         fileType: "pdf",
         fileSizeBytes: 1024,
         status: "queued",
+        failureReason: null,
         createdAt: "2026-01-15T00:00:00.000Z",
       }),
     ).not.toThrow();
@@ -21,6 +22,36 @@ describe("uploadedDocumentResponseSchema", () => {
       uploadedDocumentResponseSchema.parse({
         id: "d1",
         customCourseId: "cc1",
+        fileType: "pdf",
+        fileSizeBytes: 1024,
+        status: "queued",
+        failureReason: null,
+        createdAt: "2026-01-15T00:00:00.000Z",
+      }),
+    ).toThrow();
+  });
+
+  it("accepts a failed response with a specific failureReason (Story 2.11, AC #2)", () => {
+    expect(() =>
+      uploadedDocumentResponseSchema.parse({
+        id: "d1",
+        customCourseId: "cc1",
+        fileName: "notes.pdf",
+        fileType: "pdf",
+        fileSizeBytes: 1024,
+        status: "failed",
+        failureReason: "corrupt file",
+        createdAt: "2026-01-15T00:00:00.000Z",
+      }),
+    ).not.toThrow();
+  });
+
+  it("rejects a response missing failureReason entirely", () => {
+    expect(() =>
+      uploadedDocumentResponseSchema.parse({
+        id: "d1",
+        customCourseId: "cc1",
+        fileName: "notes.pdf",
         fileType: "pdf",
         fileSizeBytes: 1024,
         status: "queued",

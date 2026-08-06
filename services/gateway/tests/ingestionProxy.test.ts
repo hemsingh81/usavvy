@@ -172,3 +172,48 @@ describe("POST /uploads/url-import", () => {
     await app.close();
   });
 });
+
+describe("DELETE /uploads/:id", () => {
+  it("returns 401 with no token and never calls ingestion", async () => {
+    const forwardToIngestion = vi.fn();
+    const app = buildApp(createTestAppDeps({ forwardToIngestion }));
+
+    const response = await app.inject({ method: "DELETE", url: "/uploads/019fd450-b7cb-7a32-b021-42788045c71f" });
+
+    expect(response.statusCode).toBe(401);
+    expect(forwardToIngestion).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("rejects a malformed id before ever calling ingestion", async () => {
+    const forwardToIngestion = vi.fn();
+    const app = buildApp(createTestAppDeps({ forwardToIngestion }));
+    await app.ready();
+    const token = app.jwt.sign({ sub: "u1", role: "student", typ: "access" });
+
+    const response = await app.inject({ method: "DELETE", url: "/uploads/not-a-uuid", headers: { authorization: `Bearer ${token}` } });
+
+    expect(response.statusCode).toBe(400);
+    expect(forwardToIngestion).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("forwards the id and trusted headers derived from a valid token", async () => {
+    const forwardToIngestion = vi.fn().mockResolvedValue({ status: 204, body: undefined });
+    const app = buildApp(createTestAppDeps({ forwardToIngestion }));
+    await app.ready();
+    const token = app.jwt.sign({ sub: "u1", role: "student", typ: "access" });
+
+    const response = await app.inject({
+      method: "DELETE",
+      url: "/uploads/019fd450-b7cb-7a32-b021-42788045c71f",
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(response.statusCode).toBe(204);
+    expect(forwardToIngestion).toHaveBeenCalledWith("DELETE", "/uploads/019fd450-b7cb-7a32-b021-42788045c71f", {
+      headers: { "x-user-id": "u1", "x-user-role": "student" },
+    });
+    await app.close();
+  });
+});

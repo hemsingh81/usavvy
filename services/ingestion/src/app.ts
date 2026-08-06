@@ -49,7 +49,7 @@ export function buildApp(deps: BuildAppDeps) {
     }
   });
 
-  registerUploadsRoutes(app, { db: deps.db, storagePort: deps.storagePort, jobQueuePort: deps.jobQueuePort });
+  registerUploadsRoutes(app, { db: deps.db, storagePort: deps.storagePort, jobQueuePort: deps.jobQueuePort, logger: deps.logger });
 
   return app;
 }

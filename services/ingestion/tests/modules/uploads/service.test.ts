@@ -2,9 +2,9 @@ import { randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import postgres from "postgres";
 import { eq } from "drizzle-orm";
-import { createMockJobQueueAdapter, createMockStorageAdapter } from "@usavvy/service-kernel";
+import { AppError, createLogger, createMockJobQueueAdapter, createMockStorageAdapter } from "@usavvy/service-kernel";
 import { createDb, type Db } from "../../../src/db/client.js";
-import { uploadedDocuments } from "../../../src/db/schema.js";
+import { contentChunks, uploadedDocuments } from "../../../src/db/schema.js";
 import { loadIngestionConfig } from "../../../src/config.js";
 
 // Decouples importFromUrl's SSRF check (a real DNS lookup) from actual network/DNS
@@ -15,6 +15,7 @@ const lookupMock = vi.fn().mockResolvedValue({ address: "93.184.216.34", family:
 vi.mock("node:dns/promises", () => ({ lookup: (...args: unknown[]) => lookupMock(...args) }));
 
 import {
+  deleteUploadedDocument,
   getPdfPageCount,
   importFromUrl,
   importPastedText,
@@ -46,7 +47,7 @@ afterAll(async () => {
 });
 
 function deps() {
-  return { db, storagePort: createMockStorageAdapter(), jobQueuePort: createMockJobQueueAdapter() };
+  return { db, storagePort: createMockStorageAdapter(), jobQueuePort: createMockJobQueueAdapter(), logger: createLogger("test") };
 }
 
 describe("uploadDocument", () => {
@@ -249,6 +250,30 @@ describe("listUploadedDocuments", () => {
   it("returns an empty list for a customCourseId the caller doesn't own, never a 403", async () => {
     const rows = await listUploadedDocuments(db, OWNER_ID, "019fd450-b7cb-7a32-b021-42788045c71f");
     expect(rows).toEqual([]);
+  });
+
+  it("returns null failureReason for a healthy document, and the real reason for a failed one (Story 2.11, AC #2)", async () => {
+    const d = deps();
+    const healthy = await uploadDocument(d, OWNER_ID, {
+      customCourseId: undefined,
+      fileName: "healthy.txt",
+      buffer: Buffer.from("z"),
+      copyrightAttested: true,
+    });
+    const toFail = await uploadDocument(d, OWNER_ID, {
+      customCourseId: healthy.customCourseId,
+      fileName: "failed.txt",
+      buffer: Buffer.from("w"),
+      copyrightAttested: true,
+    });
+    await db.update(uploadedDocuments).set({ status: "failed", failureReason: "corrupt file" }).where(eq(uploadedDocuments.id, toFail.id));
+
+    const rows = await listUploadedDocuments(db, OWNER_ID, healthy.customCourseId);
+
+    const healthyRow = rows.find((row) => row.fileName === "healthy.txt");
+    const failedRow = rows.find((row) => row.fileName === "failed.txt");
+    expect(healthyRow?.failureReason).toBeNull();
+    expect(failedRow?.failureReason).toBe("corrupt file");
   });
 });
 
@@ -531,5 +556,64 @@ describe("stripHtmlToReadableText", () => {
     expect(result).toContain("Real intro text before the broken markup");
     expect(result).not.toContain("function foo");
     expect(result).not.toContain("console.log");
+  });
+});
+
+describe("deleteUploadedDocument", () => {
+  it("removes a document the caller owns", async () => {
+    const d = deps();
+    const document = await uploadDocument(d, OWNER_ID, {
+      customCourseId: undefined,
+      fileName: "to-delete.txt",
+      buffer: Buffer.from("x"),
+      copyrightAttested: true,
+    });
+
+    await deleteUploadedDocument(d, OWNER_ID, document.id);
+
+    const rows = await listUploadedDocuments(db, OWNER_ID, document.customCourseId);
+    expect(rows).toEqual([]);
+  });
+
+  it("cascades to that document's ContentChunk rows, even for a 'blocked' document that already has chunks (AC #3)", async () => {
+    const d = deps();
+    const document = await uploadDocument(d, OWNER_ID, {
+      customCourseId: undefined,
+      fileName: "blocked.txt",
+      buffer: Buffer.from("x"),
+      copyrightAttested: true,
+    });
+    await db.update(uploadedDocuments).set({ status: "blocked", failureReason: "blocked: self-harm-instructions" }).where(eq(uploadedDocuments.id, document.id));
+    await db.insert(contentChunks).values({
+      documentId: document.id,
+      chunkIndex: 0,
+      text: "blocked chunk text",
+      safetyStatus: "blocked",
+      safetyCategory: "self-harm-instructions",
+    });
+
+    await deleteUploadedDocument(d, OWNER_ID, document.id);
+
+    const remainingChunks = await db.select().from(contentChunks).where(eq(contentChunks.documentId, document.id));
+    expect(remainingChunks).toHaveLength(0);
+  });
+
+  it("throws NOT_FOUND for another owner's document, without leaking whether it exists (AC #3)", async () => {
+    const d = deps();
+    const document = await uploadDocument(d, "someone-else", {
+      customCourseId: undefined,
+      fileName: "theirs.txt",
+      buffer: Buffer.from("x"),
+      copyrightAttested: true,
+    });
+
+    await expect(deleteUploadedDocument(d, OWNER_ID, document.id)).rejects.toMatchObject(new AppError("NOT_FOUND", "document not found", 404));
+
+    await db.delete(uploadedDocuments).where(eq(uploadedDocuments.ownerId, "someone-else"));
+  });
+
+  it("throws NOT_FOUND for a nonexistent document id", async () => {
+    const d = deps();
+    await expect(deleteUploadedDocument(d, OWNER_ID, randomUUID())).rejects.toMatchObject(new AppError("NOT_FOUND", "document not found", 404));
   });
 });

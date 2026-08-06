@@ -3,7 +3,7 @@ import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
-import { AppError, type JobQueuePort, type StoragePort } from "@usavvy/service-kernel";
+import { AppError, type JobQueuePort, type Logger, type StoragePort } from "@usavvy/service-kernel";
 import type { Db } from "../../db/client.js";
 import { uploadedDocuments } from "../../db/schema.js";
 
@@ -52,6 +52,7 @@ export interface UploadedDocumentResponse {
   fileType: string;
   fileSizeBytes: number;
   status: string;
+  failureReason: string | null;
   createdAt: string;
 }
 
@@ -59,6 +60,7 @@ export interface UploadDeps {
   db: Db;
   storagePort: StoragePort;
   jobQueuePort: JobQueuePort;
+  logger: Logger;
 }
 
 function getExtension(fileName: string): string {
@@ -223,6 +225,7 @@ function toResponse(row: typeof uploadedDocuments.$inferSelect): UploadedDocumen
     fileType: row.fileType,
     fileSizeBytes: row.fileSizeBytes,
     status: row.status,
+    failureReason: row.failureReason,
     createdAt: row.createdAt.toISOString(),
   };
 }
@@ -423,4 +426,35 @@ export async function listUploadedDocuments(db: Db, ownerId: string, customCours
     .where(and(eq(uploadedDocuments.ownerId, ownerId), eq(uploadedDocuments.customCourseId, customCourseId)))
     .orderBy(uploadedDocuments.createdAt);
   return rows.map(toResponse);
+}
+
+/**
+ * Story 2.11 (FR-C-11), AC #3. Ownership scoped in the SAME where clause as the delete
+ * itself (not a separate pre-check) — matching `services/core`'s
+ * `markNotificationRead`/`clearNotification` precedent — so another learner's document
+ * id 404s rather than leaking whether it exists. Deleting a "queued"/"parsing"/"safety
+ * scan" document is safe with no job-cancellation logic needed: `ingestDocument`
+ * already no-ops cleanly for a job referencing a document that no longer exists
+ * (AD-17). Cascades to that document's ContentChunk rows via the FK's `onDelete:
+ * "cascade"` (schema.ts) — a "blocked" document already has chunks (Story 2.10).
+ */
+export async function deleteUploadedDocument(deps: UploadDeps, ownerId: string, id: string): Promise<void> {
+  const [row] = await deps.db.select().from(uploadedDocuments).where(and(eq(uploadedDocuments.id, id), eq(uploadedDocuments.ownerId, ownerId)));
+  if (!row) {
+    throw new AppError("NOT_FOUND", "document not found", 404);
+  }
+  await deps.db.delete(uploadedDocuments).where(and(eq(uploadedDocuments.id, id), eq(uploadedDocuments.ownerId, ownerId)));
+
+  // Best-effort: the DB-level removal above is what AC #3 actually requires. A storage
+  // cleanup hiccup shouldn't block that — but it also shouldn't vanish without a trace
+  // (AD-17), hence the logged warning rather than a silent catch.
+  try {
+    await deps.storagePort.deleteObject(row.storageKey);
+  } catch (error) {
+    deps.logger.error("failed to delete storage object for a removed document", {
+      documentId: id,
+      storageKey: row.storageKey,
+      reason: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
