@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import postgres from "postgres";
 import { eq } from "drizzle-orm";
 import { createLogger, createMockStorageAdapter } from "@usavvy/service-kernel";
@@ -179,5 +179,41 @@ describe("ingestDocument", () => {
     const chunks = await db.select().from(contentChunks).where(eq(contentChunks.documentId, documentId));
     expect(chunks).toHaveLength(1);
     expect(chunks[0]).toMatchObject({ heading: null, text: "Just plain content for this test document." });
+  });
+
+  it(
+    "is idempotent under redelivery — running the job twice for the same document does not duplicate ContentChunk rows (review finding)",
+    async () => {
+      const storageKey = `test/${randomUUID()}.pdf`;
+      const documentId = await insertDocument("pdf", storageKey);
+      const { storagePort, logger } = await depsWithStoredFixture(storageKey, fixture("valid-text.pdf"));
+
+      await ingestDocument({ db, storagePort, logger }, { uploadedDocumentId: documentId });
+      const firstRunChunks = await db.select().from(contentChunks).where(eq(contentChunks.documentId, documentId));
+
+      // Simulates pg-boss's at-least-once delivery redelivering a job whose earlier
+      // attempt already committed — the document is now "parsed", not "queued".
+      await ingestDocument({ db, storagePort, logger }, { uploadedDocumentId: documentId });
+      const secondRunChunks = await db.select().from(contentChunks).where(eq(contentChunks.documentId, documentId));
+
+      expect(secondRunChunks).toHaveLength(firstRunChunks.length);
+      expect(secondRunChunks.map((c) => c.id).sort()).toEqual(firstRunChunks.map((c) => c.id).sort());
+    },
+    30_000,
+  );
+
+  it("skips a document that isn't 'queued' without touching storage or re-parsing (review finding)", async () => {
+    const storageKey = `test/${randomUUID()}.pdf`;
+    const documentId = await insertDocument("pdf", storageKey);
+    await db.update(uploadedDocuments).set({ status: "parsed" }).where(eq(uploadedDocuments.id, documentId));
+    const storagePort = createMockStorageAdapter();
+    const getObjectSpy = vi.spyOn(storagePort, "getObject");
+    const logger = createLogger("test");
+
+    await ingestDocument({ db, storagePort, logger }, { uploadedDocumentId: documentId });
+
+    expect(getObjectSpy).not.toHaveBeenCalled();
+    const chunks = await db.select().from(contentChunks).where(eq(contentChunks.documentId, documentId));
+    expect(chunks).toHaveLength(0);
   });
 });

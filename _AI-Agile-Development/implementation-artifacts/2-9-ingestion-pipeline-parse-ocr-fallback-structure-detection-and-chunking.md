@@ -4,7 +4,7 @@ baseline_commit: 2645c30e2f2384f8be04a1fa5c024eec406ac111
 
 # Story 2.9: Ingestion pipeline — parse, OCR fallback, structure detection, and chunking
 
-Status: review
+Status: done
 
 *(Epic 2, FR-C-9. The largest story in Epic 2's ingestion arc so far: this is the FIRST story to register a real `JobQueuePort` CONSUMER — Stories 2.7/2.8 only ever produced (`enqueue`d) jobs, nothing has ever processed one. It's also the first to do REAL document parsing (Story 2.7's `getPdfPageCount` and Story 2.8's `stripHtmlToReadableText` were both explicitly-documented cheap regex approximations, with their own comments promising "Story 2.9 does the real parse" — this story is that promise coming due) and the first to introduce `ContentChunk`, the second (and last, per AD-14's ownership table) entity `services/ingestion` owns.)*
 
@@ -121,6 +121,7 @@ Claude Sonnet 5
 - Chunking is a simple, documented fixed-size (1500 chars) paragraph-boundary-aware splitter — explicitly not semantic/embedding-based (that's Story 2.12's job).
 - Test fixtures (`tests/fixtures/*`) are real, checked-in binary files — a genuine tiny encrypted PDF, a genuine corrupt-byte buffer per format, a genuine 2-page text PDF with distinct heading/body font sizes, a genuine scanned (image-only) PDF whose embedded text reads "HELLO WORLD" (used to prove real OCR recognition, not a mocked result), a genuine minimal DOCX with real `Heading1`-styled paragraphs, and a genuine minimal PPTX with real `<a:t>` slide text runs — generated once by `tests/fixtures/generate.mjs` (not run as part of the test suite itself) and empirically verified against each real parsing library before being trusted in the actual test suite.
 - Full monorepo regression: 952 tests passing across all 8 workspaces (18 config + 181 shared-types + 35 service-kernel + 224 web + 106 gateway + 81 ingestion + 200 core + 107 courses), `tsc --noEmit` and `eslint .` both clean. (One `services/core` test flaked under full-parallel-suite resource contention — confirmed passing 200/200 in isolation, the same pre-existing flake class already documented for Stories 2.6-2.8.)
+- **Review-round patch (3-layer adversarial review — see Senior Developer Review below):** fixed 4 confirmed findings, each proven via revert → confirm new test fails with the predicted wrong output → restore → confirm passes: (1) `pgboss.ts`'s `work()` swallowed every handler error and always told pg-boss the batch succeeded, permanently defeating retry/dead-letter for every job type this port serves — rewritten to use `perJobResults: true`, reporting each job's real outcome individually; (2) `ingestDocument.ts` had no idempotency guard and no transaction wrapping around the chunk-insert + status-update, so a redelivered job (pg-boss's own at-least-once guarantee) or a mid-way crash could insert duplicate `ContentChunk` rows — fixed with a `status !== "queued"` guard plus a single `db.transaction(...)` around both writes; (3) `chunkSections` silently dropped heading-only sections (empty body text, non-null heading), undercutting AC #1's structure-map guarantee — fixed to emit one chunk using the heading itself as the text; (4) hard-cut chunk slices were unconditionally `.trim()`ed, which could silently drop a whitespace byte exactly at a cut boundary and merge two words — fixed with a `trim: boolean` parameter, hard-cut pieces now preserve exact byte-for-byte content. Full monorepo regression (`pnpm -r test`), typecheck, and lint re-run clean after all four fixes landed together.
 
 ### File List
 
@@ -143,7 +144,25 @@ Claude Sonnet 5
 - `packages/service-kernel/tests/jobqueue/{pgboss,mock}.test.ts` (modified — new `work()`/`trigger()` tests)
 - `eslint.config.js` (modified — excluded `tests/fixtures/**` from lint scope, a dev-only fixture generator)
 
+## Senior Developer Review (AI)
+
+**Reviewers:** Blind Hunter, Edge Case Hunter, Acceptance Auditor (3-layer adversarial review, parallel background agents)
+**Date:** 2026-08-06
+**Outcome:** Changes Requested → all 4 confirmed findings fixed, re-verified, approved
+
+### Summary
+
+Three independent adversarial review layers examined the ingestion pipeline. Two systemic findings (pg-boss error-swallowing, missing idempotency/transaction guard) were independently surfaced by both Blind Hunter and Edge Case Hunter, raising confidence they represent real, high-value bugs rather than review noise. Two further findings (heading-only sections dropped, hard-cut whitespace loss) came from Edge Case Hunter alone but were confirmed genuine on inspection. The Acceptance Auditor found no AC-coverage gaps beyond what the other two layers already flagged. All four findings were fixed and proven via the "revert → confirm new test fails with the predicted wrong output → restore → confirm passes" methodology before being marked resolved.
+
+### Action Items
+
+- [x] **[High]** `packages/service-kernel/src/jobqueue/pgboss.ts`: `work()` caught every handler error, logged it, and returned normally from pg-boss's batch callback — telling pg-boss the whole batch succeeded regardless of actual outcome. This defeated retry/dead-letter semantics for every job type this port has ever served, not just `ingest-document`. Fixed via `perJobResults: true`, reporting each job's real `completed`/`failed` outcome individually. (Blind Hunter + Edge Case Hunter, independently confirmed)
+- [x] **[High]** `services/ingestion/src/modules/uploads/jobs/ingestDocument.ts`: no idempotency guard and no transaction wrapping around the chunk-insert + status-update — a redelivered job (pg-boss's at-least-once guarantee) or a mid-way process crash could insert a duplicate full set of `ContentChunk` rows, with no unique DB constraint to catch it. Fixed with a `document.status !== "queued"` guard checked immediately after loading the row, plus wrapping the chunk-insert and status-update in one `db.transaction(...)`. (Blind Hunter + Edge Case Hunter, independently confirmed)
+- [x] **[Medium]** `services/ingestion/src/modules/uploads/chunking.ts`: `chunkSections` unconditionally skipped any section with empty/whitespace-only text, including sections that legitimately have a heading but no body (e.g. two consecutive DOCX/MD headings with nothing between them) — silently discarding detected structure and undercutting AC #1. Fixed to emit one chunk using the heading itself as the text when a heading-only section is encountered. (Edge Case Hunter)
+- [x] **[Medium]** `services/ingestion/src/modules/uploads/chunking.ts`: hard-cut chunk slices were unconditionally `.trim()`ed in `makeChunk`, which could silently drop a whitespace byte landing exactly at the cut boundary and merge two words when chunks are later concatenated/read in sequence — a silent content-corruption risk for Story 2.12's future embedding work. Fixed by adding a `trim: boolean` parameter to `makeChunk`; hard-cut pieces now pass `trim: false`, preserving exact byte-for-byte content. (Edge Case Hunter)
+
 ## Change Log
 
 - 2026-08-06: Story drafted (create-story) for Epic 2, Story 2.9. Status → ready-for-dev.
 - 2026-08-06: Implemented Ingestion pipeline (Tasks 1-5): real PDF/DOCX/PPTX/TXT/MD parsing, OCR fallback, structure detection, chunking, and the first JobQueuePort consumer this codebase has registered. Found and fixed three real environment/library issues during implementation (see Debug Log): a from-scratch PDF encryption implementation for test fixtures, raw PDF literal-string byte normalization, Node's disabled legacy RC4 cipher, and a pdfjs-dist version conflict between two dependencies. Status → review.
+- 2026-08-06: 3-layer adversarial code review (Blind Hunter, Edge Case Hunter, Acceptance Auditor) found and fixed 4 confirmed bugs — pg-boss error-swallowing defeating retry semantics, missing idempotency/transaction guard around chunk insertion, heading-only sections silently dropped, hard-cut whitespace loss at chunk boundaries. Each fix proven via fail-then-pass regression testing. Full monorepo regression, typecheck, and lint clean. Status → done.

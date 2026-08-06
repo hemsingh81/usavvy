@@ -55,4 +55,37 @@ describe("chunkSections", () => {
     expect(chunks[0]).toMatchObject({ heading: "A", pageRangeStart: 1 });
     expect(chunks[1]).toMatchObject({ heading: "B", pageRangeStart: 2 });
   });
+
+  it("still produces a chunk for a heading-only section with no body text, rather than silently discarding the detected structure (review finding)", () => {
+    const chunks = chunkSections([
+      section({ heading: "Section A", text: "", pageRangeStart: 1, pageRangeEnd: 1 }),
+      section({ heading: "Section B", text: "", pageRangeStart: 2, pageRangeEnd: 2 }),
+    ]);
+
+    expect(chunks).toHaveLength(2);
+    expect(chunks[0]).toMatchObject({ heading: "Section A", text: "Section A" });
+    expect(chunks[1]).toMatchObject({ heading: "Section B", text: "Section B" });
+  });
+
+  it("still skips a section with neither a heading nor any body text", () => {
+    const chunks = chunkSections([section({ heading: null, text: "   " })]);
+
+    expect(chunks).toHaveLength(0);
+  });
+
+  it("preserves whitespace exactly at a hard-cut boundary, never silently merging two words (review finding)", () => {
+    // A single "paragraph" (no \n\n) of two long runs joined by one space, landing
+    // the cut exactly on that space when sliced at MAX_CHUNK_CHARS.
+    const before = "a".repeat(MAX_CHUNK_CHARS);
+    const after = "b".repeat(MAX_CHUNK_CHARS);
+    const text = `${before} ${after}`;
+
+    const chunks = chunkSections([section({ text })]);
+
+    // Reconstructing the chunks in order must reproduce the original exactly — if the
+    // boundary space were trimmed away by a hard-cut chunk, this would come back one
+    // character short with "a" and "b" merged directly together.
+    expect(chunks.map((c) => c.text).join("")).toBe(text);
+    expect(chunks.every((c) => !c.text.includes("ab"))).toBe(true);
+  });
 });

@@ -46,7 +46,7 @@ describe("createPgBossJobQueueAdapter", () => {
     await expect(adapter.enqueue("ingest-document", {})).rejects.toThrow();
   });
 
-  it("work() ensures the queue exists and registers a handler that calls the given callback per job in pg-boss's batch (Story 2.9)", async () => {
+  it("work() ensures the queue exists and registers a perJobResults handler that calls the given callback per job in pg-boss's batch (Story 2.9)", async () => {
     const { createPgBossJobQueueAdapter } = await import("../../src/jobqueue/pgboss.js");
     const adapter = await createPgBossJobQueueAdapter("postgres://test", createLogger("test"));
     createQueueMock.mockClear();
@@ -55,30 +55,39 @@ describe("createPgBossJobQueueAdapter", () => {
     await adapter.work("ingest-document", handler);
 
     expect(createQueueMock).toHaveBeenCalledWith("ingest-document");
-    expect(workMock).toHaveBeenCalledWith("ingest-document", expect.any(Function));
+    expect(workMock).toHaveBeenCalledWith("ingest-document", { perJobResults: true }, expect.any(Function));
 
-    const pgBossBatchHandler = workMock.mock.calls[0]?.[1] as (jobs: unknown[]) => Promise<void>;
+    const pgBossBatchHandler = workMock.mock.calls[0]?.[2] as (jobs: unknown[]) => Promise<unknown>;
     await pgBossBatchHandler([{ id: "j1", data: { uploadedDocumentId: "doc-1" } }]);
     expect(handler).toHaveBeenCalledWith({ uploadedDocumentId: "doc-1" });
   });
 
-  it("work()'s pg-boss batch handler logs and continues when one job's handler throws, rather than crashing the worker (AD-17)", async () => {
-    const { createPgBossJobQueueAdapter } = await import("../../src/jobqueue/pgboss.js");
-    const logger = createLogger("test");
-    const errorSpy = vi.spyOn(logger, "error");
-    const adapter = await createPgBossJobQueueAdapter("postgres://test", logger);
-    const handler = vi.fn().mockRejectedValueOnce(new Error("boom")).mockResolvedValueOnce(undefined);
+  it(
+    "review finding: reports each job's real outcome back to pg-boss via perJobResults, instead of always resolving the whole batch as if every job succeeded",
+    async () => {
+      const { createPgBossJobQueueAdapter } = await import("../../src/jobqueue/pgboss.js");
+      const logger = createLogger("test");
+      const errorSpy = vi.spyOn(logger, "error");
+      const adapter = await createPgBossJobQueueAdapter("postgres://test", logger);
+      const handler = vi.fn().mockRejectedValueOnce(new Error("boom")).mockResolvedValueOnce(undefined);
 
-    await adapter.work("ingest-document", handler);
-    const pgBossBatchHandler = workMock.mock.calls.at(-1)?.[1] as (jobs: unknown[]) => Promise<void>;
+      await adapter.work("ingest-document", handler);
+      const pgBossBatchHandler = workMock.mock.calls.at(-1)?.[2] as (jobs: unknown[]) => Promise<unknown>;
 
-    await expect(
-      pgBossBatchHandler([
+      const results = await pgBossBatchHandler([
         { id: "j1", data: { a: 1 } },
         { id: "j2", data: { a: 2 } },
-      ]),
-    ).resolves.toBeUndefined();
-    expect(handler).toHaveBeenCalledTimes(2);
-    expect(errorSpy).toHaveBeenCalled();
-  });
+      ]);
+
+      expect(handler).toHaveBeenCalledTimes(2);
+      expect(errorSpy).toHaveBeenCalled();
+      // A thrown handler error must surface as a "failed" result for THAT job (so
+      // pg-boss's own retry/dead-letter policy can act on it) — not silently resolve
+      // the whole batch as if both jobs succeeded.
+      expect(results).toEqual([
+        { id: "j1", status: "failed", output: { reason: "boom" } },
+        { id: "j2", status: "completed" },
+      ]);
+    },
+  );
 });

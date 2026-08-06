@@ -72,7 +72,7 @@ development_status:
   2-6-version-catalog-courses: done
   2-7-upload-learner-content-with-copyright-attestation: done
   2-8-paste-text-and-public-url-import: done
-  2-9-ingestion-pipeline-parse-ocr-fallback-structure-detection-and-chunking: review
+  2-9-ingestion-pipeline-parse-ocr-fallback-structure-detection-and-chunking: done
   2-10-content-safety-scan-during-ingestion: backlog
   2-11-ingestion-status-with-progress-and-failure-reasons: backlog
   2-12-embedding-and-ai-proposed-topic-concept-outline: backlog

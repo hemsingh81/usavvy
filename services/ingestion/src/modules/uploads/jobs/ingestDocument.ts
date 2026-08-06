@@ -57,6 +57,18 @@ export async function ingestDocument(deps: IngestJobDeps, payload: Record<string
     return;
   }
 
+  // Review finding: pg-boss (like any real job queue) gives at-least-once delivery —
+  // a job whose earlier attempt already committed its chunks and status update can
+  // still be redelivered (a lease-timeout race, a retry after an ambiguous network
+  // error, etc.). Without this check, reprocessing an already-"parsed"/"failed"
+  // document would re-run parsing and insert a full duplicate set of ContentChunk rows
+  // (no unique constraint catches this at the DB layer either) — a silent, no-error
+  // duplication. Only a "queued" document is eligible for (re)processing.
+  if (document.status !== "queued") {
+    deps.logger.info("ingest-document job skipped — document already processed", { uploadedDocumentId, status: document.status });
+    return;
+  }
+
   const buffer = await deps.storagePort.getObject(document.storageKey);
 
   let parsed: ParsedDocument;
@@ -81,18 +93,29 @@ export async function ingestDocument(deps: IngestJobDeps, payload: Record<string
   }
 
   const chunks = chunkSections(parsed.sections);
-  if (chunks.length > 0) {
-    await deps.db.insert(contentChunks).values(
-      chunks.map((chunk, index) => ({
-        documentId: document.id,
-        chunkIndex: index,
-        text: chunk.text,
-        heading: chunk.heading,
-        pageRangeStart: chunk.pageRangeStart,
-        pageRangeEnd: chunk.pageRangeEnd,
-      })),
-    );
-  }
 
-  await deps.db.update(uploadedDocuments).set({ status: "parsed" }).where(eq(uploadedDocuments.id, document.id));
+  // Review finding: the chunk insert and the final status update were two separate,
+  // unsynchronized statements — a crash between them (a worker restart, an OOM kill,
+  // a deploy) left orphaned ContentChunk rows under a document still stuck "queued".
+  // Because the process died before ever responding to pg-boss, the job WOULD be
+  // redelivered (unlike the fully-swallowed-error case fixed in packages/service-kernel's
+  // pgboss.ts) — combined with no idempotency check, that redelivery re-inserted a
+  // second full set of chunks. Wrapping both writes in one transaction makes a
+  // mid-way crash roll back cleanly (retry starts from scratch, same as a first
+  // attempt) instead of leaving a half-done, duplicate-prone state.
+  await deps.db.transaction(async (tx) => {
+    if (chunks.length > 0) {
+      await tx.insert(contentChunks).values(
+        chunks.map((chunk, index) => ({
+          documentId: document.id,
+          chunkIndex: index,
+          text: chunk.text,
+          heading: chunk.heading,
+          pageRangeStart: chunk.pageRangeStart,
+          pageRangeEnd: chunk.pageRangeEnd,
+        })),
+      );
+    }
+    await tx.update(uploadedDocuments).set({ status: "parsed" }).where(eq(uploadedDocuments.id, document.id));
+  });
 }
