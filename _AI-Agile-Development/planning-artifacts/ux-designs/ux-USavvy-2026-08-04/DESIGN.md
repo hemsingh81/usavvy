@@ -3,7 +3,7 @@ name: 'Usavvy'
 description: 'Interactive AI-tutor learning platform — a calm, credible study companion, not a chat app wearing a mascot.'
 status: final
 created: '2026-08-04'
-updated: '2026-08-04'
+updated: '2026-08-06'
 sources: ['Doc/00-Requirement.md', '_AI-Agile-Development/planning-artifacts/architecture/architecture-USavvy-2026-08-04/ARCHITECTURE-SPINE.md', '_AI-Agile-Development/planning-artifacts/epics.md']
 colors:
   primary: '#4338CA'
@@ -264,6 +264,12 @@ A 4px base unit keeps every spacing decision a clean multiple, with `gutter` (24
 
 The Board canvas itself is the one place that breaks from a fixed-width layout: it's an infinite vertical scroll (FR-B-31), so its internal spacing is beat-relative rather than page-relative — each Beat claims the vertical space its content actually needs.
 
+**Responsive range and multi-monitor support (NFR-7).** The full 360px–2560px viewport range isn't just "doesn't break" — it must read as an intentionally-designed layout at every step along the way, including wide/ultra-wide desktop monitors and multi-monitor setups where the browser window itself may be maximized to an unusually wide or tall size. Four reflow steps, not a single fluid scale: **mobile** (360–599px, reduced Board control set per above), **tablet** (600–1023px), **desktop** (1024–1919px), and **wide desktop** (1920px+). Above `desktop`, content containers cap at a comfortable maximum reading/working width and center with generous side margins — text lines, forms, and the Board's own control bar never stretch edge-to-edge on a 2560px display just because the viewport got wider. Reflow (regroup, re-stack, change what's visible) at each step, don't just proportionally shrink or grow every element.
+
+## Navigation
+
+Primary navigation groups related destinations under a small number of clear, learner-facing categories — e.g., *Learn* (courses, uploads/notes), *Progress* (activity history, certificates), *Account* (profile, preferences, privacy/data, deletion) — rather than a flat list of every page the product has. A learner should be able to predict which group a destination lives in before clicking; group labels describe what the learner is trying to do, never an internal epic/module/story name. Deeper or less-frequent destinations (account deletion, data export, per-course customization) nest under their parent group rather than sitting at the same nav level as top-level sections — the top level should stay short enough to scan at a glance regardless of viewport width (see the responsive range above: grouped navigation is what makes collapsing to a mobile menu tractable in the first place, versus flattening an already-flat list further). The Board itself is deliberately **outside** this navigation entirely (per Brand & Style — app chrome, including the persistent nav, hides while on the Board) since it's the one screen meant to feel like a distinct, immersive mode, not one more navigable destination.
+
 ## Elevation & Depth
 
 Depth stays minimal and purposeful. The app chrome is almost entirely flat — cards distinguish themselves from `surface` via the `surface-container` tonal steps, not shadows. The one place elevation earns its keep is the **Board control bar**, which floats above the canvas as a persistent, always-reachable strip (a soft, low-opacity indigo-tinted shadow, never a hard drop shadow) — and modals/side panels (cohort explain-more panel, checkpoint interstitial), which use a single consistent floating-panel treatment so a learner always knows what's "on top of" the lesson versus part of it.
@@ -271,6 +277,14 @@ Depth stays minimal and purposeful. The app chrome is almost entirely flat — c
 ## Shapes
 
 A moderate `10px` default radius signals "friendly and approachable" without tipping into the rounded-pill, consumer-app playfulness that would undercut trust for a professional-upskilling use case. Larger containers (cards, modals, the Board control bar) step up to `16px`–`24px`; small interactive elements (chips, badges, the star/streak icons) can use `full` where a pill genuinely reads as a badge rather than a button.
+
+## Iconography
+
+Any control with a common, unambiguous icon convention gets one — play/pause/stop/replay, back/forward, speed, volume, save/cancel/delete/edit, search, close, and the like — never a bare text-only button when a recognizable icon already exists for that action. This applies everywhere in the product, not only the Board Control Bar: dialogs, forms, settings, notification actions, list-item actions. One icon set at one consistent stroke weight and corner-language across the whole product — icons are a single visual system, not a per-component grab-bag of whatever looked closest at the time (the exact library/asset format is an Architecture/implementation choice, not re-decided per screen).
+
+- **Icon + label, except where space is genuinely constrained.** A visible text label sits alongside the icon by default (e.g., a "Save" button shows both a save icon and the word "Save"). Icon-only is reserved for tightly-packed control clusters where a label cannot fit (the Board Control Bar's transport controls) — and every icon-only control still carries an accessible name (`aria-label`/tooltip on hover and focus), never an icon with zero text equivalent anywhere in the DOM.
+- **Icon color follows the same semantic rules as every other token in this document.** `on-surface`/`on-surface-variant` for neutral, non-primary controls; `accent` reserved for the one primary action in a given view/cluster (matching the accent-is-exclusive-to-interaction/reward rule in Colors) — never a bespoke one-off icon color chosen per component.
+- **Icon size scales with its control's touch target**, not shrunk to fit a cramped layout: a minimum 24px icon inside a touch target of at least 44px, matching mobile touch-target guidance (NFR-8) — if an icon and its target can't both fit at those minimums, the layout is wrong, not the icon.
 
 ## Components
 
@@ -301,3 +315,6 @@ A moderate `10px` default radius signals "friendly and approachable" without tip
 - **Do** respect `prefers-reduced-motion` everywhere motion is used for delight (star pops, streak fills, spotlight/dim). **Don't** let reduced-motion mode drop any content — only the animation, never the information. For incremental diagrams specifically: **do** keep them manually steppable (click/arrow-key advances each stage) rather than instant-full-reveal, since the staged sequence is often the actual teaching content, not decoration; the Avatar presence indicator's idle motion is exempt from reduced-motion (it's status feedback, not delight).
 - **Do** use `warning`/`success` for icons, borders, and fills. **Don't** use their base tokens as text color — use `warning-container`/`on-warning-container` or `success-container`/`on-success-container` for any text, matching the pattern already established for `error`.
 - **Do** let the Board feel alive (progressive writing, incremental diagrams, spotlight/dim). **Don't** let app chrome outside the Board compete with it for visual energy — chrome stays quiet so the Board reads as the one "high-energy" surface in the product.
+- **Do** pair a recognizable icon with every action that has one (play/pause/stop/speed/save/cancel/delete/etc.), everywhere in the product. **Don't** ship an icon-only control with no accessible text equivalent, or mix icon styles/weights from more than one visual language.
+- **Do** design and verify every screen across the full 360px–2560px range, including wide/multi-monitor desktop widths. **Don't** let a layout merely "not break" at wide widths — cap content width and center it rather than stretching text or controls edge-to-edge on a large display.
+- **Do** group primary navigation into a small number of learner-facing categories, with deeper destinations nested under them. **Don't** add a new top-level nav item for every page as the product grows — fit it into an existing group or it's a sign the grouping itself needs revisiting.
