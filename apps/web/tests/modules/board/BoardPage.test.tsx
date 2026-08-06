@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { BoardPage } from "../../../src/modules/board/BoardPage.js";
@@ -98,6 +98,118 @@ describe("BoardPage", () => {
     // Already visited — restored fully revealed, not re-animated from scratch.
     await waitFor(() => expect(screen.getByText(/directly\.$/)).toBeInTheDocument());
   });
+
+  it("stacks Beats on an infinite-scroll canvas: the previous Beat stays in the document after Forward, not swapped away (Story 3.4, AC #2)", async () => {
+    renderBoard();
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: "Forward" }));
+
+    expect(screen.getByRole("heading", { name: "What is recursion?" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "The two parts every recursive function needs" })).toBeInTheDocument();
+  });
+
+  it(
+    "zoom in/out buttons change the displayed zoom level and clamp at the min/max (Story 3.4, AC #1)",
+    () => {
+      renderBoard();
+      expect(screen.getByLabelText("Zoom level")).toHaveTextContent("100%");
+
+      // fireEvent (synchronous, no real per-click delay) rather than userEvent — this
+      // loop clicks far more times than any other interaction in this file, and
+      // userEvent's realistic per-click timing made it flake under heavy system load.
+      fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+      expect(screen.getByLabelText("Zoom level")).toHaveTextContent("110%");
+
+      for (let i = 0; i < 15; i += 1) {
+        fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+      }
+      expect(screen.getByLabelText("Zoom level")).toHaveTextContent("200%");
+      expect(screen.getByRole("button", { name: "Zoom in" })).toBeDisabled();
+
+      for (let i = 0; i < 20; i += 1) {
+        fireEvent.click(screen.getByRole("button", { name: "Zoom out" }));
+      }
+      expect(screen.getByLabelText("Zoom level")).toHaveTextContent("50%");
+      expect(screen.getByRole("button", { name: "Zoom out" })).toBeDisabled();
+    },
+    15_000,
+  );
+
+  it("Ctrl+wheel on the canvas changes the zoom level; a plain wheel does not (Story 3.4, AC #1)", async () => {
+    renderBoard();
+    const canvas = screen.getByRole("heading", { name: "What is recursion?" }).closest("main") as HTMLElement;
+
+    fireEvent.wheel(canvas, { deltaY: -100 });
+    expect(screen.getByLabelText("Zoom level")).toHaveTextContent("100%");
+
+    fireEvent.wheel(canvas, { deltaY: -100, ctrlKey: true });
+    expect(screen.getByLabelText("Zoom level")).toHaveTextContent("110%");
+
+    fireEvent.wheel(canvas, { deltaY: 100, ctrlKey: true });
+    expect(screen.getByLabelText("Zoom level")).toHaveTextContent("100%");
+  });
+
+  it("gutter renders a marker for every Beat; clicking one jumps to that Beat, scrolls it into view, and resets zoom to 100% (Story 3.4, AC #3/#4)", async () => {
+    renderBoard();
+    const user = userEvent.setup();
+    const scrollIntoViewSpy = vi.fn();
+    // jsdom doesn't implement scrollIntoView — safe to stub for a spy-based assertion.
+    HTMLElement.prototype.scrollIntoView = scrollIntoViewSpy;
+
+    const markers = screen.getAllByRole("button", { name: /^Jump to Beat:/ });
+    expect(markers).toHaveLength(5);
+
+    await user.click(screen.getByRole("button", { name: "Zoom in" }));
+    expect(screen.getByLabelText("Zoom level")).toHaveTextContent("110%");
+
+    await user.click(screen.getByRole("button", { name: "Jump to Beat: Tracing the call stack" }));
+
+    expect(screen.getByRole("heading", { name: "Tracing the call stack" })).toBeInTheDocument();
+    expect(scrollIntoViewSpy).toHaveBeenCalledWith({ behavior: "smooth", block: "center" });
+    expect(screen.getByLabelText("Zoom level")).toHaveTextContent("100%");
+  });
+
+  // Code review finding: clicking the marker for the Beat you're ALREADY on used to
+  // unconditionally re-navigate, wiping reveal progress for a Beat still mid-reveal.
+  // Uses Beat 2, NOT Beat 1 — Beat 1's id is pre-seeded into visitedBeatIds by the
+  // component's own initial state, so goToLessonBeat(0) never actually resets it
+  // regardless of this fix; Beat 2 only enters visitedBeatIds once fully revealed,
+  // so it's the case that actually exercises the reset path this fix prevents.
+  // Asserts continuity (length holds or grows), not byte-for-byte equality — the
+  // reveal timer legitimately keeps ticking in real time across the click's own await.
+  it("clicking the marker for the currently-active Beat does not reset its in-progress reveal (Story 3.4, code review fix)", async () => {
+    renderBoard();
+    HTMLElement.prototype.scrollIntoView = vi.fn();
+    await userEvent.setup().click(screen.getByRole("button", { name: "Forward" }));
+
+    await waitFor(() => expect(screen.getByText(/Every recursive function/).textContent?.length).toBeGreaterThan(30), { timeout: 5000 });
+    const revealedLengthBefore = screen.getByText(/Every recursive function/).textContent?.length ?? 0;
+
+    await userEvent.setup().click(screen.getByRole("button", { name: "Jump to Beat: The two parts every recursive function needs" }));
+
+    expect(screen.getByText(/Every recursive function/).textContent?.length).toBeGreaterThanOrEqual(revealedLengthBefore);
+  });
+
+  it(
+    "Restart concept also resets zoom back to 100% (Story 3.4, code review fix)",
+    async () => {
+      renderBoard();
+      const user = userEvent.setup();
+
+      for (let i = 0; i < 4; i += 1) {
+        await user.click(screen.getByRole("button", { name: "Forward" }));
+      }
+      await waitFor(() => expect(screen.getByRole("button", { name: "Start checkpoint" })).toBeInTheDocument(), { timeout: 8000 });
+      await user.click(screen.getByRole("button", { name: "Zoom in" }));
+      expect(screen.getByLabelText("Zoom level")).toHaveTextContent("110%");
+
+      await user.click(screen.getByRole("button", { name: "Restart concept" }));
+
+      expect(screen.getByLabelText("Zoom level")).toHaveTextContent("100%");
+    },
+    15_000,
+  );
 
   it("disables Forward on the last Beat and Back on the first", async () => {
     renderBoard();

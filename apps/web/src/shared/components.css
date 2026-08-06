@@ -565,21 +565,26 @@
   flex: 1;
   gap: var(--spacing-4);
   padding: 0 var(--spacing-6) 140px;
-  align-items: flex-start;
+  /* Story 3.4: stretch (not flex-start) so the gutter's height tracks the canvas's own
+     rendered viewport height — needed for its markers' percentage-based top offsets
+     (measured against the canvas's scrollHeight) to line up visually. */
+  align-items: stretch;
 }
 
 /* Board Gutter Markers — small dots, neutral outline by default, accent when marking
-   the currently-active Beat; each clickable to jump the viewport there. */
+   the currently-active Beat; each clickable to jump the viewport there. Story 3.4:
+   absolutely positioned by measured Beat location (a lightweight wayfinding
+   approximation, not a pixel-perfect synced minimap — DESIGN.md's own framing). */
 .usavvy-board-gutter {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--spacing-3);
-  padding-top: var(--spacing-6);
+  position: relative;
   flex-shrink: 0;
+  width: 12px;
+  padding-top: var(--spacing-6);
 }
 
 .usavvy-board-gutter-marker {
+  position: absolute;
+  left: 1px;
   width: 10px;
   height: 10px;
   border-radius: 50%;
@@ -587,12 +592,14 @@
   border: none;
   cursor: pointer;
   padding: 0;
+  transform: translateY(-50%);
 }
 
 .usavvy-board-gutter-marker[data-active="true"] {
   background: var(--color-accent);
   width: 12px;
   height: 12px;
+  left: 0;
 }
 
 .usavvy-board-gutter-marker:focus-visible {
@@ -600,12 +607,33 @@
   outline-offset: 2px;
 }
 
+/* Story 3.4 (FR-B-31): the canvas itself is the scrollable/zoomable infinite-vertical-
+   -scroll surface (DESIGN.md's Layout & Spacing) — a fixed viewport height so it
+   actually scrolls, rather than growing the whole page. */
 .usavvy-board-canvas {
   flex: 1;
   background: var(--color-board-dark-surface);
   border-radius: var(--radius-lg);
   padding: var(--spacing-6);
   max-width: 760px;
+  max-height: calc(100vh - 260px);
+  overflow: auto;
+}
+
+.usavvy-board-canvas-zoom-wrapper {
+  /* Code review finding: an always-applied CSS transform already makes this the
+     offsetParent for its children (per the CSSOM View spec — MDN: "an element with a
+     transform value other than none will be an offsetParent"), so Beat sections'
+     measured offsetTop was already relative to this wrapper, not the document. Made
+     explicit with position: relative anyway so that relationship doesn't silently
+     depend on the transform always being present (e.g. if a future change ever made the
+     transform conditional on zoomLevel !== 1). */
+  position: relative;
+  transform-origin: top left;
+}
+
+.usavvy-board-beat-section {
+  margin-bottom: var(--spacing-8);
 }
 
 .usavvy-board-beat-heading {
@@ -614,6 +642,12 @@
   font-weight: 600;
   color: var(--color-secondary-container);
   margin: 0 0 var(--spacing-3);
+}
+
+.usavvy-board-zoom-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-2);
 }
 
 .usavvy-board-block {

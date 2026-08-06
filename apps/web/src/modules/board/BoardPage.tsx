@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
   MOCK_CONCEPT,
@@ -25,6 +25,16 @@ export const REVEAL_TICK_MS = 200;
 
 const ROUTE_OPTIONS: ExplanationRouteType[] = ["deeper", "simpler", "different-example", "more-examples", "analogy", "confused"];
 const VOICES = ["Voice A", "Voice B"];
+
+// Story 3.4 (FR-B-31). Zoom is a plain CSS scale transform, clamped — no bespoke
+// gesture-recognition engine (see the story's own CRITICAL SCOPE NOTE).
+const MIN_ZOOM = 0.5;
+const MAX_ZOOM = 2;
+const ZOOM_STEP = 0.1;
+
+function clampZoom(zoom: number): number {
+  return Math.round(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom)) * 100) / 100;
+}
 
 function countUnits(block: BoardContentBlock): number {
   switch (block.kind) {
@@ -181,6 +191,16 @@ export function BoardPage() {
   const [checkpointIndex, setCheckpointIndex] = useState(0);
   const [checkpointSelected, setCheckpointSelected] = useState<number | null>(null);
   const [checkpointDone, setCheckpointDone] = useState(false);
+  const [zoomLevel, setZoomLevel] = useState(1);
+  const [scrollTargetId, setScrollTargetId] = useState<string | null>(null);
+  const [markerPositions, setMarkerPositions] = useState<Record<string, number>>({});
+  const canvasRef = useRef<HTMLElement | null>(null);
+  const beatSectionRefs = useRef(new Map<string, HTMLElement>());
+
+  function registerBeatSectionRef(beatId: string, el: HTMLElement | null): void {
+    if (el) beatSectionRefs.current.set(beatId, el);
+    else beatSectionRefs.current.delete(beatId);
+  }
 
   const lessonBeat = concept.beats[lessonBeatIndex] as BoardBeat;
   const displayedBeat = overlayBeat ?? lessonBeat;
@@ -208,6 +228,59 @@ export function BoardPage() {
       setVisitedBeatIds((current) => new Set(current).add(displayedBeat.id));
     }
   }, [isFullyRevealed, displayedBeat.id, overlayBeat]);
+
+  // Story 3.4, AC #3: gutter markers positioned to reflect each Beat's real location on
+  // the (now-stacked) canvas — measured from actual rendered layout, not a naive
+  // index/count approximation, since Beats have very different content lengths. Known
+  // limitation: jsdom computes offsetTop/scrollHeight as 0, so this can't be
+  // pixel-verified by this test suite; it is correct in a real browser.
+  useLayoutEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const scrollHeight = canvas.scrollHeight || 1;
+    const next: Record<string, number> = {};
+    for (const beat of concept.beats.slice(0, lessonBeatIndex + 1)) {
+      const el = beatSectionRefs.current.get(beat.id);
+      next[beat.id] = el ? (el.offsetTop / scrollHeight) * 100 : 0;
+    }
+    setMarkerPositions(next);
+  }, [lessonBeatIndex, zoomLevel, revealedUnits, concept.beats]);
+
+  // Story 3.4, AC #4: runs right after the render that includes the jump target (even
+  // if it wasn't previously in the stack), since `lessonBeatIndex` is a dependency —
+  // the ref is guaranteed to exist in the DOM by the time this effect runs.
+  useEffect(() => {
+    if (!scrollTargetId) return;
+    beatSectionRefs.current.get(scrollTargetId)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    setScrollTargetId(null);
+  }, [scrollTargetId, lessonBeatIndex]);
+
+  // Code review finding: calling goToLessonBeat unconditionally — even when already on
+  // the clicked Beat — reset revealedUnits back to 0 for a Beat still mid-reveal (not
+  // yet in visitedBeatIds), a jarring "my progress just vanished" regression. Skipped
+  // when already on that Beat (and not mid-detour); the jump/zoom-reset still happens.
+  function handleGutterMarkerClick(index: number): void {
+    const targetBeat = concept.beats[index];
+    if (overlayBeat || index !== lessonBeatIndex) {
+      goToLessonBeat(index);
+    }
+    setZoomLevel(1);
+    if (targetBeat) setScrollTargetId(targetBeat.id);
+  }
+
+  function zoomIn(): void {
+    setZoomLevel((current) => clampZoom(current + ZOOM_STEP));
+  }
+
+  function zoomOut(): void {
+    setZoomLevel((current) => clampZoom(current - ZOOM_STEP));
+  }
+
+  function handleCanvasWheel(event: React.WheelEvent<HTMLElement>): void {
+    if (!event.ctrlKey) return;
+    event.preventDefault();
+    setZoomLevel((current) => clampZoom(current + (event.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP)));
+  }
 
   function goToLessonBeat(index: number): void {
     if (index < 0 || index >= concept.beats.length) return;
@@ -286,6 +359,14 @@ export function BoardPage() {
     setIsPaused(false);
     setCheckpointActive(false);
     setCheckpointDone(false);
+    // Code review finding: restarting shrinks the stack back to just Beat 1, but left a
+    // learner who'd zoomed/scrolled elsewhere still zoomed/scrolled away from it.
+    // Element.prototype.scrollTo isn't implemented in jsdom (unlike the softer
+    // scrollIntoView no-op) — guarded so this stays safe under test.
+    setZoomLevel(1);
+    if (typeof canvasRef.current?.scrollTo === "function") {
+      canvasRef.current.scrollTo({ top: 0 });
+    }
   }
 
   function startCheckpoint(): void {
@@ -351,61 +432,83 @@ export function BoardPage() {
               className="usavvy-board-gutter-marker"
               data-active={!overlayBeat && index === lessonBeatIndex}
               aria-label={`Jump to Beat: ${beat.title}`}
-              onClick={() => goToLessonBeat(index)}
+              style={{ top: `${markerPositions[beat.id] ?? (index / Math.max(concept.beats.length - 1, 1)) * 100}%` }}
+              onClick={() => handleGutterMarkerClick(index)}
             />
           ))}
         </nav>
 
-        <main className="usavvy-board-canvas">
-          <h1 className="usavvy-board-beat-heading">
-            {displayedBeat.title}
-            {overlayBeat ? ` (${describeRoute(overlayBeat.routeType as ExplanationRouteType)})` : null}
-          </h1>
-          <BeatContent beat={displayedBeat} revealedUnits={revealedUnits} />
-          {isFullyRevealed ? <p className="usavvy-board-source-tag">Source: {displayedBeat.sourceRef}</p> : null}
-
-          {overlayBeat ? (
-            <button type="button" className="usavvy-board-control-button" onClick={handleBack} style={{ paddingLeft: 0 }}>
-              ← Back to lesson
-            </button>
-          ) : null}
-
-          {!overlayBeat && isFullyRevealed ? (
-            <div>
-              {bookmarks.has(displayedBeat.id) ? (
-                <p role="status">Bookmarked{bookmarks.get(displayedBeat.id) ? `: "${bookmarks.get(displayedBeat.id)}"` : ""}</p>
-              ) : null}
-              {notingBeatId === displayedBeat.id ? (
-                <div>
-                  <input
-                    aria-label="Bookmark note"
-                    value={noteText}
-                    onChange={(event) => setNoteText(event.target.value)}
-                    placeholder="Add a note (optional)"
-                  />
-                  <button type="button" className="usavvy-board-control-button" onClick={() => saveNote(displayedBeat.id)}>
-                    Save bookmark
-                  </button>
-                </div>
-              ) : (
-                <button type="button" className="usavvy-board-control-button" onClick={() => toggleBookmark(displayedBeat.id)} style={{ paddingLeft: 0 }}>
-                  {bookmarks.has(displayedBeat.id) ? "Remove bookmark" : "Bookmark this Beat"}
+        <main className="usavvy-board-canvas" ref={canvasRef} onWheel={handleCanvasWheel}>
+          <div className="usavvy-board-canvas-zoom-wrapper" style={{ transform: `scale(${zoomLevel})` }}>
+            {overlayBeat ? (
+              <>
+                <h1 className="usavvy-board-beat-heading">
+                  {overlayBeat.title} ({describeRoute(overlayBeat.routeType as ExplanationRouteType)})
+                </h1>
+                <BeatContent beat={overlayBeat} revealedUnits={revealedUnits} />
+                {isFullyRevealed ? <p className="usavvy-board-source-tag">Source: {overlayBeat.sourceRef}</p> : null}
+                <button type="button" className="usavvy-board-control-button" onClick={handleBack} style={{ paddingLeft: 0 }}>
+                  ← Back to lesson
                 </button>
-              )}
-            </div>
-          ) : null}
+              </>
+            ) : (
+              concept.beats.slice(0, lessonBeatIndex + 1).map((beat, index) => {
+                const isActive = index === lessonBeatIndex;
+                const revealed = isActive ? revealedUnits : totalUnitsFor(beat);
+                const sectionFullyRevealed = isActive ? isFullyRevealed : true;
+                const HeadingTag = isActive ? "h1" : "h2";
+                return (
+                  <section
+                    key={beat.id}
+                    id={`beat-section-${beat.id}`}
+                    ref={(el) => registerBeatSectionRef(beat.id, el)}
+                    className="usavvy-board-beat-section"
+                  >
+                    <HeadingTag className="usavvy-board-beat-heading">{beat.title}</HeadingTag>
+                    <BeatContent beat={beat} revealedUnits={revealed} />
+                    {sectionFullyRevealed ? <p className="usavvy-board-source-tag">Source: {beat.sourceRef}</p> : null}
 
-          {atConceptEnd && !checkpointActive ? (
-            <div className="usavvy-board-block" role="status">
-              <p>You've reached the end of "{concept.title}."</p>
-              <button type="button" className="usavvy-board-explain-toggle" onClick={startCheckpoint}>
-                Start checkpoint
-              </button>
-              <button type="button" className="usavvy-board-control-button" onClick={handleRestartConcept}>
-                Restart concept
-              </button>
-            </div>
-          ) : null}
+                    {isActive && isFullyRevealed ? (
+                      <div>
+                        {bookmarks.has(beat.id) ? (
+                          <p role="status">Bookmarked{bookmarks.get(beat.id) ? `: "${bookmarks.get(beat.id)}"` : ""}</p>
+                        ) : null}
+                        {notingBeatId === beat.id ? (
+                          <div>
+                            <input
+                              aria-label="Bookmark note"
+                              value={noteText}
+                              onChange={(event) => setNoteText(event.target.value)}
+                              placeholder="Add a note (optional)"
+                            />
+                            <button type="button" className="usavvy-board-control-button" onClick={() => saveNote(beat.id)}>
+                              Save bookmark
+                            </button>
+                          </div>
+                        ) : (
+                          <button type="button" className="usavvy-board-control-button" onClick={() => toggleBookmark(beat.id)} style={{ paddingLeft: 0 }}>
+                            {bookmarks.has(beat.id) ? "Remove bookmark" : "Bookmark this Beat"}
+                          </button>
+                        )}
+                      </div>
+                    ) : null}
+
+                    {isActive && atConceptEnd && !checkpointActive ? (
+                      <div className="usavvy-board-block" role="status">
+                        <p>You've reached the end of "{concept.title}."</p>
+                        <button type="button" className="usavvy-board-explain-toggle" onClick={startCheckpoint}>
+                          Start checkpoint
+                        </button>
+                        <button type="button" className="usavvy-board-control-button" onClick={handleRestartConcept}>
+                          Restart concept
+                        </button>
+                      </div>
+                    ) : null}
+                  </section>
+                );
+              })
+            )}
+          </div>
         </main>
       </div>
 
@@ -535,6 +638,15 @@ export function BoardPage() {
         <button type="button" className="usavvy-board-control-button" onClick={() => setShowTranscript((s) => !s)}>
           Transcript
         </button>
+        <div className="usavvy-board-zoom-controls">
+          <button type="button" className="usavvy-board-control-button" onClick={zoomOut} disabled={zoomLevel <= MIN_ZOOM} aria-label="Zoom out">
+            −
+          </button>
+          <span aria-label="Zoom level">{Math.round(zoomLevel * 100)}%</span>
+          <button type="button" className="usavvy-board-control-button" onClick={zoomIn} disabled={zoomLevel >= MAX_ZOOM} aria-label="Zoom in">
+            +
+          </button>
+        </div>
         <button type="button" className="usavvy-board-explain-toggle" onClick={() => setExplainOpen((open) => !open)}>
           Explain more
         </button>
