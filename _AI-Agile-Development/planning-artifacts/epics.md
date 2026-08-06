@@ -453,6 +453,26 @@ As a learner, I want to review a chronological history of my board sessions, ass
 **When** a learner opens Activity History
 **Then** only the activity types from currently-shipped epics appear — the timeline never errors or shows a placeholder for a type that doesn't exist yet
 
+### Story 1.12: Application shell and persistent navigation
+
+*Added 2026-08-06 via Sprint Change Proposal (`sprint-change-proposal-2026-08-06.md`) — retrofits a real navigation shell across every page Epic 1/Epic 2 already shipped. Every route so far (login, signup, profile, preferences, activity history, catalog, course detail, upload-content, etc.) has only ever been reachable by typing its exact URL — no persistent header/nav has ever existed (`AppHeader.tsx`'s own comment confirms this was a deliberate, explicitly-scoped-out gap since Story 1.10). `DESIGN.md` already specifies "primary navigation" as an intended chrome element (its color spec names it directly) — this story builds what was designed but never wired up, and touches presentation/routing only, with zero changes to any of the 23 already-completed stories' backend or business logic.*
+
+As a learner, I want a consistent header and navigation across every page, so that I can move through the app as one connected experience instead of only reaching pages by typing exact URLs.
+
+**Acceptance Criteria:**
+**Given** a logged-in learner is on any authenticated page
+**Then** a persistent shell (header/nav) is visible, styled per `DESIGN.md`'s existing "primary navigation" spec, and stays present across navigation between pages
+
+**Given** the persistent nav
+**Then** it links to every already-shipped authenticated page (catalog, upload-content, profile, preferences, activity history, account deletion, data export) so each is reachable without knowing its URL
+
+**Given** a visitor is on a public route (`/login`, `/signup`, `/verify-email`, `/age-declaration`, `/waiting-for-consent`, `/parental-consent`)
+**Then** the nav is hidden or shown in a minimal, logged-out state — never showing links to authenticated-only pages
+
+**Given** this story ships
+**When** any existing route, test, or backend behavior is exercised
+**Then** nothing about it changes — this story is additive presentation/routing only
+
 ## Epic 2: Content — Catalog & Learner Uploads
 
 Users can browse/search the course catalog, customize a course before starting, or upload their own material and get a reviewable AI-proposed outline. Depends on Epic 1.
@@ -749,6 +769,8 @@ As a learner, I want to attach my own personal notes to a catalog course, so tha
 **Then** the notes remain private and are never visible or referenced in that other learner's session
 
 ## Epic 3: The Interactive Board
+
+> **Process note (added 2026-08-06, Sprint Change Proposal `sprint-change-proposal-2026-08-06.md`):** this is the first epic to kick off under the new "mock-first epic" convention — before Story 3.1 or any other backend work starts, build a click-through mocked-data UI covering this epic's core journey and get sign-off, then proceed story-by-story with real backend behind it. See `ARCHITECTURE-SPINE.md`'s Process Conventions section.
 
 Users learn via the AI-avatar-led board — pause/rewind/replay, "explain deeper/simpler," different examples, ask-anything, checkpoints, full multi-modal rendering (text/math/code/diagrams). This is the product's core bet. Depends on Epic 1 + 2. FR-B-11 (Skip concept) is delivered entirely by Epic 4, not here — see Epic 4 → Story 4.13.
 

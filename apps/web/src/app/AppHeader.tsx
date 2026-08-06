@@ -1,17 +1,34 @@
 import { useEffect, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../modules/auth/index.js";
 import { useNotifications } from "./useNotifications.js";
 
+// Story 1.12 (retrofit, Sprint Change Proposal 2026-08-06): every already-shipped
+// authenticated page (AC #2) — plus Home, which renders regardless of session and
+// isn't one of AC #2's named pages but is the nav's standard brand/home link.
+const NAV_LINKS: { to: string; label: string }[] = [
+  { to: "/", label: "Home" },
+  { to: "/catalog", label: "Catalog" },
+  { to: "/upload-content", label: "Upload content" },
+  { to: "/profile", label: "Profile" },
+  { to: "/preferences", label: "Preferences" },
+  { to: "/activity-history", label: "Activity History" },
+  { to: "/account-deletion", label: "Account Deletion" },
+  { to: "/data-export", label: "Data Export" },
+];
+
 /**
- * Story 1.10 (FR-A-10). No persistent header/nav exists anywhere else in this app —
- * every page renders its own bare <main>. This is deliberately minimal: just enough
- * chrome to host the bell icon, not a full site-wide nav/branding redesign (see that
- * story's own Scope note).
+ * Story 1.10 (FR-A-10) built this as the notification bell only. Story 1.12 (retrofit)
+ * adds the persistent nav (AC #1/#2) into the same session-gated component — the
+ * existing `!session` early-return below already satisfies AC #3 (nav hidden on every
+ * public route) for free, since a public route is by definition reached before a
+ * `session` exists.
  */
 export function AppHeader() {
-  const { session } = useAuth();
+  const { session, logout } = useAuth();
   const { notifications, unreadCount, markRead, clear, actionError } = useNotifications();
   const [open, setOpen] = useState(false);
+  const navigate = useNavigate();
 
   // Review finding: `open` previously survived a logout/login cycle (this component
   // never unmounts, only returns null) — a different learner could log in and find the
@@ -26,16 +43,38 @@ export function AppHeader() {
 
   return (
     <header className="usavvy-app-header">
-      <button
-        type="button"
-        className="usavvy-notification-bell"
-        aria-label={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : "Notifications"}
-        aria-expanded={open}
-        onClick={() => setOpen((current) => !current)}
-      >
-        <span aria-hidden="true">🔔</span>
-        {unreadCount > 0 ? <span className="usavvy-notification-dot" data-testid="notification-unread-dot" /> : null}
-      </button>
+      <nav className="usavvy-app-nav" aria-label="Primary navigation">
+        {NAV_LINKS.map((link) => (
+          <Link key={link.to} to={link.to} className="usavvy-app-nav-link">
+            {link.label}
+          </Link>
+        ))}
+      </nav>
+      <div className="usavvy-app-header-actions">
+        <button
+          type="button"
+          className="usavvy-notification-bell"
+          aria-label={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : "Notifications"}
+          aria-expanded={open}
+          onClick={() => setOpen((current) => !current)}
+        >
+          <span aria-hidden="true">🔔</span>
+          {unreadCount > 0 ? <span className="usavvy-notification-dot" data-testid="notification-unread-dot" /> : null}
+        </button>
+        {/* Review finding: `logout()` has existed in useAuth since Story 1.1 but no page
+            has ever wired it to a UI control — this shared header is now the first,
+            and only, place a learner can actually end their session. */}
+        <button
+          type="button"
+          className="usavvy-app-nav-link"
+          onClick={() => {
+            logout();
+            navigate("/login");
+          }}
+        >
+          Log out
+        </button>
+      </div>
 
       {open ? (
         <div className="usavvy-notification-panel" role="region" aria-label="Notification Center">

@@ -212,7 +212,8 @@ usavvy/
           engagement/
           admin/
         shared/                 # design system, layout, cross-module UI
-        app/                    # routing, providers, entry
+        app/                    # routing, providers, entry, persistent nav shell
+                                 # (Story 1.12) — the one place app-wide chrome lives
       tests/                    # mirrors src/ 1:1 (AD-8)
   services/                     # each an independently-deployable Fastify + TypeScript backend (AD-1)
     gateway/                    # BFF: JWT verify (AD-7), routing/aggregation to other services, CORS
@@ -291,3 +292,7 @@ erDiagram
 - **Locale library / translation tooling** — AD-4 keeps the codebase translation-ready structurally; which i18n library and locale-data format is not yet chosen.
 - **Payment/billing integration** — blocked on OQ-1 (monetisation model, explicitly unresolved upstream); no port or vendor chosen yet.
 - **Epic 3 (Board) and Epic 5 (Cohorts) epic-altitude spines** — this initiative spine sets the invariants; both epics carry enough internal complexity (per the PRD's own risk register) to warrant their own inherited epic-altitude spine before story-writing.
+
+## Process Conventions
+
+- **Mock-first epic kickoff (added 2026-08-06, Sprint Change Proposal `sprint-change-proposal-2026-08-06.md`):** before a new epic's first backend story starts, build a click-through mocked-data UI covering that epic's core user journey and get explicit sign-off on it, then proceed story-by-story with real backend built behind it. Applies starting with Epic 3 — Epics 1-2 were already built vertical-slice-per-story and are not retroactively redone, aside from Story 1.12 retrofitting a persistent nav shell across their existing pages.

@@ -48,7 +48,7 @@ tracking_system: file-system
 story_location: _AI-Agile-Development/implementation-artifacts
 
 development_status:
-  epic-1: done
+  epic-1: in-progress
   1-0-environment-walking-skeleton-health-check: done
   1-1-sign-up-log-in-with-email-verification: done
   1-2-age-declaration-minor-consent: done
@@ -61,6 +61,7 @@ development_status:
   1-9-predefined-color-theme-picker: done
   1-10-notification-center: done
   1-11-activity-history: done
+  1-12-application-shell-and-navigation: done
   epic-1-retrospective: optional
 
   epic-2: in-progress

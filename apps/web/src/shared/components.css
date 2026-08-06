@@ -216,12 +216,62 @@
 }
 
 /* Story 1.10 (FR-A-10): DESIGN.md's notification-center component token
-   (unread-dot: accent, background: surface, in-progress-lock-icon: on-surface-variant). */
+   (unread-dot: accent, background: surface, in-progress-lock-icon: on-surface-variant).
+   Story 1.12 (retrofit): now also hosts the persistent nav (left) alongside the
+   notification bell (right) — space-between replaces the old bell-only flex-end. */
 .usavvy-app-header {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-4);
   padding: var(--spacing-3) var(--spacing-4);
   position: relative;
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+}
+
+/* Story 1.12 (retrofit). DESIGN.md: "Primary — Electric Indigo. App chrome, primary
+   navigation, headers." — built on the theme-reactive --color-primary/--color-on-primary
+   tokens (not hardcoded hex) so Story 1.9's theme picker keeps working on this chrome. */
+.usavvy-app-nav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-3);
+}
+
+/* Shared by both the <a> nav links and the "Log out" <button> — a button needs the
+   border/background/font-family/cursor reset an anchor doesn't. */
+.usavvy-app-nav-link {
+  color: var(--color-on-primary);
+  text-decoration: none;
+  padding: var(--spacing-1) var(--spacing-2);
+  border-radius: var(--radius-default);
+  background: transparent;
+  border: none;
+  font-family: inherit;
+  font-size: inherit;
+  cursor: pointer;
+}
+
+.usavvy-app-nav-link:hover {
+  text-decoration: underline;
+}
+
+/* Review finding: --color-focus-ring resolves to the same hex as --color-primary in
+   the default and warm-paper themes — a same-color-as-background outline is invisible.
+   --color-on-primary (always a contrasting color against the header's own background,
+   by construction) is the correct outline color for anything sitting on this header,
+   not the shared page-wide focus-ring token. */
+.usavvy-app-nav-link:focus-visible {
+  outline: 2px solid var(--color-on-primary);
+  outline-offset: 1px;
+}
+
+.usavvy-app-header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
 }
 
 .usavvy-notification-bell {
@@ -234,7 +284,7 @@
 }
 
 .usavvy-notification-bell:focus-visible {
-  outline: 2px solid var(--color-focus-ring);
+  outline: 2px solid var(--color-on-primary);
   outline-offset: 1px;
 }
 
