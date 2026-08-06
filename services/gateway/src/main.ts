@@ -3,6 +3,7 @@ import { loadGatewayConfig } from "./config.js";
 import { createCoreClient } from "./coreClient.js";
 import { createCoursesClient } from "./coursesClient.js";
 import { createIngestionClient } from "./ingestionClient.js";
+import { createBoardOrchestrationClient } from "./boardOrchestrationClient.js";
 import { buildApp } from "./app.js";
 
 const config = loadGatewayConfig(process.env);
@@ -10,6 +11,7 @@ const logger = createLogger("gateway");
 const coreClient = createCoreClient(config.coreServiceUrl, logger, config.internalServiceSecret);
 const coursesClient = createCoursesClient(config.coursesServiceUrl, logger, config.internalServiceSecret);
 const ingestionClient = createIngestionClient(config.ingestionServiceUrl, logger, config.internalServiceSecret);
+const boardOrchestrationClient = createBoardOrchestrationClient(config.boardOrchestrationServiceUrl, logger, config.internalServiceSecret);
 
 const app = buildApp({
   fetchCoreHealth: () => coreClient.fetchHealth(),
@@ -19,6 +21,7 @@ const app = buildApp({
   forwardToIngestion: (method, path, options) => ingestionClient.forward(method, path, options),
   forwardMultipartToIngestion: (path, contentType, rawBody, headers) =>
     ingestionClient.forwardMultipart(path, contentType, rawBody, { headers }),
+  forwardToBoardOrchestration: (method, path, options) => boardOrchestrationClient.forward(method, path, options),
   corsOrigin: config.webOrigin,
   jwtSecret: config.jwtSecret,
   logger,

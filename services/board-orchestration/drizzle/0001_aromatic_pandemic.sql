@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "learning_sessions_user_concept_active_idx" ON "learning_sessions" USING btree ("user_id","concept_id") WHERE status <> 'ended';

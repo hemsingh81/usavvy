@@ -12,6 +12,7 @@ export function createTestAppDeps(overrides: Partial<BuildAppDeps> = {}): BuildA
     forwardToCourses: vi.fn().mockResolvedValue({ status: 200, body: {} }),
     forwardToIngestion: vi.fn().mockResolvedValue({ status: 200, body: {} }),
     forwardMultipartToIngestion: vi.fn().mockResolvedValue({ status: 201, body: {} }),
+    forwardToBoardOrchestration: vi.fn().mockResolvedValue({ status: 200, body: {} }),
     corsOrigin: "http://localhost:5173",
     jwtSecret: "test-secret",
     logger: createLogger("test"),

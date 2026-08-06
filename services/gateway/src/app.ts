@@ -8,6 +8,7 @@ import { registerAuthProxyRoutes } from "./authProxy.js";
 import { registerCoursesProxyRoutes } from "./coursesProxy.js";
 import { registerIngestionProxyRoutes } from "./ingestionProxy.js";
 import { registerOutlineConfirmationProxyRoutes } from "./outlineConfirmationProxy.js";
+import { registerBoardOrchestrationProxyRoutes } from "./boardOrchestrationProxy.js";
 
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 
@@ -18,6 +19,7 @@ export interface BuildAppDeps {
   forwardToCourses: (method: string, path: string, options?: ProxyOptions) => Promise<ProxyResult>;
   forwardToIngestion: (method: string, path: string, options?: ProxyOptions) => Promise<ProxyResult>;
   forwardMultipartToIngestion: (path: string, contentType: string, rawBody: Buffer, headers: Record<string, string>) => Promise<ProxyResult>;
+  forwardToBoardOrchestration: (method: string, path: string, options?: ProxyOptions) => Promise<ProxyResult>;
   corsOrigin: string;
   jwtSecret: string;
   logger: Logger;
@@ -63,6 +65,7 @@ export function buildApp(deps: BuildAppDeps) {
     forwardToCourses: deps.forwardToCourses,
     logger: deps.logger,
   });
+  registerBoardOrchestrationProxyRoutes(app, { forwardToBoardOrchestration: deps.forwardToBoardOrchestration });
 
   return app;
 }

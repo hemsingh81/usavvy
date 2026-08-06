@@ -19,3 +19,8 @@ EOSQL
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" <<-EOSQL
   CREATE DATABASE usavvy_ingestion;
 EOSQL
+
+# Story 3.1 (Epic 3 start): board-orchestration (LearningSession/Beat/SessionEvent, AD-14).
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" <<-EOSQL
+  CREATE DATABASE usavvy_board_orchestration;
+EOSQL

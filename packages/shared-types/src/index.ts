@@ -154,3 +154,17 @@ export {
   urlImportInputSchema,
   type UrlImportInput,
 } from "./uploads.js";
+export {
+  beatInputSchema,
+  type BeatInput,
+  beatResponseSchema,
+  type BeatResponse,
+  createLearningSessionInputSchema,
+  type CreateLearningSessionInput,
+  learningSessionResponseSchema,
+  type LearningSessionResponse,
+  pauseLearningSessionInputSchema,
+  type PauseLearningSessionInput,
+  resumeLearningSessionResponseSchema,
+  type ResumeLearningSessionResponse,
+} from "./learningSessions.js";
