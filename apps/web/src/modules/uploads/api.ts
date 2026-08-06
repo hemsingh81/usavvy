@@ -1,5 +1,5 @@
 import { listUploadsQuerySchema, uploadedDocumentResponseSchema, type UploadedDocumentResponse } from "@usavvy/shared-types";
-import { ApiError, throwForErrorResponse } from "../../shared/apiClient.js";
+import { apiRequest, ApiError, throwForErrorResponse } from "../../shared/apiClient.js";
 
 const REQUEST_TIMEOUT_MS = 60_000;
 
@@ -42,6 +42,36 @@ export async function uploadFile(
   }
   const json: unknown = await response.json().catch(() => undefined);
   return uploadedDocumentResponseSchema.parse(json);
+}
+
+/** Story 2.8, AC #1: unlike uploadFile, a plain JSON body — built on the shared apiRequest helper. */
+export function pasteText(
+  apiUrl: string,
+  accessToken: string,
+  customCourseId: string | undefined,
+  text: string,
+  copyrightAttested: boolean,
+): Promise<UploadedDocumentResponse> {
+  return apiRequest(apiUrl, "/uploads/paste-text", uploadedDocumentResponseSchema, {
+    method: "POST",
+    body: { ...(customCourseId ? { customCourseId } : {}), text, copyrightAttested },
+    accessToken,
+  });
+}
+
+/** Story 2.8, AC #2/#3. */
+export function importFromUrl(
+  apiUrl: string,
+  accessToken: string,
+  customCourseId: string | undefined,
+  url: string,
+  copyrightAttested: boolean,
+): Promise<UploadedDocumentResponse> {
+  return apiRequest(apiUrl, "/uploads/url-import", uploadedDocumentResponseSchema, {
+    method: "POST",
+    body: { ...(customCourseId ? { customCourseId } : {}), url, copyrightAttested },
+    accessToken,
+  });
 }
 
 export async function listUploads(apiUrl: string, accessToken: string, customCourseId: string): Promise<UploadedDocumentResponse[]> {

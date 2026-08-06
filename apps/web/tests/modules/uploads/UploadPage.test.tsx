@@ -136,4 +136,63 @@ describe("UploadPage", () => {
     expect(screen.getByText(/file-10\.txt: 10-file-per-course limit reached/)).toBeInTheDocument();
     expect(screen.getByText(/file-11\.txt: 10-file-per-course limit reached/)).toBeInTheDocument();
   });
+
+  it("pasting valid text and submitting shows it accepted (Story 2.8, AC #1)", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(201, { id: "d1", customCourseId: "cc1", fileName: "pasted-text.txt", fileType: "txt", fileSizeBytes: 20, status: "queued", createdAt: "2026-01-15T00:00:00.000Z" }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage({ accessToken: "a-token" });
+    const user = userEvent.setup();
+
+    await user.click(screen.getByLabelText(/right to use this material/i));
+    await user.type(screen.getByLabelText("Paste text"), "This is clearly more than ten words of pasted content for testing.");
+    await user.click(screen.getByRole("button", { name: "Add pasted text" }));
+
+    await waitFor(() => expect(screen.getByText(/pasted-text\.txt: accepted/)).toBeInTheDocument());
+    expect(screen.getByText("1 of 10 files added")).toBeInTheDocument();
+  });
+
+  it("shows the specific rejection message when pasted text is too short (Story 2.8, AC #4)", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(400, { error: { code: "VALIDATION_ERROR", message: "not enough content to build a course from" } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage({ accessToken: "a-token" });
+    const user = userEvent.setup();
+
+    await user.click(screen.getByLabelText(/right to use this material/i));
+    await user.type(screen.getByLabelText("Paste text"), "too short");
+    await user.click(screen.getByRole("button", { name: "Add pasted text" }));
+
+    await waitFor(() => expect(screen.getByText(/pasted-text\.txt: not enough content to build a course from/)).toBeInTheDocument());
+  });
+
+  it("submitting an unreachable URL shows the specific reason from the response (Story 2.8, AC #3)", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(400, { error: { code: "VALIDATION_ERROR", message: "URL is unreachable" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage({ accessToken: "a-token" });
+    const user = userEvent.setup();
+
+    await user.click(screen.getByLabelText(/right to use this material/i));
+    await user.type(screen.getByLabelText("Import from URL"), "https://example.com/down");
+    await user.click(screen.getByRole("button", { name: "Import" }));
+
+    await waitFor(() => expect(screen.getByText(/example\.com\/down: URL is unreachable/)).toBeInTheDocument());
+  });
+
+  it("a successful URL import increments the same running count file uploads use (Story 2.8, AC #2)", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(201, { id: "d2", customCourseId: "cc1", fileName: "example.com.txt", fileType: "txt", fileSizeBytes: 40, status: "queued", createdAt: "2026-01-15T00:00:00.000Z" }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage({ accessToken: "a-token" });
+    const user = userEvent.setup();
+
+    await user.click(screen.getByLabelText(/right to use this material/i));
+    await user.type(screen.getByLabelText("Import from URL"), "https://example.com/article");
+    await user.click(screen.getByRole("button", { name: "Import" }));
+
+    await waitFor(() => expect(screen.getByText("1 of 10 files added")).toBeInTheDocument());
+  });
 });

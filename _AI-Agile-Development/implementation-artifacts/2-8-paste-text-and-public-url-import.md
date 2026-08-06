@@ -4,7 +4,7 @@ baseline_commit: 6512fde46283cb1f8df823734c1a7ffc70baabcb
 
 # Story 2.8: Paste-text and public-URL import
 
-Status: ready-for-dev
+Status: review
 
 *(Epic 2, FR-C-8. Builds directly on Story 2.7's `services/ingestion` — `uploaded_documents`, `StoragePort`, `JobQueuePort`, the copyright-attestation-first ordering, and the 10-file-per-`customCourseId` advisory-lock transaction are all reused, not reinvented. This story adds two new ways to CREATE an `UploadedDocument` — pasted text and a fetched public URL — alongside Story 2.7's existing file upload, sharing the same downstream validation/storage/queueing core.)*
 
@@ -45,13 +45,13 @@ so that I can build a custom course without needing a file to upload.
   - [x] `POST /uploads/paste-text`, `POST /uploads/url-import` — both plain JSON forwards via the EXISTING `forward()` method on `ingestionClient.ts` (no new multipart handling needed, unlike Story 2.7's file-upload route — these are ordinary JSON bodies), `requireAuth`, matching every other JSON proxy route's exact shape in this codebase
   - [x] Tests: 401 without auth for both new routes; both forward body + trusted headers correctly
 
-- [ ] **Task 5: `apps/web` — paste-text and URL-import UI** (AC: #1, #2, #3, #4)
-  - [ ] Extend `packages/shared-types/src/uploads.ts`: `pasteTextInputSchema = z.object({ customCourseId: z.uuid().optional(), text: z.string(), copyrightAttested: z.boolean() })`, `urlImportInputSchema = z.object({ customCourseId: z.uuid().optional(), url: z.url(), copyrightAttested: z.boolean() })`
-  - [ ] Extend `apps/web/src/modules/uploads/api.ts`: `pasteText(apiUrl, accessToken, customCourseId, text, copyrightAttested)`, `importFromUrl(apiUrl, accessToken, customCourseId, url, copyrightAttested)` — both plain JSON `apiRequest` calls (unlike `uploadFile`'s `FormData`-based multipart call), reusing `uploadedDocumentResponseSchema` for the response
-  - [ ] Extend `UploadPage.tsx`: a "Paste text" `<textarea>` + submit button, and a "Import from URL" `<input type="url">` + submit button, alongside the existing file input — all three share the SAME `copyrightAttested` checkbox and the SAME running `results`/count list (a pasted-text or URL import that succeeds/fails renders in the identical list Story 2.7 already built, just with a synthetic "fileName" — e.g. `"pasted-text.txt"` or the imported URL — standing in for a real uploaded file's name)
-  - [ ] Tests: pasting valid text and submitting shows it accepted; pasting too-short text shows the specific rejection message; submitting an unreachable/erroring URL shows the specific reason from the mocked response; a successful paste/URL-import increments the same running count file uploads already use
+- [x] **Task 5: `apps/web` — paste-text and URL-import UI** (AC: #1, #2, #3, #4)
+  - [x] Extend `packages/shared-types/src/uploads.ts`: `pasteTextInputSchema = z.object({ customCourseId: z.uuid().optional(), text: z.string(), copyrightAttested: z.boolean() })`, `urlImportInputSchema = z.object({ customCourseId: z.uuid().optional(), url: z.url(), copyrightAttested: z.boolean() })`
+  - [x] Extend `apps/web/src/modules/uploads/api.ts`: `pasteText(apiUrl, accessToken, customCourseId, text, copyrightAttested)`, `importFromUrl(apiUrl, accessToken, customCourseId, url, copyrightAttested)` — both plain JSON `apiRequest` calls (unlike `uploadFile`'s `FormData`-based multipart call), reusing `uploadedDocumentResponseSchema` for the response
+  - [x] Extend `UploadPage.tsx`: a "Paste text" `<textarea>` + submit button, and a "Import from URL" `<input type="url">` + submit button, alongside the existing file input — all three share the SAME `copyrightAttested` checkbox and the SAME running `results`/count list (a pasted-text or URL import that succeeds/fails renders in the identical list Story 2.7 already built, just with a synthetic "fileName" — e.g. `"pasted-text.txt"` or the imported URL — standing in for a real uploaded file's name)
+  - [x] Tests: pasting valid text and submitting shows it accepted; pasting too-short text shows the specific rejection message; submitting an unreachable/erroring URL shows the specific reason from the mocked response; a successful paste/URL-import increments the same running count file uploads already use
 
-- [ ] **Task 6: Tests mirroring `src/` 1:1** (AD-8) — consolidates the per-task test lists above; no additional test files beyond what Tasks 1-5 already name
+- [x] **Task 6: Tests mirroring `src/` 1:1** (AD-8) — consolidates the per-task test lists above; no additional test files beyond what Tasks 1-5 already name
 
 ## Dev Notes
 
@@ -100,12 +100,39 @@ All three are the same thing from `uploaded_documents`' perspective: a private, 
 
 ### Agent Model Used
 
+Claude Sonnet 5
+
 ### Debug Log References
+
+None — no live-environment bugs found this time (unlike Story 2.7's pg-boss/SeaweedFS-bucket surprises). All live verification (paste-text success/too-short, URL import against a real reachable page, an unreachable host, and a real 404) passed on the first attempt, reusing Story 2.7's already-provisioned SeaweedFS bucket and pg-boss queue.
 
 ### Completion Notes List
 
+- All 6 tasks implemented and tested. Refactored `uploadDocument`'s shared tail into a private `finalizeUpload` (attestation already verified by the caller, the advisory-lock-guarded transaction, storage put, enqueue) so file upload, pasted text, and URL import all converge on the exact same validated core — confirmed non-breaking by running Story 2.7's full existing test suite unmodified before adding anything new.
+- `importPastedText`: attestation first, then a `MIN_PASTED_TEXT_WORDS = 10` word-count check (a documented, tunable choice — AC #4 names no numeric threshold), then `finalizeUpload`.
+- `importFromUrl`: attestation first, then URL-format validation, then a fetch with three distinctly-mapped failure reasons (AC #3): thrown/timed-out fetch → "URL is unreachable"; 401/403 → "access denied"; any other non-2xx → "content could not be retrieved". A successfully-fetched page is passed through `stripHtmlToReadableText` (a deliberate cheap regex approximation, not a real Readability-grade extractor — documented in Dev Notes) and then the SAME word-count check pasted-text uses.
+- New routes `POST /uploads/paste-text` and `POST /uploads/url-import` (plain JSON, unlike Story 2.7's multipart file-upload route) and matching gateway JSON-forward proxy routes, using the gateway's existing `forward()` method with zero new gateway-level machinery.
+- `apps/web`'s `UploadPage` gained a "Paste text" textarea and an "Import from URL" input, both sharing the exact same attestation checkbox and running per-item results/count list the file-upload UI already built.
+- Live-verified end-to-end through the real gateway → ingestion chain, including real external HTTP requests: pasted text accepted and queued; too-short text rejected with the specific message; a real page (`https://example.com`) fetched, extracted, and stored; an unreachable/nonexistent host rejected with "URL is unreachable"; a real 404 path rejected with "content could not be retrieved" (distinctly from the unreachable-host case). Test data cleaned up afterward.
+- Full monorepo regression: 891 tests passing across all 8 workspaces (18 config + 181 shared-types + 31 service-kernel + 224 web + 106 gateway + 44 ingestion + 200 core + 107 courses), `tsc --noEmit` and `eslint .` both clean. (One `services/core` test flaked under full-parallel-suite resource contention — confirmed passing 200/200 in isolation, unrelated to this story's changes, matching the same flake class already documented for Story 2.6/2.7.)
+
 ### File List
+
+- `services/ingestion/src/modules/uploads/service.ts` (modified — extracted `finalizeUpload`; new `importPastedText`, `importFromUrl`, `stripHtmlToReadableText`, `MIN_PASTED_TEXT_WORDS`)
+- `services/ingestion/src/modules/uploads/routes.ts` (modified — new `POST /uploads/paste-text`, `POST /uploads/url-import`)
+- `services/ingestion/src/modules/uploads/index.ts` (modified — barrel exports)
+- `services/ingestion/tests/modules/uploads/{service,routes}.test.ts` (modified — new test suites for both import paths)
+- `packages/shared-types/src/uploads.ts` (modified — `pasteTextInputSchema`, `urlImportInputSchema`)
+- `packages/shared-types/src/index.ts` (modified — barrel exports)
+- `packages/shared-types/tests/uploads.test.ts` (modified — new schema tests)
+- `services/gateway/src/ingestionProxy.ts` (modified — new `POST /uploads/paste-text`, `POST /uploads/url-import` proxy routes)
+- `services/gateway/tests/ingestionProxy.test.ts` (modified — new route tests)
+- `apps/web/src/modules/uploads/api.ts` (modified — `pasteText`, `importFromUrl`)
+- `apps/web/src/modules/uploads/UploadPage.tsx` (modified — paste-text textarea, URL-import input, shared results list)
+- `apps/web/src/modules/uploads/index.ts` (modified — barrel exports)
+- `apps/web/tests/modules/uploads/UploadPage.test.tsx` (modified — new UI tests)
 
 ## Change Log
 
 - 2026-08-06: Story drafted (create-story) for Epic 2, Story 2.8. Status → ready-for-dev.
+- 2026-08-06: Implemented Paste-text and public-URL import (Tasks 1-6): refactored uploadDocument's shared tail into finalizeUpload, added importPastedText/importFromUrl, new gateway proxy routes, apps/web UI. No live-environment bugs found this round. Live-verified end-to-end with real external HTTP requests. Status → review.
