@@ -74,6 +74,7 @@ describe("ingestDocument", () => {
       expect(chunks.length).toBeGreaterThan(0);
       expect(chunks.some((c) => c.heading === "Chapter One" && c.pageRangeStart === 1)).toBe(true);
       expect(chunks.some((c) => c.heading === "Chapter Two" && c.pageRangeStart === 2)).toBe(true);
+      expect(chunks.every((c) => c.safetyStatus === "clear" && c.safetyCategory === null)).toBe(true);
 
       const [document] = await db.select().from(uploadedDocuments).where(eq(uploadedDocuments.id, documentId));
       expect(document).toMatchObject({ status: "parsed", failureReason: null });
@@ -152,6 +153,7 @@ describe("ingestDocument", () => {
 
     const chunks = await db.select().from(contentChunks).where(eq(contentChunks.documentId, documentId));
     expect(chunks.some((c) => c.heading === "Introduction")).toBe(true);
+    expect(chunks.every((c) => c.safetyStatus === "clear" && c.safetyCategory === null)).toBe(true);
     const [document] = await db.select().from(uploadedDocuments).where(eq(uploadedDocuments.id, documentId));
     expect(document?.status).toBe("parsed");
   });
@@ -165,6 +167,7 @@ describe("ingestDocument", () => {
 
     const chunks = await db.select().from(contentChunks).where(eq(contentChunks.documentId, documentId));
     expect(chunks.some((c) => c.heading === "Slide One Title" && c.pageRangeStart === 1)).toBe(true);
+    expect(chunks.every((c) => c.safetyStatus === "clear" && c.safetyCategory === null)).toBe(true);
     const [document] = await db.select().from(uploadedDocuments).where(eq(uploadedDocuments.id, documentId));
     expect(document?.status).toBe("parsed");
   });
@@ -203,18 +206,27 @@ describe("ingestDocument", () => {
   );
 
   it(
-    "marks a document blocked with the matching category and inserts all chunks (safety scan finds a blocked category) (AC #1, #2)",
+    "marks only the blocked chunk 'blocked' in a multi-chunk document, leaves the other chunk's own status intact, and halts the document (AC #1, #2)",
     async () => {
-      const storageKey = `test/${randomUUID()}.txt`;
-      const documentId = await insertDocument("txt", storageKey);
-      const blockedText = "Here is how to kill yourself using household items.";
-      const { storagePort, logger } = await depsWithStoredFixture(storageKey, Buffer.from(blockedText));
+      const storageKey = `test/${randomUUID()}.md`;
+      const documentId = await insertDocument("md", storageKey);
+      const text = [
+        "# Section One",
+        "This is ordinary clean content for the first section.",
+        "",
+        "# Section Two",
+        "Here is how to kill yourself using household items.",
+      ].join("\n");
+      const { storagePort, logger } = await depsWithStoredFixture(storageKey, Buffer.from(text));
 
       await ingestDocument({ db, storagePort, logger }, { uploadedDocumentId: documentId });
 
       const chunks = await db.select().from(contentChunks).where(eq(contentChunks.documentId, documentId));
-      expect(chunks.length).toBeGreaterThan(0);
-      expect(chunks.some((c) => c.safetyStatus === "blocked" && c.safetyCategory === "self-harm-instructions")).toBe(true);
+      expect(chunks).toHaveLength(2);
+      const sectionOne = chunks.find((c) => c.heading === "Section One");
+      const sectionTwo = chunks.find((c) => c.heading === "Section Two");
+      expect(sectionOne).toMatchObject({ safetyStatus: "clear", safetyCategory: null });
+      expect(sectionTwo).toMatchObject({ safetyStatus: "blocked", safetyCategory: "self-harm-instructions" });
 
       const [document] = await db.select().from(uploadedDocuments).where(eq(uploadedDocuments.id, documentId));
       expect(document).toMatchObject({ status: "blocked", failureReason: "blocked: self-harm-instructions" });
@@ -223,18 +235,27 @@ describe("ingestDocument", () => {
   );
 
   it(
-    "proceeds to 'parsed' when only a minority of chunks are flagged as borderline, marking the flagged chunk (AC #3)",
+    "proceeds to 'parsed' when only a minority of chunks in a multi-chunk document are flagged as borderline, marking only that chunk (AC #3)",
     async () => {
-      const storageKey = `test/${randomUUID()}.txt`;
-      const documentId = await insertDocument("txt", storageKey);
-      const text = "This is a damn good example.";
+      const storageKey = `test/${randomUUID()}.md`;
+      const documentId = await insertDocument("md", storageKey);
+      const text = [
+        "# Section One",
+        "This is ordinary clean content for the first section.",
+        "",
+        "# Section Two",
+        "This is a damn good example.",
+      ].join("\n");
       const { storagePort, logger } = await depsWithStoredFixture(storageKey, Buffer.from(text));
 
       await ingestDocument({ db, storagePort, logger }, { uploadedDocumentId: documentId });
 
       const chunks = await db.select().from(contentChunks).where(eq(contentChunks.documentId, documentId));
-      expect(chunks).toHaveLength(1);
-      expect(chunks[0]).toMatchObject({ safetyStatus: "flagged", safetyCategory: "profanity" });
+      expect(chunks).toHaveLength(2);
+      const sectionOne = chunks.find((c) => c.heading === "Section One");
+      const sectionTwo = chunks.find((c) => c.heading === "Section Two");
+      expect(sectionOne).toMatchObject({ safetyStatus: "clear", safetyCategory: null });
+      expect(sectionTwo).toMatchObject({ safetyStatus: "flagged", safetyCategory: "profanity" });
 
       const [document] = await db.select().from(uploadedDocuments).where(eq(uploadedDocuments.id, documentId));
       expect(document).toMatchObject({ status: "parsed", failureReason: null });
@@ -270,5 +291,22 @@ describe("ingestDocument", () => {
     expect(getObjectSpy).not.toHaveBeenCalled();
     const chunks = await db.select().from(contentChunks).where(eq(contentChunks.documentId, documentId));
     expect(chunks).toHaveLength(0);
+  });
+
+  it("skips a document that is already 'blocked' without touching storage or re-scanning (review finding)", async () => {
+    const storageKey = `test/${randomUUID()}.pdf`;
+    const documentId = await insertDocument("pdf", storageKey);
+    await db.update(uploadedDocuments).set({ status: "blocked", failureReason: "blocked: self-harm-instructions" }).where(eq(uploadedDocuments.id, documentId));
+    const storagePort = createMockStorageAdapter();
+    const getObjectSpy = vi.spyOn(storagePort, "getObject");
+    const logger = createLogger("test");
+
+    await ingestDocument({ db, storagePort, logger }, { uploadedDocumentId: documentId });
+
+    expect(getObjectSpy).not.toHaveBeenCalled();
+    const chunks = await db.select().from(contentChunks).where(eq(contentChunks.documentId, documentId));
+    expect(chunks).toHaveLength(0);
+    const [document] = await db.select().from(uploadedDocuments).where(eq(uploadedDocuments.id, documentId));
+    expect(document).toMatchObject({ status: "blocked", failureReason: "blocked: self-harm-instructions" });
   });
 });

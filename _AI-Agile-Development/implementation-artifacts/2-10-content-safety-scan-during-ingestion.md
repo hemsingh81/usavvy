@@ -4,7 +4,7 @@ baseline_commit: e79b8d66141fb662261bdb2c28287a55f80b2f05
 
 # Story 2.10: Content safety scan during ingestion
 
-Status: review
+Status: done
 
 *(Epic 2, FR-C-13. Runs immediately after Story 2.9's parse/chunk step, inside the SAME `ingestDocument` job — this story extends that job rather than adding a second one. It introduces the first "blocked" terminal status for `UploadedDocument` and the first per-chunk classification field on `ContentChunk`, but adds NO new entity: both changes are columns on the two tables `services/ingestion` already owns per AD-14's ownership table.)*
 
@@ -101,22 +101,46 @@ Claude Sonnet 5
 
 - All 4 tasks implemented and tested via red-green TDD (failing tests written and confirmed failing before each implementation, then made to pass).
 - No new port abstraction introduced — confirmed via research that no `ModerationPort`/`ContentSafetyPort` exists anywhere in this codebase, and AD-3's conceptual `SafetyFilter` is scoped to `GenerationPort`/`VoicePort`/real-time chat, not batch ingestion. `contentSafety.ts` is a plain pure module (`scanChunkText`/`scanChunks`/`aggregateDocumentOutcome`), matching `chunking.ts`'s and the parsers' existing style.
-- Policy-category taxonomy is a small, hardcoded, documented keyword/regex heuristic (no external moderation vendor specified anywhere in the PRD/epics) — same cheap-approximation discipline as Story 2.7/2.8/2.9. Five categories: `self-harm-instructions`/`credible-violent-threat` (blocked severity), `profanity`/`harassment` (flagged severity). A blocked match always wins over a flagged match in the same chunk.
+- Policy-category taxonomy is a small, hardcoded, documented keyword/regex heuristic (no external moderation vendor specified anywhere in the PRD/epics) — same cheap-approximation discipline as Story 2.7/2.8/2.9. Four categories: `self-harm-instructions`/`credible-violent-threat` (blocked severity), `profanity`/`harassment` (flagged severity). A blocked match always wins over a flagged match in the same chunk.
 - `contentChunks` gained two columns (`safetyStatus`, `safetyCategory`) via a new migration (`0002_bitter_butterfly.sql`, generated and applied against the live `usavvy_ingestion` database); `uploadedDocuments` needed no migration — `"blocked"` is simply a new value in its existing free-text `status` column, reusing the existing `failureReason` column for the blocked reason (`"blocked: <category>"`).
 - The scan runs inline inside the SAME `ingestDocument` job, right after `chunkSections` and before Story 2.9's existing insert-transaction — not a second queued stage — specifically to avoid reopening the crash-between-writes race Story 2.9's review round closed. All chunks (including any blocked-category chunk) are still inserted, with the document-level `status`/`failureReason` gating what future stories (2.12 embedding) will do with them.
 - No numeric "majority flagged also blocks" threshold was implemented — the ACs only define a single halting condition (any blocked-category match); this is documented as a deliberate choice, not an oversight, in Dev Notes.
 - Full monorepo regression after this story's changes: all packages pass (`packages/config` 18, `packages/shared-types` 181, `packages/service-kernel` 35, `apps/web` 224, `services/gateway` 106, `services/ingestion` 97, `services/courses` 107, `services/core` 200 in isolation — one `services/core` auth test flaked under full-parallel-suite resource contention, confirmed passing 14/14 in isolation, the same pre-existing flake class already documented for Stories 2.6-2.9 and unrelated to this story's changes). `tsc --noEmit` and `eslint .` both clean.
+- **Review-round patch (3-layer adversarial review — see Senior Developer Review below):** fixed 4 confirmed findings, each proven via a failing test written and confirmed failing before the fix, then made to pass: (1) blocked-category regexes required a literal single space, silently missing the exact same phrase when split across a `\n\n` paragraph break (a realistic `.txt`/`.md` input shape, since those parsers preserve paragraph breaks verbatim unlike PDF/DOCX/PPTX, which collapse whitespace) — fixed by switching to `\s+`; (2) `scanChunks` only ever scanned `chunk.text`, never `chunk.heading`, so a policy-violating heading with a clean body was invisible to the scan — fixed by scanning heading+text combined; (3) `/\bsuicide method\b/i`'s trailing word boundary excluded the plural "methods" — fixed to `methods?`; (4) the harassment pattern missed the uncontracted "you are" and real curly/smart-quote apostrophes (what word-processor autocorrect actually produces) — fixed to accept both apostrophe variants and the uncontracted phrasing. Also strengthened test coverage: existing multi-chunk PDF/DOCX/PPTX happy-path tests now assert `safetyStatus: "clear"` on every chunk; the blocked/flagged job-level tests were rewritten from single-chunk to genuine multi-chunk fixtures asserting each chunk's own status independently; added a regression test for the idempotency guard's handling of an already-`"blocked"` document. Documented (not code-fixed, per AD-1) two accepted limitations of a per-chunk keyword heuristic: a phrase can still be split across two separate hard-cut chunks, and single common words used as flagged-tier triggers will over-flag some benign academic content — an accepted trade-off since "flagged" only routes to review and never blocks. Full monorepo regression, typecheck, and lint re-run clean after all fixes landed together.
 
 ### File List
 
 - `services/ingestion/src/db/schema.ts` (modified — `contentChunks.safetyStatus`/`safetyCategory`; updated `uploadedDocuments.status`/`failureReason` doc comments to mention `"blocked"`)
 - `services/ingestion/drizzle/0002_bitter_butterfly.sql` (new migration)
-- `services/ingestion/src/modules/uploads/contentSafety.ts` (new)
+- `services/ingestion/src/modules/uploads/contentSafety.ts` (new; patched in review round — `\s+` regex fix, heading now scanned, plural/apostrophe/uncontracted-phrasing fixes, accepted-limitations doc comment)
 - `services/ingestion/src/modules/uploads/jobs/ingestDocument.ts` (modified — wires `scanChunks`/`aggregateDocumentOutcome` into the existing transaction)
-- `services/ingestion/tests/modules/uploads/contentSafety.test.ts` (new)
-- `services/ingestion/tests/modules/uploads/jobs/ingestDocument.test.ts` (modified — 3 new tests for blocked/flagged/clean safety-scan outcomes)
+- `services/ingestion/tests/modules/uploads/contentSafety.test.ts` (new; review round added 5 regression tests)
+- `services/ingestion/tests/modules/uploads/jobs/ingestDocument.test.ts` (modified — 3 new tests for blocked/flagged/clean safety-scan outcomes; review round strengthened PDF/DOCX/PPTX assertions, rewrote blocked/flagged tests to genuine multi-chunk fixtures, added a `"blocked"`-status idempotency test)
+
+## Senior Developer Review (AI)
+
+**Reviewers:** Blind Hunter, Edge Case Hunter, Acceptance Auditor (3-layer adversarial review, parallel background agents)
+**Date:** 2026-08-06
+**Outcome:** Changes Requested → all confirmed findings fixed, re-verified, approved
+
+### Summary
+
+Two independent adversarial review layers (Blind Hunter and Edge Case Hunter) independently converged on the same two root findings — the heading-not-scanned gap and the literal-space regex bug (found via different mechanisms: paragraph-join within a chunk vs. hard-cut across chunks) — raising confidence these were real, high-value bugs rather than review noise. Edge Case Hunter additionally found two further regex correctness bugs (plural "methods," apostrophe/uncontracted-phrasing). Acceptance Auditor confirmed all 4 ACs are genuinely implemented with a minor test-depth nitpick. All confirmed bugs were fixed and proven via the "write failing test → confirm it fails → fix → confirm it passes" methodology; two additional Edge Case Hunter findings (chunk-boundary phrase-splitting, common-word false-positive volume) were judged to be inherent, accepted limitations of a cheap per-chunk keyword heuristic (consistent with AD-1) and were documented rather than code-fixed.
+
+### Action Items
+
+- [x] **[High]** `contentSafety.ts`: blocked-category regexes required a literal single space between phrase halves, so the exact same phrase split across a `\n\n` paragraph break (realistic for `.txt`/`.md` input, which preserves paragraph breaks verbatim) silently evaded detection, defeating AC #2. Fixed by switching literal spaces to `\s+` in the multi-word patterns. (Blind Hunter, verified reproducible)
+- [x] **[High]** `contentSafety.ts`'s `scanChunks`: only `chunk.text` was scanned, never `chunk.heading` — a chunk with a policy-violating heading and a clean body was entirely invisible to the scan, a real AC #1 gap ("each chunk is checked"). Fixed by scanning heading+text combined. (Edge Case Hunter)
+- [x] **[Medium-High]** `contentSafety.ts`: `/\bsuicide method\b/i`'s trailing `\b` excluded the plural "methods" (no boundary exists between "method" and "s"). Fixed to `methods?`. (Edge Case Hunter)
+- [x] **[Medium]** `contentSafety.ts`: the harassment pattern only matched the contracted "you're" with a straight apostrophe, missing both the uncontracted "you are" and the curly/smart-quote apostrophe real word-processor autocorrect produces. Fixed to accept both. (Blind Hunter + Edge Case Hunter, independently confirmed the apostrophe issue)
+- [x] **[Medium]** Existing multi-chunk PDF/DOCX/PPTX happy-path tests in `ingestDocument.test.ts` never asserted `safetyStatus` at all. Added `every chunk safetyStatus: "clear"` assertions to all three. (Blind Hunter)
+- [x] **[Low]** The blocked/flagged job-level tests used single-chunk fixtures, not genuine multi-chunk scenarios, so they couldn't prove per-chunk status is set correctly across multiple chunks. Rewrote both as multi-section markdown fixtures asserting each chunk's own status independently. (Blind Hunter + Acceptance Auditor)
+- [x] **[Low]** The idempotency guard's handling of an already-`"blocked"` document specifically was untested (only `"parsed"` was covered). Added a matching regression test. (Edge Case Hunter)
+- [x] **[Low, accepted-by-design, documented not code-fixed]** A trigger phrase can still be split across two separate chunks by `chunking.ts`'s own hard-cut, and single common words (e.g. "hell") used as flagged-tier triggers will over-flag benign academic content. Both are inherent to a cheap per-chunk keyword scan and are now explicitly documented in `contentSafety.ts` as accepted trade-offs — the former has no cheap fix within this story's scope (would require cross-chunk overlap scanning), and the latter is acceptable because the "flagged" tier only routes to review and never blocks. (Edge Case Hunter)
+- [x] **[Cosmetic]** Story Completion Notes said "five categories" when only four are implemented. Corrected.
 
 ## Change Log
 
 - 2026-08-06: Story drafted (create-story) for Epic 2, Story 2.10. Status → ready-for-dev.
 - 2026-08-06: Implemented content safety scan (Tasks 1-4): `contentChunks.safetyStatus`/`safetyCategory` columns, a documented keyword-heuristic `contentSafety.ts` module, and wiring into the existing `ingestDocument` job's transaction — no new job/queue, no new port. Full monorepo regression, typecheck, and lint clean. Status → review.
+- 2026-08-06: 3-layer adversarial code review (Blind Hunter, Edge Case Hunter, Acceptance Auditor) found and fixed 4 confirmed regex/coverage bugs — literal-space paragraph-break miss, heading never scanned, plural "methods" word-boundary miss, apostrophe/uncontracted-phrasing miss — plus strengthened test coverage and documented two accepted heuristic limitations. Each fix proven via fail-then-pass regression testing. Full monorepo regression, typecheck, and lint clean. Status → done.
