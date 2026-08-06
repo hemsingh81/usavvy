@@ -1,4 +1,4 @@
-import type { Logger } from "./logger.js";
+import type { Logger } from "../logger.js";
 
 const PING_TIMEOUT_MS = 5000;
 

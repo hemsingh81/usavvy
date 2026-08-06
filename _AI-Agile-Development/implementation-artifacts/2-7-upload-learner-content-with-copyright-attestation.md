@@ -23,18 +23,18 @@ so that I can turn my own material into a custom course that stays private to me
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1: `packages/service-kernel` — real `StoragePort`** (AD-6; AC: #1)
-  - [ ] New `src/storage/port.ts`: `StoragePort { putObject(key: string, data: Buffer, contentType: string): Promise<void>; getObject(key: string): Promise<Buffer>; deleteObject(key: string): Promise<void> }` — same DI-seam shape as core's `NotificationPort` (`port.ts`/adapter/`factory.ts`), so a future hosted-S3 swap is config-only (AD-6's own stated rule)
-  - [ ] New `src/storage/seaweedfs.ts`: real adapter — plain unauthenticated `fetch` PUT/GET/DELETE against `${endpoint}/<bucket>/<key>` (SeaweedFS's dev docker-compose command has no identity/auth configured, so no AWS SigV4 signing is needed — matches `pingStorage`'s already-established unauthenticated-fetch precedent against this same endpoint; do NOT add an AWS SDK dependency for this)
-  - [ ] New `src/storage/mock.ts`: in-memory `Map`-backed adapter for tests, mirroring `notification/mock.ts`'s shape
-  - [ ] New `src/storage/factory.ts`: `createStorageAdapter(adapter: "mock" | "seaweedfs", endpoint: string, logger: Logger): StoragePort`
-  - [ ] Move the existing `pingStorage` health-check helper into `src/storage/ping.ts` (unchanged behavior) and keep re-exporting it from `src/index.ts` exactly as today — core's and courses' existing `/health` checks must keep working unmodified
-  - [ ] Tests: `seaweedfs.test.ts` (mock `fetch`, verify PUT/GET/DELETE URLs and methods), `mock.test.ts`, `factory.test.ts`
+- [x] **Task 1: `packages/service-kernel` — real `StoragePort`** (AD-6; AC: #1)
+  - [x] New `src/storage/port.ts`: `StoragePort { putObject(key: string, data: Buffer, contentType: string): Promise<void>; getObject(key: string): Promise<Buffer>; deleteObject(key: string): Promise<void> }` — same DI-seam shape as core's `NotificationPort` (`port.ts`/adapter/`factory.ts`), so a future hosted-S3 swap is config-only (AD-6's own stated rule)
+  - [x] New `src/storage/seaweedfs.ts`: real adapter — plain unauthenticated `fetch` PUT/GET/DELETE against `${endpoint}/<bucket>/<key>` (SeaweedFS's dev docker-compose command has no identity/auth configured, so no AWS SigV4 signing is needed — matches `pingStorage`'s already-established unauthenticated-fetch precedent against this same endpoint; do NOT add an AWS SDK dependency for this)
+  - [x] New `src/storage/mock.ts`: in-memory `Map`-backed adapter for tests, mirroring `notification/mock.ts`'s shape
+  - [x] New `src/storage/factory.ts`: `createStorageAdapter(adapter: "mock" | "seaweedfs", endpoint: string, logger: Logger): StoragePort`
+  - [x] Move the existing `pingStorage` health-check helper into `src/storage/ping.ts` (unchanged behavior) and keep re-exporting it from `src/index.ts` exactly as today — core's and courses' existing `/health` checks must keep working unmodified
+  - [x] Tests: `seaweedfs.test.ts` (mock `fetch`, verify PUT/GET/DELETE URLs and methods), `mock.test.ts`, `factory.test.ts`
 
-- [ ] **Task 2: `packages/service-kernel` — real `JobQueuePort`** (AD-15; AC: #1)
-  - [ ] Add `pg-boss` as a dependency of `packages/service-kernel` — already the architecture's chosen stack tech for this exact purpose (Stack table: "pg-boss | latest stable (Postgres-native job queue, AD-15)"), not a new/undecided library; pre-approved by this story, no separate approval needed
-  - [ ] Replace the placeholder `src/jobqueue/index.ts` with: `port.ts` (`JobQueuePort { enqueue(jobName: string, payload: Record<string, unknown>): Promise<string> }` — producer-only; nothing consumes a job yet, Story 2.9 registers the first real `work()` handler), `pgboss.ts` (real adapter — `new PgBoss(databaseUrl)`, `.start()` once at boot, `.send(jobName, payload)` per `enqueue` call), `mock.ts` (records enqueued jobs in an array, for tests), `factory.ts` (`createJobQueueAdapter(adapter: "mock" | "pgboss", databaseUrl: string, logger: Logger): Promise<JobQueuePort>` — async because the real adapter must `.start()` before use)
-  - [ ] Tests: `pgboss.test.ts` (can mock the `pg-boss` module — verify `.send()` is called with the right job name/payload), `mock.test.ts`
+- [x] **Task 2: `packages/service-kernel` — real `JobQueuePort`** (AD-15; AC: #1)
+  - [x] Add `pg-boss` as a dependency of `packages/service-kernel` — already the architecture's chosen stack tech for this exact purpose (Stack table: "pg-boss | latest stable (Postgres-native job queue, AD-15)"), not a new/undecided library; pre-approved by this story, no separate approval needed
+  - [x] Replace the placeholder `src/jobqueue/index.ts` with: `port.ts` (`JobQueuePort { enqueue(jobName: string, payload: Record<string, unknown>): Promise<string> }` — producer-only; nothing consumes a job yet, Story 2.9 registers the first real `work()` handler), `pgboss.ts` (real adapter — `new PgBoss(databaseUrl)`, `.start()` once at boot, `.send(jobName, payload)` per `enqueue` call), `mock.ts` (records enqueued jobs in an array, for tests), `factory.ts` (`createJobQueueAdapter(adapter: "mock" | "pgboss", databaseUrl: string, logger: Logger): Promise<JobQueuePort>` — async because the real adapter must `.start()` before use)
+  - [x] Tests: `pgboss.test.ts` (can mock the `pg-boss` module — verify `.send()` is called with the right job name/payload), `mock.test.ts`
 
 - [ ] **Task 3: New `services/ingestion`** (AD-1, AD-14; AC: #1, #2, #3, #4)
   - [ ] Scaffold matching `services/courses`' exact shape 1:1: `package.json` (same dependency set as courses, plus `@fastify/multipart` — needed to parse the incoming multipart upload request; a natural, expected Fastify companion library, not a surprising dependency), `tsconfig.json`, `src/{config.ts,app.ts,main.ts}`, `src/db/{schema.ts,client.ts,migrate.ts}`, `drizzle.config.ts`

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { pingStorage } from "../src/storage.js";
-import { createLogger } from "../src/logger.js";
+import { pingStorage } from "../../src/storage/ping.js";
+import { createLogger } from "../../src/logger.js";
 
 describe("pingStorage", () => {
   afterEach(() => {
