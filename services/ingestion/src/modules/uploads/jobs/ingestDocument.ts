@@ -3,6 +3,7 @@ import type { Logger, StoragePort } from "@usavvy/service-kernel";
 import type { Db } from "../../../db/client.js";
 import { contentChunks, uploadedDocuments } from "../../../db/schema.js";
 import { chunkSections } from "../chunking.js";
+import { aggregateDocumentOutcome, scanChunks } from "../contentSafety.js";
 import { parseDocx } from "../parsers/docx.js";
 import { ocrPdfPages } from "../parsers/ocr.js";
 import { parsePdf } from "../parsers/pdf.js";
@@ -94,6 +95,13 @@ export async function ingestDocument(deps: IngestJobDeps, payload: Record<string
 
   const chunks = chunkSections(parsed.sections);
 
+  // Story 2.10 (FR-C-13), AC #1: scan every chunk before it's committed. Runs inline,
+  // in-memory, in the same job as the parse/chunk step (not a second queued stage) —
+  // see this story's Dev Notes on why a separate stage would reopen the exact
+  // crash-between-writes race Story 2.9's review round just closed below.
+  const scannedChunks = scanChunks(chunks);
+  const safetyOutcome = aggregateDocumentOutcome(scannedChunks);
+
   // Review finding: the chunk insert and the final status update were two separate,
   // unsynchronized statements — a crash between them (a worker restart, an OOM kill,
   // a deploy) left orphaned ContentChunk rows under a document still stuck "queued".
@@ -104,18 +112,23 @@ export async function ingestDocument(deps: IngestJobDeps, payload: Record<string
   // mid-way crash roll back cleanly (retry starts from scratch, same as a first
   // attempt) instead of leaving a half-done, duplicate-prone state.
   await deps.db.transaction(async (tx) => {
-    if (chunks.length > 0) {
+    if (scannedChunks.length > 0) {
       await tx.insert(contentChunks).values(
-        chunks.map((chunk, index) => ({
+        scannedChunks.map((chunk, index) => ({
           documentId: document.id,
           chunkIndex: index,
           text: chunk.text,
           heading: chunk.heading,
           pageRangeStart: chunk.pageRangeStart,
           pageRangeEnd: chunk.pageRangeEnd,
+          safetyStatus: chunk.safetyStatus,
+          safetyCategory: chunk.safetyCategory,
         })),
       );
     }
-    await tx.update(uploadedDocuments).set({ status: "parsed" }).where(eq(uploadedDocuments.id, document.id));
+    await tx
+      .update(uploadedDocuments)
+      .set({ status: safetyOutcome.status, failureReason: safetyOutcome.failureReason })
+      .where(eq(uploadedDocuments.id, document.id));
   });
 }

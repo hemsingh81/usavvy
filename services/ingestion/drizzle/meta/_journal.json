@@ -15,6 +15,13 @@
       "when": 1785982165477,
       "tag": "0001_secret_firebrand",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1785986408546,
+      "tag": "0002_bitter_butterfly",
+      "breakpoints": true
     }
   ]
 }
