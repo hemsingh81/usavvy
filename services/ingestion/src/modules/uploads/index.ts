@@ -12,3 +12,4 @@ export {
   MAX_FILES_PER_CUSTOM_COURSE,
   MIN_PASTED_TEXT_WORDS,
 } from "./service.js";
+export { ingestDocument, type IngestJobDeps } from "./jobs/ingestDocument.js";

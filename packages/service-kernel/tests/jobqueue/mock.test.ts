@@ -14,4 +14,22 @@ describe("createMockJobQueueAdapter", () => {
       { jobName: "ingest-document", payload: { uploadedDocumentId: "b" } },
     ]);
   });
+
+  it("trigger() invokes a handler registered via work() with the given payload (Story 2.9)", async () => {
+    const adapter = createMockJobQueueAdapter();
+    const received: unknown[] = [];
+    await adapter.work("ingest-document", async (payload) => {
+      received.push(payload);
+    });
+
+    await adapter.trigger("ingest-document", { uploadedDocumentId: "doc-1" });
+
+    expect(received).toEqual([{ uploadedDocumentId: "doc-1" }]);
+  });
+
+  it("trigger() throws for a job name with no registered handler", async () => {
+    const adapter = createMockJobQueueAdapter();
+
+    await expect(adapter.trigger("never-registered", {})).rejects.toThrow();
+  });
 });

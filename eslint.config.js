@@ -4,7 +4,10 @@ import importX from "eslint-plugin-import-x";
 
 export default tseslint.config(
   {
-    ignores: ["**/dist/**", "**/node_modules/**", "**/coverage/**", "**/*.tsbuildinfo", "**/*.d.ts"],
+    // tests/fixtures/generate.mjs is a one-off, manually-run fixture generator (Story
+    // 2.9) — a dev tool, not shipped/reviewed application code, same tier as the binary
+    // fixture files it produces sitting alongside it.
+    ignores: ["**/dist/**", "**/node_modules/**", "**/coverage/**", "**/*.tsbuildinfo", "**/*.d.ts", "**/tests/fixtures/**"],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,

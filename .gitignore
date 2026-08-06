@@ -38,6 +38,9 @@ pnpm-debug.log*
 .turbo/
 .cache/
 *.tsbuildinfo
+# tesseract.js downloads its OCR language model to the process's cwd at runtime
+# (Story 2.9) — not a source file, must not be committed.
+*.traineddata
 
 # Python
 __pycache__/

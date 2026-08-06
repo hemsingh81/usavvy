@@ -32,5 +32,24 @@ export async function createPgBossJobQueueAdapter(databaseUrl: string, logger: L
       }
       return jobId;
     },
+
+    async work(jobName, handler) {
+      await ensureQueue(jobName);
+      // pg-boss v12's own handler receives a BATCH of jobs; this port's own interface
+      // is deliberately simpler (one payload at a time — this codebase's jobs are each
+      // independent, 1:1 with one document/record). Each job in the batch is handled
+      // independently so one job's failure doesn't block its batch-mates; a thrown
+      // error is logged and left to pg-boss's own retry/dead-letter handling rather
+      // than crashing the whole worker process (AD-17).
+      await boss.work(jobName, async (jobs) => {
+        for (const job of jobs) {
+          try {
+            await handler(job.data as Record<string, unknown>);
+          } catch (error) {
+            logger.error("job handler failed", { jobName, jobId: job.id, reason: error instanceof Error ? error.message : String(error) });
+          }
+        }
+      });
+    },
   };
 }

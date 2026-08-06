@@ -8,6 +8,13 @@
       "when": 1785975145244,
       "tag": "0000_unique_whistler",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1785982165477,
+      "tag": "0001_secret_firebrand",
+      "breakpoints": true
     }
   ]
 }

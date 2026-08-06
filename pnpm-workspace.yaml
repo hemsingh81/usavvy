@@ -5,7 +5,15 @@ packages:
 allowBuilds:
   argon2: true
   esbuild: true
+  tesseract.js: true
   unrs-resolver: true
+# Story 2.9: pdf-to-img hard-pins its own internal pdfjs-dist@~5.6.205 dependency —
+# loading a second, different pdfjs-dist version (services/ingestion's own direct
+# dependency) in the same process throws "API version does not match Worker version".
+# Pinning everything to the one version pdf-to-img itself requires avoids the conflict
+# (safer than forcing pdf-to-img onto a newer major it was never tested against).
+overrides:
+  pdfjs-dist: 5.6.205
 minimumReleaseAgeExclude:
   - '@typescript-eslint/eslint-plugin@8.66.0'
   - '@typescript-eslint/parser@8.66.0'

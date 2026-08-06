@@ -19,9 +19,31 @@ export const uploadedDocuments = pgTable("uploaded_documents", {
   fileSizeBytes: integer("file_size_bytes").notNull(),
   storageKey: text("storage_key").notNull(),
   copyrightAttested: boolean("copyright_attested").notNull(),
-  // "queued" today; Story 2.9/2.11 add more states (parsing, safety scan, embedding,
-  // outline ready, failed reasons) — a plain text column so extending it needs no
-  // migration.
+  // "queued" (Story 2.7) -> "parsed" | "failed" (Story 2.9); Story 2.11 adds more states
+  // (parsing, safety scan, embedding, outline ready) — a plain text column so extending
+  // it needs no migration.
   status: text("status").notNull().default("queued"),
+  // Story 2.9 (FR-C-9), AC #3/#4: "encrypted file" | "corrupt file" — null unless
+  // status is "failed".
+  failureReason: text("failure_reason"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// Story 2.9 (FR-C-9). The second and last entity this service owns per AD-14's
+// ownership table (UploadedDocument, ContentChunk -> ingestion).
+export const contentChunks = pgTable("content_chunks", {
+  id: uuid("id").primaryKey().default(uuidv7Default),
+  documentId: uuid("document_id")
+    .notNull()
+    .references(() => uploadedDocuments.id),
+  // Order within the document — chunking is sequential, not content-addressed.
+  chunkIndex: integer("chunk_index").notNull(),
+  text: text("text").notNull(),
+  // The detected section heading this chunk falls under, if any (DOCX/MD have a real
+  // signal for this; PDF/PPTX use a documented heuristic; TXT has none — see Dev Notes).
+  heading: text("heading"),
+  // PDF page / PPTX slide numbers; null for formats with no page concept (DOCX/TXT/MD).
+  pageRangeStart: integer("page_range_start"),
+  pageRangeEnd: integer("page_range_end"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
