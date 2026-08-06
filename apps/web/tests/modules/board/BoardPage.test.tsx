@@ -25,6 +25,10 @@ function renderBoard(courseId = "c1") {
 describe("BoardPage", () => {
   afterEach(() => {
     cleanup();
+    // Story 3.12: jsdom's sessionStorage is shared across tests within this file (no
+    // real page reload between them) — without this, a later test's renderBoard() would
+    // load whatever an earlier test left behind instead of the real defaults.
+    sessionStorage.clear();
   });
 
   it("renders the first Beat's title and progressively reveals its text", async () => {
@@ -393,6 +397,38 @@ describe("BoardPage", () => {
     renderBoard();
 
     expect(screen.getByRole("link", { name: /Exit board/ })).toHaveAttribute("href", "/courses/c1");
+  });
+
+  it("persists speed/mute/voice across unmount+remount within the same session (Story 3.12, AC #4)", async () => {
+    const user = userEvent.setup();
+    const first = renderBoard();
+
+    await user.selectOptions(screen.getByLabelText("Narration speed"), "1.5");
+    await user.click(screen.getByRole("button", { name: "Mute" }));
+    await user.selectOptions(screen.getByLabelText("Narration voice"), "Voice B");
+
+    first.unmount();
+    renderBoard();
+
+    expect(screen.getByLabelText("Narration speed")).toHaveValue("1.5");
+    expect(screen.getByRole("button", { name: "Unmute" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Narration voice")).toHaveValue("Voice B");
+  });
+
+  it("falls back to defaults when sessionStorage is empty or malformed (Story 3.12, AC #4)", () => {
+    sessionStorage.setItem("usavvy-board-preferences", "not valid json{{{");
+    renderBoard();
+
+    expect(screen.getByLabelText("Narration speed")).toHaveValue("1");
+    expect(screen.getByRole("button", { name: "Mute" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Narration voice")).toHaveValue("Voice A");
+  });
+
+  it("falls back to the default speed when a stored value is outside the allowed options (Story 3.12, AC #4)", () => {
+    sessionStorage.setItem("usavvy-board-preferences", JSON.stringify({ speed: 99, muted: false, voice: "Voice A" }));
+    renderBoard();
+
+    expect(screen.getByLabelText("Narration speed")).toHaveValue("1");
   });
 });
 

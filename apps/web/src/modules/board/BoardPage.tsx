@@ -25,6 +25,44 @@ export const REVEAL_TICK_MS = 200;
 
 const ROUTE_OPTIONS: ExplanationRouteType[] = ["deeper", "simpler", "different-example", "more-examples", "analogy", "confused"];
 const VOICES = ["Voice A", "Voice B"];
+const SPEED_OPTIONS = [0.75, 1, 1.25, 1.5];
+
+// Story 3.12 (FR-B-10), AC #4: "persist for the remainder of the session" is exactly
+// what `sessionStorage` means (as distinct from `localStorage`'s cross-session
+// persistence, or a bare `useState` which loses everything on reload) — one JSON blob
+// under one key, not three separate keys.
+const PREFERENCES_STORAGE_KEY = "usavvy-board-preferences";
+
+interface BoardPreferences {
+  speed: number;
+  muted: boolean;
+  voice: string;
+}
+
+const DEFAULT_PREFERENCES: BoardPreferences = { speed: 1, muted: false, voice: VOICES[0] as string };
+
+function loadStoredPreferences(): BoardPreferences {
+  try {
+    const raw = sessionStorage.getItem(PREFERENCES_STORAGE_KEY);
+    if (!raw) return DEFAULT_PREFERENCES;
+    const parsed = JSON.parse(raw) as Partial<BoardPreferences>;
+    return {
+      // Validated against the actual allowed set, not just its type — a stale/tampered
+      // value outside SPEED_OPTIONS would otherwise render the <select> with no option
+      // selected, matching the same rigor already applied to `voice` below.
+      speed: typeof parsed.speed === "number" && SPEED_OPTIONS.includes(parsed.speed) ? parsed.speed : DEFAULT_PREFERENCES.speed,
+      muted: typeof parsed.muted === "boolean" ? parsed.muted : DEFAULT_PREFERENCES.muted,
+      voice: typeof parsed.voice === "string" && VOICES.includes(parsed.voice) ? parsed.voice : DEFAULT_PREFERENCES.voice,
+    };
+  } catch {
+    // Malformed JSON, or sessionStorage itself unavailable (e.g. a locked-down/private
+    // browsing context) — never let a preferences read break the whole page (AD-17's
+    // "no silent failures" is about surfacing real errors, not about crashing on a
+    // best-effort convenience feature; falling back to defaults is the correct behavior
+    // here, not a swallowed error).
+    return DEFAULT_PREFERENCES;
+  }
+}
 
 // Story 3.4 (FR-B-31). Zoom is a plain CSS scale transform, clamped — no bespoke
 // gesture-recognition engine (see the story's own CRITICAL SCOPE NOTE).
@@ -229,9 +267,13 @@ export function BoardPage() {
   const [overlayBeat, setOverlayBeat] = useState<BoardBeat | null>(null);
   const [revealedUnits, setRevealedUnits] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
-  const [speed, setSpeed] = useState(1);
-  const [muted, setMuted] = useState(false);
-  const [voice, setVoice] = useState(VOICES[0] as string);
+  // Story 3.12, AC #4: initialized from sessionStorage (lazy initializer, so the read
+  // only ever happens once, on mount) rather than defaulting then overwriting in an
+  // effect — avoids a one-frame flash of the default before the stored value applies.
+  const [storedPreferences] = useState(loadStoredPreferences);
+  const [speed, setSpeed] = useState(storedPreferences.speed);
+  const [muted, setMuted] = useState(storedPreferences.muted);
+  const [voice, setVoice] = useState(storedPreferences.voice);
   const [showTranscript, setShowTranscript] = useState(false);
   const [transcriptQuery, setTranscriptQuery] = useState("");
   const [explainOpen, setExplainOpen] = useState(false);
@@ -324,6 +366,18 @@ export function BoardPage() {
     }
     setMarkerPositions(next);
   }, [lessonBeatIndex, zoomLevel, revealedUnits, concept.beats]);
+
+  // Story 3.12, AC #4: one write per change, one JSON blob — mirrors loadStoredPreferences'
+  // own single-key shape. sessionStorage.setItem can throw (quota exceeded, private
+  // browsing) — same "never let a best-effort convenience feature break the page" stance
+  // as the load path.
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(PREFERENCES_STORAGE_KEY, JSON.stringify({ speed, muted, voice }));
+    } catch {
+      // Best-effort — see loadStoredPreferences' own comment.
+    }
+  }, [speed, muted, voice]);
 
   // Story 3.4, AC #4: runs right after the render that includes the jump target (even
   // if it wasn't previously in the stack), since `lessonBeatIndex` is a dependency —
