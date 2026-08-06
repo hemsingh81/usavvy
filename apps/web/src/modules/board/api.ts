@@ -34,6 +34,11 @@ export function resumeLearningSession(apiUrl: string, accessToken: string, sessi
   return apiRequest(apiUrl, `/learning-sessions/${sessionId}/resume`, resumeLearningSessionResponseSchema, { method: "POST", accessToken });
 }
 
+/** Story 3.2 (FR-B-2). */
+export function replayCurrentBeat(apiUrl: string, accessToken: string, sessionId: string): Promise<ResumeLearningSessionResponse> {
+  return apiRequest(apiUrl, `/learning-sessions/${sessionId}/replay`, resumeLearningSessionResponseSchema, { method: "POST", accessToken });
+}
+
 export function recordBeatReached(apiUrl: string, accessToken: string, sessionId: string, beatId: string): Promise<LearningSessionResponse> {
   return apiRequest(apiUrl, `/learning-sessions/${sessionId}/beats/${beatId}/reached`, learningSessionResponseSchema, { method: "POST", accessToken });
 }

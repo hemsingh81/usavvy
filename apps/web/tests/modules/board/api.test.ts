@@ -5,6 +5,7 @@ import {
   getLearningSession,
   pauseLearningSession,
   recordBeatReached,
+  replayCurrentBeat,
   resumeLearningSession,
 } from "../../../src/modules/board/api.js";
 
@@ -78,6 +79,19 @@ describe("board api", () => {
     expect(callOptions.method).toBe("POST");
     expect(callOptions).not.toHaveProperty("body");
     expect(result).toEqual(resumed);
+  });
+
+  it("replayCurrentBeat posts with no body and returns the streamRef", async () => {
+    const replayed = { ...SESSION, narrationOffsetMs: 0, boardRenderState: null, streamRef: "stream-2" };
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve(replayed) } as unknown as Response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await replayCurrentBeat("http://localhost:3000", "a-token", "session-1");
+
+    expect(fetchMock).toHaveBeenCalledWith("http://localhost:3000/learning-sessions/session-1/replay", expect.objectContaining({ method: "POST" }));
+    const [, callOptions] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(callOptions).not.toHaveProperty("body");
+    expect(result).toEqual(replayed);
   });
 
   it("recordBeatReached posts to the beat's reached endpoint", async () => {

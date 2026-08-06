@@ -12,6 +12,7 @@ import {
   getLearningSession,
   pauseLearningSession,
   recordBeatReached,
+  replayCurrentBeat,
   resumeLearningSession,
   type BeatInput,
 } from "../../../src/modules/learningSessions/service.js";
@@ -254,6 +255,90 @@ describe("resumeLearningSession", () => {
     const [row] = await db.select().from(learningSessions).where(eq(learningSessions.id, session.id));
     expect(row).toMatchObject({ status: "ended" });
     expect(row?.endedAt).not.toBeNull();
+  });
+});
+
+describe("replayCurrentBeat", () => {
+  it("succeeds from 'active' status: resets narrationOffsetMs to 0, boardRenderState to null, returns a streamRef, records a 'replayed' event (AC #1)", async () => {
+    const session = await createOrResumeLearningSession(db, OWNER_ID, randomUUID(), SAMPLE_BEATS);
+    const beatId = session.beats[0]?.id as string;
+
+    const replayed = await replayCurrentBeat(db, OWNER_ID, session.id, voicePort());
+
+    expect(replayed).toMatchObject({ status: "active", currentBeatId: beatId, narrationOffsetMs: 0, boardRenderState: null });
+    expect(replayed.streamRef).toEqual(expect.stringContaining(beatId));
+    const events = await db.select().from(sessionEvents).where(eq(sessionEvents.sessionId, session.id));
+    expect(events.map((e) => e.type)).toEqual(["started", "replayed"]);
+  });
+
+  // The one behavior that actually distinguishes Replay from Resume — would fail if
+  // replayCurrentBeat were accidentally implemented as a call to resumeLearningSession.
+  it("succeeds from 'paused' status with a non-zero offset, resetting it to 0 rather than restoring the paused offset (AC #1)", async () => {
+    const session = await createOrResumeLearningSession(db, OWNER_ID, randomUUID(), SAMPLE_BEATS);
+    const beatId = session.beats[0]?.id as string;
+    await pauseLearningSession(db, OWNER_ID, session.id, { currentBeatId: beatId, narrationOffsetMs: 8000, boardRenderState: { scrollY: 99 } });
+
+    const replayed = await replayCurrentBeat(db, OWNER_ID, session.id, voicePort());
+
+    expect(replayed).toMatchObject({ status: "active", currentBeatId: beatId, narrationOffsetMs: 0, boardRenderState: null });
+    const [row] = await db.select().from(learningSessions).where(eq(learningSessions.id, session.id));
+    expect(row).toMatchObject({ status: "active", narrationOffsetMs: 0 });
+  });
+
+  it("on VoicePort failure, throws VOICE_UNAVAILABLE and leaves the persisted state byte-for-byte unchanged", async () => {
+    const session = await createOrResumeLearningSession(db, OWNER_ID, randomUUID(), SAMPLE_BEATS);
+    const beatId = session.beats[0]?.id as string;
+    await pauseLearningSession(db, OWNER_ID, session.id, { currentBeatId: beatId, narrationOffsetMs: 4400, boardRenderState: { z: 3 } });
+    const voice = voicePort();
+    voice.failNext();
+
+    await expect(replayCurrentBeat(db, OWNER_ID, session.id, voice)).rejects.toMatchObject({ code: "VOICE_UNAVAILABLE", statusCode: 503 });
+
+    const [row] = await db.select().from(learningSessions).where(eq(learningSessions.id, session.id));
+    expect(row).toMatchObject({ status: "paused", currentBeatId: beatId, narrationOffsetMs: 4400, boardRenderState: { z: 3 } });
+    const events = await db.select().from(sessionEvents).where(eq(sessionEvents.sessionId, session.id));
+    expect(events.map((e) => e.type)).toEqual(["started", "paused"]);
+  });
+
+  // Code review finding (post-implementation): resumeLearningSession's own test suite
+  // (Story 3.1's code review) has a deterministic test that actually drives the
+  // `!updated` -> SESSION_STATE_CHANGED branch by racing a concurrent end from inside
+  // the mock VoicePort call; replayCurrentBeat's WHERE-clause guard had no equivalent,
+  // leaving that branch unexercised. Mirrors that exact test shape.
+  it("rejects with SESSION_STATE_CHANGED, and does not reverse an end that lands while VoicePort is in flight", async () => {
+    const session = await createOrResumeLearningSession(db, OWNER_ID, randomUUID(), SAMPLE_BEATS);
+    const beatId = session.beats[0]?.id as string;
+    await pauseLearningSession(db, OWNER_ID, session.id, { currentBeatId: beatId, narrationOffsetMs: 700, boardRenderState: {} });
+    const { port } = pubSubPort();
+    const raceyVoicePort = {
+      async reestablishStream(reachedBeatId: string, offset: number) {
+        await endLearningSession(db, OWNER_ID, session.id, port);
+        return { streamRef: `mock-stream-${reachedBeatId}-${offset}` };
+      },
+    };
+
+    await expect(replayCurrentBeat(db, OWNER_ID, session.id, raceyVoicePort)).rejects.toMatchObject({ code: "SESSION_STATE_CHANGED", statusCode: 409 });
+
+    const [row] = await db.select().from(learningSessions).where(eq(learningSessions.id, session.id));
+    expect(row).toMatchObject({ status: "ended" });
+    expect(row?.endedAt).not.toBeNull();
+  });
+
+  it("rejects replaying an already-ended session, leaving it unchanged in the database", async () => {
+    const session = await createOrResumeLearningSession(db, OWNER_ID, randomUUID(), SAMPLE_BEATS);
+    const { port } = pubSubPort();
+    await endLearningSession(db, OWNER_ID, session.id, port);
+
+    await expect(replayCurrentBeat(db, OWNER_ID, session.id, voicePort())).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+
+    const [row] = await db.select().from(learningSessions).where(eq(learningSessions.id, session.id));
+    expect(row).toMatchObject({ status: "ended" });
+  });
+
+  it("404s for another learner's session", async () => {
+    const session = await createOrResumeLearningSession(db, OWNER_ID, randomUUID(), SAMPLE_BEATS);
+
+    await expect(replayCurrentBeat(db, "someone-else", session.id, voicePort())).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 });
 

@@ -73,6 +73,21 @@ describe("learning-sessions HTTP lifecycle: create -> pause -> resume -> beat re
     expect(pauseResponse.statusCode).toBe(200);
     expect(pauseResponse.json()).toMatchObject({ status: "paused", currentBeatId: firstBeatId, narrationOffsetMs: 1500 });
 
+    // Story 3.2: Replay works from a paused state with a non-zero offset, resetting it to 0.
+    const replayResponse = await app.inject({ method: "POST", url: `/learning-sessions/${created.id}/replay`, headers });
+    expect(replayResponse.statusCode).toBe(200);
+    const replayed = replayResponse.json() as { status: string; narrationOffsetMs: number; streamRef: string };
+    expect(replayed).toMatchObject({ status: "active", narrationOffsetMs: 0 });
+    expect(typeof replayed.streamRef).toBe("string");
+
+    const pauseAgainResponse = await app.inject({
+      method: "POST",
+      url: `/learning-sessions/${created.id}/pause`,
+      headers,
+      payload: { currentBeatId: firstBeatId, narrationOffsetMs: 1500, boardRenderState: { scrollTop: 42 } },
+    });
+    expect(pauseAgainResponse.statusCode).toBe(200);
+
     const resumeResponse = await app.inject({ method: "POST", url: `/learning-sessions/${created.id}/resume`, headers });
     expect(resumeResponse.statusCode).toBe(200);
     const resumed = resumeResponse.json() as { status: string; streamRef: string };

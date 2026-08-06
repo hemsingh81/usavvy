@@ -6,7 +6,15 @@ import { createLearningSessionInputSchema, pauseLearningSessionInputSchema } fro
 import type { Db } from "../../db/client.js";
 import type { VoicePort } from "../voice/index.js";
 import type { PubSubPort } from "../pubsub/index.js";
-import { createOrResumeLearningSession, endLearningSession, getLearningSession, pauseLearningSession, recordBeatReached, resumeLearningSession } from "./service.js";
+import {
+  createOrResumeLearningSession,
+  endLearningSession,
+  getLearningSession,
+  pauseLearningSession,
+  recordBeatReached,
+  replayCurrentBeat,
+  resumeLearningSession,
+} from "./service.js";
 
 // Duplicated from courses'/ingestion's own identically-named private helper (AD-9/AD-13
 // — services/* never import each other; each service's modules/* are private except
@@ -83,6 +91,12 @@ export function registerLearningSessionsRoutes(app: FastifyInstance, deps: Learn
     const { userId } = requireTrustedUser(request);
     const id = requireValidId((request.params as { id: string }).id);
     return resumeLearningSession(deps.db, userId, id, deps.voicePort);
+  });
+
+  app.post("/learning-sessions/:id/replay", async (request) => {
+    const { userId } = requireTrustedUser(request);
+    const id = requireValidId((request.params as { id: string }).id);
+    return replayCurrentBeat(deps.db, userId, id, deps.voicePort);
   });
 
   app.post("/learning-sessions/:id/beats/:beatId/reached", async (request) => {

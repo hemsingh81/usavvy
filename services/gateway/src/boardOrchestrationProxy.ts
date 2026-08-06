@@ -51,6 +51,12 @@ export function registerBoardOrchestrationProxyRoutes(app: FastifyInstance, deps
     reply.code(result.status).send(result.body);
   });
 
+  app.post("/learning-sessions/:id/replay", { preHandler: requireAuth }, async (request, reply) => {
+    const id = requireValidId((request.params as { id: string }).id);
+    const result = await deps.forwardToBoardOrchestration("POST", `/learning-sessions/${id}/replay`, { headers: trustedHeaders(request) });
+    reply.code(result.status).send(result.body);
+  });
+
   app.post("/learning-sessions/:id/beats/:beatId/reached", { preHandler: requireAuth }, async (request, reply) => {
     const { id, beatId } = request.params as { id: string; beatId: string };
     const result = await deps.forwardToBoardOrchestration(

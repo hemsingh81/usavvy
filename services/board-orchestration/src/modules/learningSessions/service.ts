@@ -62,8 +62,16 @@ async function findActiveOrPausedSession(db: Db, userId: string, conceptId: stri
   return existing;
 }
 
+// Bug found via a genuinely-racing test run: drizzle-orm's postgres-js session wraps
+// EVERY query error in its own DrizzleQueryError, whose `.cause` holds the real
+// PostgresError — `.code` never appears on the outer error we actually catch. Checking
+// only the top-level `.code` meant this check had silently never matched a real DB-level
+// unique-violation; earlier test runs happened to pass because the SELECT-vs-INSERT race
+// window rarely lined up for both concurrent calls to reach the INSERT at once, not
+// because the fallback path worked.
 function isUniqueViolation(error: unknown): boolean {
-  return typeof error === "object" && error !== null && "code" in error && (error as { code?: unknown }).code === "23505";
+  const code = (error as { code?: unknown; cause?: { code?: unknown } } | null)?.code ?? (error as { cause?: { code?: unknown } } | null)?.cause?.code;
+  return code === "23505";
 }
 
 async function loadSessionOrThrow(db: Db, userId: string, sessionId: string): Promise<typeof learningSessions.$inferSelect> {
@@ -278,6 +286,50 @@ export async function resumeLearningSession(db: Db, userId: string, sessionId: s
     type: "resumed",
     payload: { currentBeatId: session.currentBeatId, narrationOffsetMs: session.narrationOffsetMs },
   });
+
+  const response = await toResponse(db, updated);
+  return { ...response, streamRef };
+}
+
+/**
+ * Story 3.2 (FR-B-2), AC #1-#3. Semantically "resume, but forced to offset 0" — reuses
+ * `resumeLearningSession`'s exact write-ordering discipline (VoicePort called before any
+ * write; on failure, zero mutation) and its code-review-hardened `status <> "ended"`
+ * defensive write. Unlike Resume, valid from EITHER "active" or "paused" (AC #1: "whether
+ * playing or paused"), and always resets `narrationOffsetMs`/`boardRenderState` rather
+ * than restoring a persisted offset. `boardRenderState` resets to `null`, not a
+ * synthesized "start of Beat" value — it's an opaque, frontend-owned blob this service
+ * has never interpreted (see pauseLearningSession's own convention).
+ */
+export async function replayCurrentBeat(db: Db, userId: string, sessionId: string, voicePort: VoicePort): Promise<LearningSessionResponse & { streamRef: string }> {
+  const session = await loadSessionOrThrow(db, userId, sessionId);
+  if (session.status === "ended") {
+    throw new AppError("VALIDATION_ERROR", "this learning session has already ended and cannot be replayed", 400);
+  }
+  if (!session.currentBeatId) {
+    throw new AppError("INTERNAL_ERROR", "learning session is missing its current Beat", 500);
+  }
+
+  let streamRef: string;
+  try {
+    const stream = await voicePort.reestablishStream(session.currentBeatId, 0);
+    streamRef = stream.streamRef;
+  } catch (error) {
+    throw new AppError("VOICE_UNAVAILABLE", "unable to reestablish the narration audio stream — try again", 503, {
+      reason: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  const [updated] = await db
+    .update(learningSessions)
+    .set({ status: "active", narrationOffsetMs: 0, boardRenderState: null, updatedAt: new Date() })
+    .where(and(eq(learningSessions.id, sessionId), ne(learningSessions.status, "ended")))
+    .returning();
+  if (!updated) {
+    throw new AppError("SESSION_STATE_CHANGED", "this learning session's status changed while replaying — try again", 409);
+  }
+
+  await db.insert(sessionEvents).values({ sessionId, type: "replayed", payload: { currentBeatId: session.currentBeatId } });
 
   const response = await toResponse(db, updated);
   return { ...response, streamRef };
