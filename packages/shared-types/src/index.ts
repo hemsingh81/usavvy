@@ -124,4 +124,8 @@ export {
   listUploadsQuerySchema,
   type ListUploadsQuery,
   optionalCustomCourseIdSchema,
+  pasteTextInputSchema,
+  type PasteTextInput,
+  urlImportInputSchema,
+  type UrlImportInput,
 } from "./uploads.js";

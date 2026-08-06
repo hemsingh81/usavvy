@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import postgres from "postgres";
 import { eq } from "drizzle-orm";
 import { buildApp } from "../../../src/app.js";
@@ -183,5 +183,132 @@ describe("GET /uploads", () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toHaveLength(1);
+  });
+});
+
+const LONG_ENOUGH_TEXT = "This is a paragraph with clearly more than ten words in it for testing purposes.";
+
+describe("POST /uploads/paste-text", () => {
+  it("rejects without the internal service secret", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/uploads/paste-text",
+      headers: { "x-user-id": OWNER_ID, "x-user-role": "student" },
+      payload: { text: LONG_ENOUGH_TEXT, copyrightAttested: true },
+    });
+
+    expect(response.statusCode).toBe(401);
+  });
+
+  it("accepts valid attested pasted text and returns the stored document (AC #1)", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/uploads/paste-text",
+      headers: learnerHeaders,
+      payload: { text: LONG_ENOUGH_TEXT, copyrightAttested: true },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toMatchObject({ fileName: "pasted-text.txt", status: "queued" });
+  });
+
+  it("rejects text below the minimum word count (AC #4)", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/uploads/paste-text",
+      headers: learnerHeaders,
+      payload: { text: "too short", copyrightAttested: true },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error.message).toContain("not enough content");
+  });
+
+  it("rejects a malformed customCourseId with a clean 400", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/uploads/paste-text",
+      headers: learnerHeaders,
+      payload: { customCourseId: "not-a-uuid", text: LONG_ENOUGH_TEXT, copyrightAttested: true },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error.code).toBe("VALIDATION_ERROR");
+  });
+});
+
+describe("POST /uploads/url-import", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("rejects without the internal service secret", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/uploads/url-import",
+      headers: { "x-user-id": OWNER_ID, "x-user-role": "student" },
+      payload: { url: "https://example.com", copyrightAttested: true },
+    });
+
+    expect(response.statusCode).toBe(401);
+  });
+
+  it("fetches and stores a page's extracted text through the real route (AC #2)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: true, status: 200, text: () => Promise.resolve(`<p>${LONG_ENOUGH_TEXT}</p>`) } as unknown as Response),
+    );
+    const app = buildApp(createTestAppDeps({ db }));
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/uploads/url-import",
+      headers: learnerHeaders,
+      payload: { url: "https://example.com/article", copyrightAttested: true },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json().status).toBe("queued");
+  });
+
+  it("rejects an unreachable URL with a specific reason through the real route (AC #3)", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("ECONNREFUSED")));
+    const app = buildApp(createTestAppDeps({ db }));
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/uploads/url-import",
+      headers: learnerHeaders,
+      payload: { url: "https://example.com/down", copyrightAttested: true },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error.message).toContain("unreachable");
+  });
+
+  it("rejects a non-URL string before ever calling fetch", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const app = buildApp(createTestAppDeps({ db }));
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/uploads/url-import",
+      headers: learnerHeaders,
+      payload: { url: "not-a-url", copyrightAttested: true },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

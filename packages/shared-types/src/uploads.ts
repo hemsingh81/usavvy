@@ -25,3 +25,20 @@ export type ListUploadsQuery = z.infer<typeof listUploadsQuerySchema>;
 // POST didn't. Optional here (unlike GET's), since the first file of a new batch omits
 // it and the server mints one.
 export const optionalCustomCourseIdSchema = z.uuid().optional();
+
+// Story 2.8 (FR-C-8).
+export const pasteTextInputSchema = z.object({
+  customCourseId: z.uuid().optional(),
+  text: z.string(),
+  copyrightAttested: z.boolean(),
+});
+
+export type PasteTextInput = z.infer<typeof pasteTextInputSchema>;
+
+export const urlImportInputSchema = z.object({
+  customCourseId: z.uuid().optional(),
+  url: z.url(),
+  copyrightAttested: z.boolean(),
+});
+
+export type UrlImportInput = z.infer<typeof urlImportInputSchema>;

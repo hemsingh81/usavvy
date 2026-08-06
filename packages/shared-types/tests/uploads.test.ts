@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { listUploadsQuerySchema, uploadedDocumentResponseSchema } from "../src/uploads.js";
+import { listUploadsQuerySchema, pasteTextInputSchema, uploadedDocumentResponseSchema, urlImportInputSchema } from "../src/uploads.js";
 
 describe("uploadedDocumentResponseSchema", () => {
   it("accepts a fully-populated response", () => {
@@ -37,5 +37,25 @@ describe("listUploadsQuerySchema", () => {
 
   it("rejects a non-uuid customCourseId", () => {
     expect(() => listUploadsQuerySchema.parse({ customCourseId: "not-a-uuid" })).toThrow();
+  });
+});
+
+describe("pasteTextInputSchema", () => {
+  it("accepts text with no customCourseId", () => {
+    expect(() => pasteTextInputSchema.parse({ text: "hello world", copyrightAttested: true })).not.toThrow();
+  });
+
+  it("rejects a non-boolean copyrightAttested", () => {
+    expect(() => pasteTextInputSchema.parse({ text: "hello world", copyrightAttested: "true" })).toThrow();
+  });
+});
+
+describe("urlImportInputSchema", () => {
+  it("accepts a valid URL with no customCourseId", () => {
+    expect(() => urlImportInputSchema.parse({ url: "https://example.com/article", copyrightAttested: true })).not.toThrow();
+  });
+
+  it("rejects a non-URL string", () => {
+    expect(() => urlImportInputSchema.parse({ url: "not-a-url", copyrightAttested: true })).toThrow();
   });
 });

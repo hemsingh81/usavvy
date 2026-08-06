@@ -2,9 +2,9 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { z } from "zod";
 import { AppError, type JobQueuePort, type StoragePort } from "@usavvy/service-kernel";
 import { ROLES, type Role } from "@usavvy/config";
-import { listUploadsQuerySchema, optionalCustomCourseIdSchema } from "@usavvy/shared-types";
+import { listUploadsQuerySchema, optionalCustomCourseIdSchema, pasteTextInputSchema, urlImportInputSchema } from "@usavvy/shared-types";
 import type { Db } from "../../db/client.js";
-import { listUploadedDocuments, uploadDocument } from "./service.js";
+import { importFromUrl, importPastedText, listUploadedDocuments, uploadDocument } from "./service.js";
 
 // Duplicated from courses' own identically-named private helper (AD-9/AD-13).
 function parseOrThrow<T>(schema: z.ZodType<T>, data: unknown): T {
@@ -93,5 +93,24 @@ export function registerUploadsRoutes(app: FastifyInstance, deps: UploadsRouteDe
     const { userId } = requireTrustedUser(request);
     const { customCourseId } = parseOrThrow(listUploadsQuerySchema, request.query);
     return listUploadedDocuments(deps.db, userId, customCourseId);
+  });
+
+  // Story 2.8 (FR-C-8), AC #1: plain JSON, unlike the multipart file-upload route above
+  // — no binary payload to stream.
+  app.post("/uploads/paste-text", async (request, reply) => {
+    const { userId } = requireTrustedUser(request);
+    const input = parseOrThrow(pasteTextInputSchema, request.body);
+    // Zod's `.optional()` produces an optional key; service.ts's PasteTextInput requires
+    // the key present (exactOptionalPropertyTypes) — spread + explicit assignment makes it so.
+    const result = await importPastedText(deps, userId, { ...input, customCourseId: input.customCourseId });
+    reply.code(201).send(result);
+  });
+
+  // Story 2.8 (FR-C-8), AC #2/#3.
+  app.post("/uploads/url-import", async (request, reply) => {
+    const { userId } = requireTrustedUser(request);
+    const input = parseOrThrow(urlImportInputSchema, request.body);
+    const result = await importFromUrl(deps, userId, { ...input, customCourseId: input.customCourseId });
+    reply.code(201).send(result);
   });
 }
