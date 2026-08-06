@@ -71,7 +71,7 @@ development_status:
   2-5-optional-placement-check: done
   2-6-version-catalog-courses: done
   2-7-upload-learner-content-with-copyright-attestation: done
-  2-8-paste-text-and-public-url-import: backlog
+  2-8-paste-text-and-public-url-import: ready-for-dev
   2-9-ingestion-pipeline-parse-ocr-fallback-structure-detection-and-chunking: backlog
   2-10-content-safety-scan-during-ingestion: backlog
   2-11-ingestion-status-with-progress-and-failure-reasons: backlog
