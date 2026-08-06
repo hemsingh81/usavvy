@@ -28,6 +28,7 @@ const URL_FETCH_TIMEOUT_MS = 10000;
 
 export interface UploadDocumentInput {
   customCourseId: string | undefined;
+  courseId: string | undefined;
   fileName: string;
   buffer: Buffer;
   copyrightAttested: boolean;
@@ -35,25 +36,50 @@ export interface UploadDocumentInput {
 
 export interface PasteTextInput {
   customCourseId: string | undefined;
+  courseId: string | undefined;
   text: string;
   copyrightAttested: boolean;
 }
 
 export interface UrlImportInput {
   customCourseId: string | undefined;
+  courseId: string | undefined;
   url: string;
   copyrightAttested: boolean;
 }
 
 export interface UploadedDocumentResponse {
   id: string;
-  customCourseId: string;
+  customCourseId: string | null;
+  courseId: string | null;
   fileName: string;
   fileType: string;
   fileSizeBytes: number;
   status: string;
   failureReason: string | null;
   createdAt: string;
+}
+
+// Story 2.14 (FR-C-14). Every upload/list operation is scoped to exactly one grouping
+// key — either a self-contained "custom course" batch (Stories 2.7-2.13) or an existing
+// catalog course's courseId (this story) — never both. This resolves the caller-supplied
+// pair into that single key, minting a fresh customCourseId only when NEITHER is given
+// (finalizeUpload's existing "start a new custom course" default) — a caller supplying
+// courseId always uses it directly, never falls back to minting.
+export type UploadGroupKey = { kind: "customCourseId"; value: string } | { kind: "courseId"; value: string };
+
+export function resolveUploadGroupKey(customCourseId: string | undefined, courseId: string | undefined): UploadGroupKey {
+  if (customCourseId && courseId) {
+    throw new AppError("VALIDATION_ERROR", "customCourseId and courseId cannot both be provided", 400);
+  }
+  if (courseId) {
+    return { kind: "courseId", value: courseId };
+  }
+  return { kind: "customCourseId", value: customCourseId ?? randomUUID() };
+}
+
+function groupKeyColumn(kind: UploadGroupKey["kind"]) {
+  return kind === "courseId" ? uploadedDocuments.courseId : uploadedDocuments.customCourseId;
 }
 
 export interface UploadDeps {
@@ -221,6 +247,7 @@ function toResponse(row: typeof uploadedDocuments.$inferSelect): UploadedDocumen
   return {
     id: row.id,
     customCourseId: row.customCourseId,
+    courseId: row.courseId,
     fileName: row.fileName,
     fileType: row.fileType,
     fileSizeBytes: row.fileSizeBytes,
@@ -230,16 +257,17 @@ function toResponse(row: typeof uploadedDocuments.$inferSelect): UploadedDocumen
   };
 }
 
-async function countExistingFiles(db: DbOrTx, ownerId: string, customCourseId: string): Promise<number> {
+async function countExistingFiles(db: DbOrTx, ownerId: string, groupKey: UploadGroupKey): Promise<number> {
   const rows = await db
     .select({ id: uploadedDocuments.id })
     .from(uploadedDocuments)
-    .where(and(eq(uploadedDocuments.ownerId, ownerId), eq(uploadedDocuments.customCourseId, customCourseId)));
+    .where(and(eq(uploadedDocuments.ownerId, ownerId), eq(groupKeyColumn(groupKey.kind), groupKey.value)));
   return rows.length;
 }
 
 interface FinalizeUploadInput {
   customCourseId: string | undefined;
+  courseId: string | undefined;
   fileName: string;
   fileType: string;
   buffer: Buffer;
@@ -260,26 +288,29 @@ interface FinalizeUploadInput {
  * URL-import have no analogous "expensive check to avoid" before this point anyway).
  */
 async function finalizeUpload(deps: UploadDeps, ownerId: string, input: FinalizeUploadInput): Promise<UploadedDocumentResponse> {
-  const customCourseId = input.customCourseId ?? randomUUID();
+  const groupKey = resolveUploadGroupKey(input.customCourseId, input.courseId);
 
-  const existingCount = await countExistingFiles(deps.db, ownerId, customCourseId);
+  const existingCount = await countExistingFiles(deps.db, ownerId, groupKey);
   if (existingCount >= MAX_FILES_PER_CUSTOM_COURSE) {
     throw new AppError("VALIDATION_ERROR", "10-file-per-course limit reached", 400);
   }
 
-  const storageKey = `${ownerId}/${customCourseId}/${randomUUID()}.${input.fileType}`;
+  const storageKey = `${ownerId}/${groupKey.value}/${randomUUID()}.${input.fileType}`;
   await deps.storagePort.putObject(storageKey, input.buffer, contentTypeForFileType(input.fileType));
 
   // Review finding (Story 2.7): the pre-check above and the insert were two separate,
   // unsynchronized statements — two concurrent uploads to the same customCourseId
   // could both read a stale count and both insert, breaking the 10-file cap.
-  // pg_advisory_xact_lock serializes concurrent attempts for the SAME customCourseId
+  // pg_advisory_xact_lock serializes concurrent attempts for the SAME groupKey value
   // (auto-released at transaction end) without blocking uploads to different ones —
   // the recount+insert inside it is the actual enforcement, not just the pre-check.
+  // Story 2.14: the lock/cap now generalizes to whichever grouping key (customCourseId
+  // OR courseId) is present — a catalog course's 10-note cap is independent of any
+  // unrelated custom-course batch the same owner also has in progress.
   const row = await deps.db.transaction(async (tx) => {
-    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${customCourseId}))`);
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${groupKey.value}))`);
 
-    const authoritativeCount = await countExistingFiles(tx, ownerId, customCourseId);
+    const authoritativeCount = await countExistingFiles(tx, ownerId, groupKey);
     if (authoritativeCount >= MAX_FILES_PER_CUSTOM_COURSE) {
       throw new AppError("VALIDATION_ERROR", "10-file-per-course limit reached", 400);
     }
@@ -288,7 +319,8 @@ async function finalizeUpload(deps: UploadDeps, ownerId: string, input: Finalize
       .insert(uploadedDocuments)
       .values({
         ownerId,
-        customCourseId,
+        customCourseId: groupKey.kind === "customCourseId" ? groupKey.value : null,
+        courseId: groupKey.kind === "courseId" ? groupKey.value : null,
         fileName: input.fileName,
         fileType: input.fileType,
         fileSizeBytes: input.buffer.byteLength,
@@ -336,6 +368,7 @@ export async function uploadDocument(deps: UploadDeps, ownerId: string, input: U
 
   return finalizeUpload(deps, ownerId, {
     customCourseId: input.customCourseId,
+    courseId: input.courseId,
     fileName: input.fileName,
     fileType: extension.slice(1),
     buffer: input.buffer,
@@ -354,6 +387,7 @@ export async function importPastedText(deps: UploadDeps, ownerId: string, input:
 
   return finalizeUpload(deps, ownerId, {
     customCourseId: input.customCourseId,
+    courseId: input.courseId,
     fileName: "pasted-text.txt",
     fileType: "txt",
     buffer: Buffer.from(input.text, "utf-8"),
@@ -412,18 +446,24 @@ export async function importFromUrl(deps: UploadDeps, ownerId: string, input: Ur
 
   return finalizeUpload(deps, ownerId, {
     customCourseId: input.customCourseId,
+    courseId: input.courseId,
     fileName: `${fileName}.txt`,
     fileType: "txt",
     buffer: Buffer.from(extractedText, "utf-8"),
   });
 }
 
-/** Scoped to the caller's own `ownerId` — a `customCourseId` the caller doesn't own returns `[]`, never a 403 leaking existence. */
-export async function listUploadedDocuments(db: Db, ownerId: string, customCourseId: string): Promise<UploadedDocumentResponse[]> {
+/**
+ * Scoped to the caller's own `ownerId` — a grouping key the caller doesn't own returns
+ * `[]`, never a 403 leaking existence. Story 2.14: accepts either grouping key (the
+ * route's own schema validation guarantees exactly one is ever passed here — see
+ * `listUploadsQuerySchema`'s `.refine()`).
+ */
+export async function listUploadedDocuments(db: Db, ownerId: string, groupKey: UploadGroupKey): Promise<UploadedDocumentResponse[]> {
   const rows = await db
     .select()
     .from(uploadedDocuments)
-    .where(and(eq(uploadedDocuments.ownerId, ownerId), eq(uploadedDocuments.customCourseId, customCourseId)))
+    .where(and(eq(uploadedDocuments.ownerId, ownerId), eq(groupKeyColumn(groupKey.kind), groupKey.value)))
     .orderBy(uploadedDocuments.createdAt);
   return rows.map(toResponse);
 }

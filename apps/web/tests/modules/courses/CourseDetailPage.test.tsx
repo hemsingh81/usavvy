@@ -209,6 +209,14 @@ describe("CourseDetailPage", () => {
     expect(screen.queryByText("Intro to Algebra", { selector: "h1" })).not.toBeInTheDocument();
   });
 
+  it("links to the attach-personal-notes page for this course (Story 2.14, AC #1)", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(await jsonResponse(FULL_COURSE)));
+    renderWithSession({ accessToken: "a-token" });
+
+    await waitFor(() => expect(screen.getByText("Intro to Algebra")).toBeInTheDocument());
+    expect(screen.getByRole("link", { name: "Add your personal notes to this course" })).toHaveAttribute("href", "/courses/c1/notes");
+  });
+
   it("shows a distinguishable error rather than a blank page when the fetch fails", async () => {
     vi.stubGlobal(
       "fetch",

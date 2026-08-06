@@ -39,6 +39,11 @@ describe("describeIngestionStatus", () => {
     });
   });
 
+  it("maps 'embedded' — a catalog-course-attached note's terminal success state, distinct from 'outline ready' (Story 2.14, AC #1, #2)", () => {
+    const result = describeIngestionStatus("embedded", null);
+    expect(result).toMatchObject({ stageLabel: "Added to course notes", progressPercent: 100, isTerminal: true, isFailure: false });
+  });
+
   it("maps 'blocked' with the raw failure reason and a content-policy next step (AC #2, #3)", () => {
     const result = describeIngestionStatus("blocked", "blocked: self-harm-instructions");
     expect(result).toMatchObject({ stageLabel: "Blocked", isTerminal: true, isFailure: true, failureReason: "blocked: self-harm-instructions" });

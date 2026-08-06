@@ -23,8 +23,11 @@ export interface IngestJobDeps {
 
 // Story 2.12 (FR-C-9): only these are terminal now — "parsed" has somewhere further to
 // go (embedding + outline proposal), so it moved out of this set (it was terminal as of
-// Story 2.11, before this story existed).
-const TERMINAL_STATUSES = new Set(["outline ready", "blocked", "failed"]);
+// Story 2.11, before this story existed). Story 2.14 (FR-C-14) adds "embedded" — the
+// terminal status for a personal note attached to an existing catalog course, which
+// skips outline proposal entirely and never reaches "outline ready" (see
+// embedAndProposeOutline's courseId branch below).
+const TERMINAL_STATUSES = new Set(["outline ready", "embedded", "blocked", "failed"]);
 
 // A document at either of these statuses already has its ContentChunk rows committed
 // (the parse/chunk/safety-scan transaction below already ran successfully) — resuming
@@ -88,7 +91,7 @@ async function loadEmbeddableChunks(db: Db, documentId: string): Promise<Embedda
  */
 async function embedAndProposeOutline(
   deps: IngestJobDeps,
-  document: { id: string; customCourseId: string },
+  document: { id: string; customCourseId: string | null; courseId: string | null },
   chunks: EmbeddableChunk[],
 ): Promise<void> {
   if (chunks.length === 0) {
@@ -98,6 +101,28 @@ async function embedAndProposeOutline(
     // silent, misleading success. An honest "failed" outcome, matching how the parser
     // step already reports other unprocessable-content cases.
     await deps.db.update(uploadedDocuments).set({ status: "failed", failureReason: "no extractable content" }).where(eq(uploadedDocuments.id, document.id));
+    return;
+  }
+
+  // Review finding: checked AFTER vectorStorePort.upsert previously ran — an invariant
+  // violation would have already persisted an orphaned chunk_embeddings row before this
+  // ever threw. Checked symmetrically (both set is exactly as invalid as neither) and
+  // up front now, before any embedding work starts, matching AD-17's "fail fast, don't
+  // do partial work first" discipline. `resolveUploadGroupKey` (uploads/service.ts)
+  // already prevents "both" at upload time and `finalizeUpload` always sets exactly
+  // one, so neither branch is reachable via any real route today — this guards against
+  // a future bug (a manual DB edit, a new write path that bypasses `finalizeUpload`)
+  // the same way the "neither" case was already guarded, not a case expected in practice.
+  if ((document.customCourseId === null) === (document.courseId === null)) {
+    await deps.db
+      .update(uploadedDocuments)
+      .set({ status: "failed", failureReason: "internal error" })
+      .where(eq(uploadedDocuments.id, document.id));
+    deps.logger.error("document has an invalid customCourseId/courseId combination — exactly one must be set", {
+      documentId: document.id,
+      customCourseId: document.customCourseId,
+      courseId: document.courseId,
+    });
     return;
   }
 
@@ -111,10 +136,25 @@ async function embedAndProposeOutline(
         chunkId: chunk.id,
         documentId: document.id,
         customCourseId: document.customCourseId,
+        courseId: document.courseId,
         conceptId: null,
         embedding: embeddings[index] as number[],
       })),
     );
+
+    // Story 2.14 (FR-C-14), AC #2: a personal note attached to an existing catalog
+    // Course has nothing to propose an outline FOR — that Course already has its own
+    // official Topic/Concept structure (Story 2.1). Embedding alone (above) already
+    // satisfies AC #2; skip straight to the terminal status rather than generating and
+    // persisting a Topic/Concept structure no screen will ever show.
+    if (document.courseId !== null) {
+      await deps.db.update(uploadedDocuments).set({ status: "embedded" }).where(eq(uploadedDocuments.id, document.id));
+      return;
+    }
+    // The guard above already ensured exactly one of customCourseId/courseId is set,
+    // and the branch just above returned for the courseId case — so customCourseId is
+    // non-null here. Narrows the type for proposedTopics' still-NOT-NULL column below.
+    const customCourseId = document.customCourseId as string;
 
     const outline = await deps.generationPort.proposeOutline({
       chunks: chunks.map((chunk) => ({
@@ -131,7 +171,7 @@ async function embedAndProposeOutline(
       for (const [topicIndex, topic] of outline.entries()) {
         const [topicRow] = await tx
           .insert(proposedTopics)
-          .values({ customCourseId: document.customCourseId, documentId: document.id, title: topic.title, position: topicIndex })
+          .values({ customCourseId, documentId: document.id, title: topic.title, position: topicIndex })
           .returning();
         if (!topicRow) continue;
         for (const [conceptIndex, concept] of topic.concepts.entries()) {

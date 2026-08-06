@@ -148,6 +148,7 @@ export {
   listUploadsQuerySchema,
   type ListUploadsQuery,
   optionalCustomCourseIdSchema,
+  optionalCourseIdSchema,
   pasteTextInputSchema,
   type PasteTextInput,
   urlImportInputSchema,

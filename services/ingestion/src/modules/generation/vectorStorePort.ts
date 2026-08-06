@@ -7,7 +7,12 @@
 export interface VectorStoreEntry {
   chunkId: string;
   documentId: string;
-  customCourseId: string;
+  // Story 2.14 (FR-C-14): exactly one of customCourseId/courseId is ever set, mirroring
+  // uploadedDocuments' own exactly-one-of invariant — courseId is a real catalog
+  // services/courses courseId when this entry belongs to a personal note attached to an
+  // existing catalog course, rather than a new custom course.
+  customCourseId: string | null;
+  courseId: string | null;
   // AC #1's "conceptId placeholder" — always null until a future story creates real
   // Concepts (Story 2.13 or later; see this story's Scope Note).
   conceptId: string | null;

@@ -56,6 +56,26 @@ async function insertDocument(fileType: string, storageKey: string): Promise<str
   return row.id;
 }
 
+// Story 2.14 (FR-C-14): a personal note attached to an existing catalog course — courseId
+// set, customCourseId null, mirroring finalizeUpload's own exactly-one-of invariant.
+async function insertCourseNoteDocument(fileType: string, storageKey: string, courseId: string = randomUUID()): Promise<string> {
+  const [row] = await db
+    .insert(uploadedDocuments)
+    .values({
+      ownerId: OWNER_ID,
+      courseId,
+      fileName: `test.${fileType}`,
+      fileType,
+      fileSizeBytes: 100,
+      storageKey,
+      copyrightAttested: true,
+      status: "queued",
+    })
+    .returning();
+  if (!row) throw new Error("failed to insert test document");
+  return row.id;
+}
+
 // Story 2.12 (FR-C-9): every IngestJobDeps call site now needs a GenerationPort and a
 // VectorStorePort — mocks here, matching storagePort's own mock-by-default test
 // convention. Real-adapter coverage lives in vectorStorePgvector.test.ts instead.
@@ -560,5 +580,117 @@ describe("ingestDocument", () => {
     expect(embedSpy).not.toHaveBeenCalled();
     const topics = await db.select().from(proposedTopics).where(eq(proposedTopics.documentId, documentId));
     expect(topics).toHaveLength(0);
+  });
+
+  it("reaches 'embedded' (not 'outline ready') for a personal note attached to a catalog course, with zero proposed-outline rows and the real courseId on its embeddings (Story 2.14, AC #1, #2)", async () => {
+    const storageKey = `test/${randomUUID()}.txt`;
+    const courseId = randomUUID();
+    const documentId = await insertCourseNoteDocument("txt", storageKey, courseId);
+    const deps = await depsWithStoredFixture(storageKey, Buffer.from("Just plain content for this test document."));
+
+    await ingestDocument(deps, { uploadedDocumentId: documentId });
+
+    const [document] = await db.select().from(uploadedDocuments).where(eq(uploadedDocuments.id, documentId));
+    expect(document).toMatchObject({ status: "embedded", failureReason: null, courseId, customCourseId: null });
+
+    const topics = await db.select().from(proposedTopics).where(eq(proposedTopics.documentId, documentId));
+    expect(topics).toHaveLength(0);
+
+    expect(deps.vectorStorePort.entries.size).toBeGreaterThan(0);
+    expect([...deps.vectorStorePort.entries.values()].every((e) => e.courseId === courseId && e.customCourseId === null)).toBe(true);
+  });
+
+  it("fails a catalog-course-attached note exactly like a standalone custom-course upload on the same failure reason (Story 2.14, AC #3)", async () => {
+    const storageKey = `test/${randomUUID()}.pdf`;
+    const documentId = await insertCourseNoteDocument("pdf", storageKey);
+    const deps = await depsWithStoredFixture(storageKey, fixture("encrypted.pdf"));
+
+    await ingestDocument(deps, { uploadedDocumentId: documentId });
+
+    const chunks = await db.select().from(contentChunks).where(eq(contentChunks.documentId, documentId));
+    expect(chunks).toHaveLength(0);
+    const [document] = await db.select().from(uploadedDocuments).where(eq(uploadedDocuments.id, documentId));
+    expect(document).toMatchObject({ status: "failed", failureReason: "encrypted file" });
+  });
+
+  it(
+    "resumes straight to embedding for a courseId-scoped document already at 'parsed' with committed chunks, reaching 'embedded' with zero proposed-outline rows (Story 2.14, crash-recovery)",
+    async () => {
+      const storageKey = `test/${randomUUID()}.pdf`;
+      const courseId = randomUUID();
+      const documentId = await insertCourseNoteDocument("pdf", storageKey, courseId);
+      await db.insert(contentChunks).values([{ documentId, chunkIndex: 0, text: "Only section text.", heading: "Only", pageRangeStart: 1, pageRangeEnd: 1, safetyStatus: "clear" }]);
+      await db.update(uploadedDocuments).set({ status: "parsed" }).where(eq(uploadedDocuments.id, documentId));
+      const storagePort = createMockStorageAdapter();
+      const getObjectSpy = vi.spyOn(storagePort, "getObject");
+      const logger = createLogger("test");
+      const { generationPort, vectorStorePort } = generationDeps();
+
+      await ingestDocument({ db, storagePort, logger, generationPort, vectorStorePort }, { uploadedDocumentId: documentId });
+
+      expect(getObjectSpy).not.toHaveBeenCalled();
+      const [document] = await db.select().from(uploadedDocuments).where(eq(uploadedDocuments.id, documentId));
+      expect(document).toMatchObject({ status: "embedded", courseId, customCourseId: null });
+      expect(vectorStorePort.entries.size).toBe(1);
+      const topics = await db.select().from(proposedTopics).where(eq(proposedTopics.documentId, documentId));
+      expect(topics).toHaveLength(0);
+    },
+    30_000,
+  );
+
+  it("fails cleanly with no chunk_embeddings written when a document somehow has BOTH customCourseId and courseId set (review finding: symmetric invariant guard)", async () => {
+    const storageKey = `test/${randomUUID()}.txt`;
+    const [row] = await db
+      .insert(uploadedDocuments)
+      .values({
+        ownerId: OWNER_ID,
+        customCourseId: randomUUID(),
+        courseId: randomUUID(),
+        fileName: "test.txt",
+        fileType: "txt",
+        fileSizeBytes: 100,
+        storageKey,
+        copyrightAttested: true,
+        status: "parsed",
+      })
+      .returning();
+    if (!row) throw new Error("failed to insert test document");
+    await db.insert(contentChunks).values([{ documentId: row.id, chunkIndex: 0, text: "text", heading: null, safetyStatus: "clear" }]);
+    const storagePort = createMockStorageAdapter();
+    const logger = createLogger("test");
+    const { generationPort, vectorStorePort } = generationDeps();
+
+    await ingestDocument({ db, storagePort, logger, generationPort, vectorStorePort }, { uploadedDocumentId: row.id });
+
+    const [document] = await db.select().from(uploadedDocuments).where(eq(uploadedDocuments.id, row.id));
+    expect(document).toMatchObject({ status: "failed", failureReason: "internal error" });
+    expect(vectorStorePort.entries.size).toBe(0);
+  });
+
+  it("fails cleanly with no chunk_embeddings written when a document has NEITHER customCourseId nor courseId set (review finding: symmetric invariant guard)", async () => {
+    const storageKey = `test/${randomUUID()}.txt`;
+    const [row] = await db
+      .insert(uploadedDocuments)
+      .values({
+        ownerId: OWNER_ID,
+        fileName: "test.txt",
+        fileType: "txt",
+        fileSizeBytes: 100,
+        storageKey,
+        copyrightAttested: true,
+        status: "parsed",
+      })
+      .returning();
+    if (!row) throw new Error("failed to insert test document");
+    await db.insert(contentChunks).values([{ documentId: row.id, chunkIndex: 0, text: "text", heading: null, safetyStatus: "clear" }]);
+    const storagePort = createMockStorageAdapter();
+    const logger = createLogger("test");
+    const { generationPort, vectorStorePort } = generationDeps();
+
+    await ingestDocument({ db, storagePort, logger, generationPort, vectorStorePort }, { uploadedDocumentId: row.id });
+
+    const [document] = await db.select().from(uploadedDocuments).where(eq(uploadedDocuments.id, row.id));
+    expect(document).toMatchObject({ status: "failed", failureReason: "internal error" });
+    expect(vectorStorePort.entries.size).toBe(0);
   });
 });

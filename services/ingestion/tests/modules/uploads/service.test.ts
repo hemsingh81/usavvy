@@ -162,7 +162,7 @@ describe("uploadDocument", () => {
       uploadDocument(d, OWNER_ID, { customCourseId, fileName: "file-11.txt", buffer: Buffer.from("x"), copyrightAttested: true }),
     ).rejects.toMatchObject({ code: "VALIDATION_ERROR", message: expect.stringContaining("10-file-per-course limit") });
 
-    const rows = await listUploadedDocuments(db, OWNER_ID, customCourseId as string);
+    const rows = await listUploadedDocuments(db, OWNER_ID, { kind: "customCourseId", value: customCourseId as string });
     expect(rows).toHaveLength(MAX_FILES_PER_CUSTOM_COURSE);
   });
 
@@ -181,7 +181,7 @@ describe("uploadDocument", () => {
     expect(succeeded).toHaveLength(MAX_FILES_PER_CUSTOM_COURSE);
     expect(rejected).toHaveLength(15 - MAX_FILES_PER_CUSTOM_COURSE);
 
-    const rows = await listUploadedDocuments(db, OWNER_ID, customCourseId);
+    const rows = await listUploadedDocuments(db, OWNER_ID, { kind: "customCourseId", value: customCourseId });
     expect(rows).toHaveLength(MAX_FILES_PER_CUSTOM_COURSE);
   });
 
@@ -211,8 +211,86 @@ describe("uploadDocument", () => {
     });
     expect(second.customCourseId).toBe(first.customCourseId);
 
-    const rows = await listUploadedDocuments(db, OWNER_ID, first.customCourseId);
+    const rows = await listUploadedDocuments(db, OWNER_ID, { kind: "customCourseId", value: first.customCourseId });
     expect(rows.map((r) => r.fileName).sort()).toEqual(["good.txt", "good2.txt"]);
+  });
+});
+
+describe("uploadDocument — courseId (Story 2.14, FR-C-14)", () => {
+  it("stores the supplied courseId directly (never minting), leaving customCourseId null (AC #1)", async () => {
+    const d = deps();
+    const courseId = randomUUID();
+
+    const result = await uploadDocument(d, OWNER_ID, {
+      customCourseId: undefined,
+      courseId,
+      fileName: "notes.pdf",
+      buffer: Buffer.from("%PDF-1.4 fake"),
+      copyrightAttested: true,
+    });
+
+    expect(result.courseId).toBe(courseId);
+    expect(result.customCourseId).toBeNull();
+  });
+
+  it("rejects a request supplying both customCourseId and courseId, without storing anything (AD-17)", async () => {
+    const d = deps();
+    const putObjectSpy = vi.spyOn(d.storagePort, "putObject");
+
+    await expect(
+      uploadDocument(d, OWNER_ID, {
+        customCourseId: randomUUID(),
+        courseId: randomUUID(),
+        fileName: "notes.pdf",
+        buffer: Buffer.from("%PDF-1.4 fake"),
+        copyrightAttested: true,
+      }),
+    ).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+    expect(putObjectSpy).not.toHaveBeenCalled();
+  });
+
+  it("caps a courseId's 10-file limit independently of an unrelated customCourseId batch for the same owner (AC #1)", async () => {
+    const d = deps();
+    const courseId = randomUUID();
+    for (let i = 0; i < MAX_FILES_PER_CUSTOM_COURSE; i++) {
+      await uploadDocument(d, OWNER_ID, { customCourseId: undefined, courseId, fileName: `note-${i}.txt`, buffer: Buffer.from(`n${i}`), copyrightAttested: true });
+    }
+    // A custom-course batch for the SAME owner must not count against, or be counted
+    // by, the courseId cap above — each grouping key has its own independent 10-file cap.
+    const customCourseResult = await uploadDocument(d, OWNER_ID, {
+      customCourseId: undefined,
+      courseId: undefined,
+      fileName: "unrelated.txt",
+      buffer: Buffer.from("x"),
+      copyrightAttested: true,
+    });
+    expect(customCourseResult.status).toBe("queued");
+
+    await expect(
+      uploadDocument(d, OWNER_ID, { customCourseId: undefined, courseId, fileName: "note-11.txt", buffer: Buffer.from("x"), copyrightAttested: true }),
+    ).rejects.toMatchObject({ code: "VALIDATION_ERROR", message: expect.stringContaining("10-file-per-course limit") });
+
+    const courseRows = await listUploadedDocuments(db, OWNER_ID, { kind: "courseId", value: courseId });
+    expect(courseRows).toHaveLength(MAX_FILES_PER_CUSTOM_COURSE);
+  });
+
+  it("lists and deletes courseId-scoped documents identically to customCourseId-scoped ones", async () => {
+    const d = deps();
+    const courseId = randomUUID();
+    const uploaded = await uploadDocument(d, OWNER_ID, {
+      customCourseId: undefined,
+      courseId,
+      fileName: "note.txt",
+      buffer: Buffer.from("x"),
+      copyrightAttested: true,
+    });
+
+    const rows = await listUploadedDocuments(db, OWNER_ID, { kind: "courseId", value: courseId });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.id).toBe(uploaded.id);
+
+    await deleteUploadedDocument(d, OWNER_ID, uploaded.id);
+    expect(await listUploadedDocuments(db, OWNER_ID, { kind: "courseId", value: courseId })).toEqual([]);
   });
 });
 
@@ -239,7 +317,7 @@ describe("listUploadedDocuments", () => {
       copyrightAttested: true,
     });
 
-    const rows = await listUploadedDocuments(db, OWNER_ID, mine.customCourseId);
+    const rows = await listUploadedDocuments(db, OWNER_ID, { kind: "customCourseId", value: mine.customCourseId });
 
     expect(rows).toHaveLength(1);
     expect(rows[0]?.fileName).toBe("mine.txt");
@@ -248,7 +326,7 @@ describe("listUploadedDocuments", () => {
   });
 
   it("returns an empty list for a customCourseId the caller doesn't own, never a 403", async () => {
-    const rows = await listUploadedDocuments(db, OWNER_ID, "019fd450-b7cb-7a32-b021-42788045c71f");
+    const rows = await listUploadedDocuments(db, OWNER_ID, { kind: "customCourseId", value: "019fd450-b7cb-7a32-b021-42788045c71f" });
     expect(rows).toEqual([]);
   });
 
@@ -268,7 +346,7 @@ describe("listUploadedDocuments", () => {
     });
     await db.update(uploadedDocuments).set({ status: "failed", failureReason: "corrupt file" }).where(eq(uploadedDocuments.id, toFail.id));
 
-    const rows = await listUploadedDocuments(db, OWNER_ID, healthy.customCourseId);
+    const rows = await listUploadedDocuments(db, OWNER_ID, { kind: "customCourseId", value: healthy.customCourseId });
 
     const healthyRow = rows.find((row) => row.fileName === "healthy.txt");
     const failedRow = rows.find((row) => row.fileName === "failed.txt");
@@ -341,7 +419,7 @@ describe("importPastedText", () => {
     });
 
     expect(pasteResult.customCourseId).toBe(fileResult.customCourseId);
-    const rows = await listUploadedDocuments(db, OWNER_ID, fileResult.customCourseId);
+    const rows = await listUploadedDocuments(db, OWNER_ID, { kind: "customCourseId", value: fileResult.customCourseId });
     expect(rows).toHaveLength(2);
   });
 });
@@ -443,7 +521,7 @@ describe("importFromUrl", () => {
     });
 
     expect(urlResult.customCourseId).toBe(fileResult.customCourseId);
-    const rows = await listUploadedDocuments(db, OWNER_ID, fileResult.customCourseId);
+    const rows = await listUploadedDocuments(db, OWNER_ID, { kind: "customCourseId", value: fileResult.customCourseId });
     expect(rows).toHaveLength(2);
   });
 
@@ -571,7 +649,7 @@ describe("deleteUploadedDocument", () => {
 
     await deleteUploadedDocument(d, OWNER_ID, document.id);
 
-    const rows = await listUploadedDocuments(db, OWNER_ID, document.customCourseId);
+    const rows = await listUploadedDocuments(db, OWNER_ID, { kind: "customCourseId", value: document.customCourseId });
     expect(rows).toEqual([]);
   });
 

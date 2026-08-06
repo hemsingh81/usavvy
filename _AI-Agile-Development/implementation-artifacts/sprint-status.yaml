@@ -64,7 +64,7 @@ development_status:
   1-12-application-shell-and-navigation: done
   epic-1-retrospective: optional
 
-  epic-2: in-progress
+  epic-2: done
   2-1-model-the-course-module-topic-concept-hierarchy: done
   2-2-catalog-browse-and-search-with-filters: done
   2-3-course-detail-page: done
@@ -78,7 +78,7 @@ development_status:
   2-11-ingestion-status-with-progress-and-failure-reasons: done
   2-12-embedding-and-ai-proposed-topic-concept-outline: done
   2-13-review-and-edit-the-proposed-outline: done
-  2-14-mixed-courses-attach-personal-notes-to-a-catalog-course: backlog
+  2-14-mixed-courses-attach-personal-notes-to-a-catalog-course: done
   epic-2-retrospective: optional
 
   epic-3: backlog

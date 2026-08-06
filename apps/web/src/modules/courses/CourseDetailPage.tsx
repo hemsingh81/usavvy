@@ -182,6 +182,13 @@ export function CourseDetailPage() {
               Customise before starting
             </Link>
           </div>
+
+          {/* Story 2.14 (FR-C-14): a secondary, lower-visual-weight action — attaching
+              personal notes isn't a step in starting the course, so it doesn't compete
+              with the primary "Start course"/"Customise" CTAs above for attention. */}
+          <p>
+            <Link to={`/courses/${id}/notes`}>Add your personal notes to this course</Link>
+          </p>
         </>
       ) : null}
     </main>

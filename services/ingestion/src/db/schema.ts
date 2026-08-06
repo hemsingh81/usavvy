@@ -17,8 +17,18 @@ export const uploadedDocuments = pgTable("uploaded_documents", {
   // Opaque cross-service reference to core's users (AD-13) — never a real DB FK.
   ownerId: text("owner_id").notNull(),
   // Groups a batch of uploads into one "custom course" (AD-1: not yet a real `courses`
-  // row — see this story's Dev Notes on why that's deliberately deferred to Story 2.13).
-  customCourseId: uuid("custom_course_id").notNull(),
+  // row — see Story 2.7's Dev Notes on why that was deliberately deferred to Story 2.13).
+  // Story 2.14: nullable — a document attached to an existing catalog course (courseId
+  // below) has no customCourseId at all. Exactly one of customCourseId/courseId is ever
+  // set, enforced in services/uploads/service.ts (finalizeUpload), not a DB constraint —
+  // no table in this schema uses a CHECK constraint for a cross-column invariant.
+  customCourseId: uuid("custom_course_id"),
+  // Story 2.14 (FR-C-14). Opaque, non-FK reference to services/courses' courses.id (same
+  // bare-cross-service-id convention as ownerId above; AD-14 forbids a real FK) — set
+  // when this document is a personal note attached to an EXISTING catalog course rather
+  // than part of a new custom course. See customCourseId's own comment for the
+  // exactly-one-of invariant.
+  courseId: uuid("course_id"),
   fileName: text("file_name").notNull(),
   // "pdf" | "docx" | "pptx" | "txt" | "md" — validated at the Zod boundary, not a DB
   // enum, matching this codebase's existing convention (e.g. courses.status).
@@ -78,8 +88,15 @@ export const chunkEmbeddings = pgTable("chunk_embeddings", {
     .notNull()
     .references(() => uploadedDocuments.id, { onDelete: "cascade" }),
   // Same bare, non-FK convention as uploadedDocuments.customCourseId — see that column's
-  // own comment for why (no real `courses` row exists yet).
-  customCourseId: uuid("custom_course_id").notNull(),
+  // own comment for why (no real `courses` row exists yet). Story 2.14: nullable, same
+  // exactly-one-of-customCourseId/courseId invariant as uploadedDocuments — denormalized
+  // straight from whichever one the source document has set.
+  customCourseId: uuid("custom_course_id"),
+  // Story 2.14 (FR-C-14). Denormalized from uploadedDocuments.courseId — see that
+  // column's own comment. Set instead of customCourseId when this embedding belongs to a
+  // personal note attached to an existing catalog course, so a future board session's
+  // retrieval query can filter by the real catalog courseId directly.
+  courseId: uuid("course_id"),
   // AC #1's "conceptId placeholder" — always null until a future story creates real
   // Concepts (Story 2.13 or later; see this story's Scope Note).
   conceptId: uuid("concept_id"),

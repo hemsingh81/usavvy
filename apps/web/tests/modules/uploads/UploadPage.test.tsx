@@ -22,6 +22,19 @@ function renderPage(session: { accessToken: string } | null) {
   );
 }
 
+// Story 2.14 (FR-C-14): the attach-personal-notes-to-a-catalog-course entry point.
+function renderNotesPage(session: { accessToken: string } | null, courseId = "019fd450-b7cb-7a32-b021-42788045c71f") {
+  useAuthMock.mockReturnValue({ session });
+  return render(
+    <MemoryRouter initialEntries={[`/courses/${courseId}/notes`]}>
+      <Routes>
+        <Route path="/courses/:courseId/notes" element={<UploadPage />} />
+        <Route path="/login" element={<div>login page</div>} />
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
 function jsonResponse(status: number, body: unknown) {
   return Promise.resolve({ ok: status < 400, status, json: () => Promise.resolve(body) } as unknown as Response);
 }
@@ -60,7 +73,7 @@ describe("UploadPage", () => {
 
   it("uploads a valid file once attested and shows it as accepted", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
-      jsonResponse(201, { id: "d1", customCourseId: "cc1", fileName: "notes.txt", fileType: "txt", fileSizeBytes: 5, status: "queued", failureReason: null, createdAt: "2026-01-15T00:00:00.000Z" }),
+      jsonResponse(201, { id: "d1", customCourseId: "cc1", courseId: null, fileName: "notes.txt", fileType: "txt", fileSizeBytes: 5, status: "queued", failureReason: null, createdAt: "2026-01-15T00:00:00.000Z" }),
     );
     vi.stubGlobal("fetch", fetchMock);
     renderPage({ accessToken: "a-token" });
@@ -86,7 +99,7 @@ describe("UploadPage", () => {
       .fn()
       .mockResolvedValueOnce(jsonResponse(400, { error: { code: "VALIDATION_ERROR", message: "file exceeds 50 MB limit" } }))
       .mockResolvedValueOnce(
-        jsonResponse(201, { id: "d2", customCourseId: "cc1", fileName: "good.txt", fileType: "txt", fileSizeBytes: 5, status: "queued", failureReason: null, createdAt: "2026-01-15T00:00:00.000Z" }),
+        jsonResponse(201, { id: "d2", customCourseId: "cc1", courseId: null, fileName: "good.txt", fileType: "txt", fileSizeBytes: 5, status: "queued", failureReason: null, createdAt: "2026-01-15T00:00:00.000Z" }),
       );
     vi.stubGlobal("fetch", fetchMock);
     renderPage({ accessToken: "a-token" });
@@ -103,7 +116,7 @@ describe("UploadPage", () => {
 
   it("disables the file input once 10 files have been accepted (AC #3)", async () => {
     const fetchMock = vi.fn().mockImplementation(() =>
-      jsonResponse(201, { id: "d", customCourseId: "cc1", fileName: "x.txt", fileType: "txt", fileSizeBytes: 5, status: "queued", failureReason: null, createdAt: "2026-01-15T00:00:00.000Z" }),
+      jsonResponse(201, { id: "d", customCourseId: "cc1", courseId: null, fileName: "x.txt", fileType: "txt", fileSizeBytes: 5, status: "queued", failureReason: null, createdAt: "2026-01-15T00:00:00.000Z" }),
     );
     vi.stubGlobal("fetch", fetchMock);
     renderPage({ accessToken: "a-token" });
@@ -121,7 +134,7 @@ describe("UploadPage", () => {
 
   it("shows a per-file limit message for every file beyond 10 selected in a single batch, rather than silently dropping them (review finding)", async () => {
     const fetchMock = vi.fn().mockImplementation(() =>
-      jsonResponse(201, { id: "d", customCourseId: "cc1", fileName: "x.txt", fileType: "txt", fileSizeBytes: 5, status: "queued", failureReason: null, createdAt: "2026-01-15T00:00:00.000Z" }),
+      jsonResponse(201, { id: "d", customCourseId: "cc1", courseId: null, fileName: "x.txt", fileType: "txt", fileSizeBytes: 5, status: "queued", failureReason: null, createdAt: "2026-01-15T00:00:00.000Z" }),
     );
     vi.stubGlobal("fetch", fetchMock);
     renderPage({ accessToken: "a-token" });
@@ -141,7 +154,7 @@ describe("UploadPage", () => {
 
   it("pasting valid text and submitting shows it accepted (Story 2.8, AC #1)", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
-      jsonResponse(201, { id: "d1", customCourseId: "cc1", fileName: "pasted-text.txt", fileType: "txt", fileSizeBytes: 20, status: "queued", failureReason: null, createdAt: "2026-01-15T00:00:00.000Z" }),
+      jsonResponse(201, { id: "d1", customCourseId: "cc1", courseId: null, fileName: "pasted-text.txt", fileType: "txt", fileSizeBytes: 20, status: "queued", failureReason: null, createdAt: "2026-01-15T00:00:00.000Z" }),
     );
     vi.stubGlobal("fetch", fetchMock);
     renderPage({ accessToken: "a-token" });
@@ -185,7 +198,7 @@ describe("UploadPage", () => {
 
   it("a successful URL import increments the same running count file uploads use (Story 2.8, AC #2)", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
-      jsonResponse(201, { id: "d2", customCourseId: "cc1", fileName: "example.com.txt", fileType: "txt", fileSizeBytes: 40, status: "queued", failureReason: null, createdAt: "2026-01-15T00:00:00.000Z" }),
+      jsonResponse(201, { id: "d2", customCourseId: "cc1", courseId: null, fileName: "example.com.txt", fileType: "txt", fileSizeBytes: 40, status: "queued", failureReason: null, createdAt: "2026-01-15T00:00:00.000Z" }),
     );
     vi.stubGlobal("fetch", fetchMock);
     renderPage({ accessToken: "a-token" });
@@ -205,7 +218,7 @@ describe("UploadPage", () => {
       if (method === "POST" && urlStr.endsWith("/uploads")) {
         return jsonResponse(201, {
           id: "d1",
-          customCourseId: "019fd450-b7cb-7a32-b021-42788045c71f",
+          customCourseId: "019fd450-b7cb-7a32-b021-42788045c71f", courseId: null,
           fileName: "notes.txt",
           fileType: "txt",
           fileSizeBytes: 5,
@@ -218,7 +231,7 @@ describe("UploadPage", () => {
         return jsonResponse(200, [
           {
             id: "d1",
-            customCourseId: "019fd450-b7cb-7a32-b021-42788045c71f",
+            customCourseId: "019fd450-b7cb-7a32-b021-42788045c71f", courseId: null,
             fileName: "notes.txt",
             fileType: "txt",
             fileSizeBytes: 5,
@@ -249,7 +262,7 @@ describe("UploadPage", () => {
       if (method === "POST" && urlStr.endsWith("/uploads")) {
         return jsonResponse(201, {
           id: "d1",
-          customCourseId: "019fd450-b7cb-7a32-b021-42788045c71f",
+          customCourseId: "019fd450-b7cb-7a32-b021-42788045c71f", courseId: null,
           fileName: "notes.txt",
           fileType: "txt",
           fileSizeBytes: 5,
@@ -264,7 +277,7 @@ describe("UploadPage", () => {
         return jsonResponse(200, [
           {
             id: "d1",
-            customCourseId: "019fd450-b7cb-7a32-b021-42788045c71f",
+            customCourseId: "019fd450-b7cb-7a32-b021-42788045c71f", courseId: null,
             fileName: "notes.txt",
             fileType: "txt",
             fileSizeBytes: 5,
@@ -314,7 +327,10 @@ describe("UploadPage", () => {
   });
 
   it("keeps fetching later files in the same batch even when the first file already reached a terminal status before the second finishes uploading (review finding, AC #1)", async () => {
-    const docs: Record<string, { id: string; customCourseId: string; fileName: string; fileType: string; fileSizeBytes: number; status: string; failureReason: string | null; createdAt: string }> = {};
+    const docs: Record<
+      string,
+      { id: string; customCourseId: string; courseId: string | null; fileName: string; fileType: string; fileSizeBytes: number; status: string; failureReason: string | null; createdAt: string }
+    > = {};
     const fetchMock = vi.fn((url: unknown, init?: RequestInit) => {
       const method = init?.method ?? "GET";
       const urlStr = String(url);
@@ -325,7 +341,7 @@ describe("UploadPage", () => {
         const status = id === "d1" ? "parsed" : "queued";
         docs[id] = {
           id,
-          customCourseId: "019fd450-b7cb-7a32-b021-42788045c71f",
+          customCourseId: "019fd450-b7cb-7a32-b021-42788045c71f", courseId: null,
           fileName: `${id}.txt`,
           fileType: "txt",
           fileSizeBytes: 5,
@@ -362,7 +378,7 @@ describe("UploadPage", () => {
       if (method === "POST" && urlStr.endsWith("/uploads")) {
         return jsonResponse(201, {
           id: "d1",
-          customCourseId: "019fd450-b7cb-7a32-b021-42788045c71f",
+          customCourseId: "019fd450-b7cb-7a32-b021-42788045c71f", courseId: null,
           fileName: "notes.txt",
           fileType: "txt",
           fileSizeBytes: 5,
@@ -377,7 +393,7 @@ describe("UploadPage", () => {
         return jsonResponse(200, [
           {
             id: "d1",
-            customCourseId: "019fd450-b7cb-7a32-b021-42788045c71f",
+            customCourseId: "019fd450-b7cb-7a32-b021-42788045c71f", courseId: null,
             fileName: "notes.txt",
             fileType: "txt",
             fileSizeBytes: 5,
@@ -415,7 +431,7 @@ describe("UploadPage", () => {
       if (method === "POST" && urlStr.endsWith("/uploads")) {
         return jsonResponse(201, {
           id: "d1",
-          customCourseId: "019fd450-b7cb-7a32-b021-42788045c71f",
+          customCourseId: "019fd450-b7cb-7a32-b021-42788045c71f", courseId: null,
           fileName: "notes.txt",
           fileType: "txt",
           fileSizeBytes: 5,
@@ -428,7 +444,7 @@ describe("UploadPage", () => {
         return jsonResponse(200, [
           {
             id: "d1",
-            customCourseId: "019fd450-b7cb-7a32-b021-42788045c71f",
+            customCourseId: "019fd450-b7cb-7a32-b021-42788045c71f", courseId: null,
             fileName: "notes.txt",
             fileType: "txt",
             fileSizeBytes: 5,
@@ -465,7 +481,7 @@ describe("UploadPage", () => {
       if (method === "POST" && urlStr.endsWith("/uploads")) {
         return jsonResponse(201, {
           id: "d1",
-          customCourseId: "019fd450-b7cb-7a32-b021-42788045c71f",
+          customCourseId: "019fd450-b7cb-7a32-b021-42788045c71f", courseId: null,
           fileName: "notes.txt",
           fileType: "txt",
           fileSizeBytes: 5,
@@ -478,7 +494,7 @@ describe("UploadPage", () => {
         return jsonResponse(200, [
           {
             id: "d1",
-            customCourseId: "019fd450-b7cb-7a32-b021-42788045c71f",
+            customCourseId: "019fd450-b7cb-7a32-b021-42788045c71f", courseId: null,
             fileName: "notes.txt",
             fileType: "txt",
             fileSizeBytes: 5,
@@ -518,7 +534,7 @@ describe("UploadPage", () => {
       if (method === "POST" && urlStr.endsWith("/uploads")) {
         return jsonResponse(201, {
           id: "d1",
-          customCourseId: "019fd450-b7cb-7a32-b021-42788045c71f",
+          customCourseId: "019fd450-b7cb-7a32-b021-42788045c71f", courseId: null,
           fileName: "notes.txt",
           fileType: "txt",
           fileSizeBytes: 5,
@@ -531,7 +547,7 @@ describe("UploadPage", () => {
         return jsonResponse(200, [
           {
             id: "d1",
-            customCourseId: "019fd450-b7cb-7a32-b021-42788045c71f",
+            customCourseId: "019fd450-b7cb-7a32-b021-42788045c71f", courseId: null,
             fileName: "notes.txt",
             fileType: "txt",
             fileSizeBytes: 5,
@@ -568,7 +584,7 @@ describe("UploadPage", () => {
       if (method === "POST" && urlStr.endsWith("/uploads")) {
         return jsonResponse(201, {
           id: "d1",
-          customCourseId: "019fd450-b7cb-7a32-b021-42788045c71f",
+          customCourseId: "019fd450-b7cb-7a32-b021-42788045c71f", courseId: null,
           fileName: "notes.txt",
           fileType: "txt",
           fileSizeBytes: 5,
@@ -581,7 +597,7 @@ describe("UploadPage", () => {
         return jsonResponse(200, [
           {
             id: "d1",
-            customCourseId: "019fd450-b7cb-7a32-b021-42788045c71f",
+            customCourseId: "019fd450-b7cb-7a32-b021-42788045c71f", courseId: null,
             fileName: "notes.txt",
             fileType: "txt",
             fileSizeBytes: 5,
@@ -603,5 +619,91 @@ describe("UploadPage", () => {
 
     await waitFor(() => expect(screen.getByText(/encrypted file/)).toBeInTheDocument());
     expect(screen.getByText(/password protection/)).toBeInTheDocument();
+  });
+});
+
+describe("UploadPage — attaching personal notes to a catalog course (Story 2.14)", () => {
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    useAuthMock.mockReset();
+  });
+
+  it("shows the catalog-course-specific heading and fetches the existing list on mount, with no upload needed first (AC #1)", async () => {
+    const fetchMock = vi.fn((url: unknown) => {
+      const urlStr = String(url);
+      expect(urlStr).toContain("courseId=019fd450-b7cb-7a32-b021-42788045c71f");
+      expect(urlStr).not.toContain("customCourseId");
+      return jsonResponse(200, []);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderNotesPage({ accessToken: "a-token" });
+
+    expect(screen.getByText("Add personal notes to this course")).toBeInTheDocument();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+  });
+
+  it("uploading a file sends courseId, not customCourseId, in the multipart form data (AC #1)", async () => {
+    const fetchMock = vi.fn((url: unknown, init?: RequestInit) => {
+      const method = init?.method ?? "GET";
+      if (method === "GET") return jsonResponse(200, []);
+      return jsonResponse(201, {
+        id: "d1",
+        customCourseId: null,
+        courseId: "019fd450-b7cb-7a32-b021-42788045c71f",
+        fileName: "notes.txt",
+        fileType: "txt",
+        fileSizeBytes: 5,
+        status: "queued",
+        failureReason: null,
+        createdAt: "2026-01-15T00:00:00.000Z",
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderNotesPage({ accessToken: "a-token" });
+    const user = userEvent.setup();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    await user.click(screen.getByLabelText(/right to use this material/i));
+    const realFileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    await user.upload(realFileInput, file("notes.txt"));
+
+    await waitFor(() => expect(screen.getByText(/notes\.txt: accepted/)).toBeInTheDocument());
+    const postCall = fetchMock.mock.calls.find((call) => (call[1] as RequestInit | undefined)?.method === "POST");
+    const body = (postCall?.[1] as RequestInit).body as FormData;
+    expect(body.get("courseId")).toBe("019fd450-b7cb-7a32-b021-42788045c71f");
+    expect(body.get("customCourseId")).toBeNull();
+  });
+
+  it("never shows a 'Review outline' link, even once a listed document reaches a terminal status (AC #1 — no outline review exists for catalog-attached notes)", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, [
+        {
+          id: "d1",
+          customCourseId: null,
+          courseId: "019fd450-b7cb-7a32-b021-42788045c71f",
+          fileName: "notes.txt",
+          fileType: "txt",
+          fileSizeBytes: 5,
+          status: "embedded",
+          failureReason: null,
+          createdAt: "2026-01-15T00:00:00.000Z",
+        },
+      ]),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    renderNotesPage({ accessToken: "a-token" });
+
+    await waitFor(() => expect(screen.getByText("Added to course notes")).toBeInTheDocument());
+    expect(screen.queryByRole("link", { name: "Review outline" })).not.toBeInTheDocument();
+  });
+
+  it("shows an invalid-link message and never fetches for a malformed courseId, rather than retrying forever in silence (review finding)", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    renderNotesPage({ accessToken: "a-token" }, "not-a-uuid");
+
+    await waitFor(() => expect(screen.getByText(/course link looks invalid/i)).toBeInTheDocument());
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

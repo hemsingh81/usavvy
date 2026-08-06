@@ -70,6 +70,19 @@ export function describeIngestionStatus(status: string, failureReason: string | 
         failureReason: null,
         nextStepSuggestion: null,
       };
+    // Story 2.14 (FR-C-14): a personal note attached to an existing catalog course skips
+    // outline proposal entirely (that course already has its own official Topic/Concept
+    // structure) — this is its terminal success state, distinct from "outline ready"
+    // (which implies an outline-review screen this flow never has).
+    case "embedded":
+      return {
+        stageLabel: "Added to course notes",
+        progressPercent: 100,
+        isTerminal: true,
+        isFailure: false,
+        failureReason: null,
+        nextStepSuggestion: null,
+      };
     case "blocked":
       return {
         stageLabel: "Blocked",

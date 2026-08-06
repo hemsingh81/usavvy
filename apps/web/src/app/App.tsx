@@ -69,6 +69,7 @@ export function App() {
               <Route path="/courses/:id" element={<CourseDetailPage />} />
               <Route path="/courses/:id/customize" element={<CustomizePage />} />
               <Route path="/courses/:id/placement-check" element={<PlacementCheckPage />} />
+              <Route path="/courses/:courseId/notes" element={<UploadPage />} />
               <Route path="/upload-content" element={<UploadPage />} />
               <Route path="/upload-content/:customCourseId/outline" element={<OutlineReviewPage />} />
               <Route path="*" element={<NotFoundPage />} />

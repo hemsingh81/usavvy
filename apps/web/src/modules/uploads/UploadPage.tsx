@@ -1,13 +1,19 @@
 import { useEffect, useState } from "react";
-import { Link, Navigate } from "react-router-dom";
+import { Link, Navigate, useParams } from "react-router-dom";
 import type { UploadedDocumentResponse } from "@usavvy/shared-types";
 import { ApiError } from "../../shared/apiClient.js";
 import { getWebConfig } from "../../app/config.js";
 import { useAuth } from "../auth/index.js";
-import { deleteUpload, importFromUrl, listUploads, pasteText, uploadFile } from "./api.js";
+import { deleteUpload, importFromUrl, listUploads, pasteText, uploadFile, type UploadGroupKey } from "./api.js";
 import { describeIngestionStatus } from "./ingestionStatus.js";
 
 const MAX_FILES = 10;
+// Story 2.14 (FR-C-14). Mirrors the server's z.uuid() shape check — validated up front
+// so a malformed courseId (a bad/stale link) never enters the polling effect at all,
+// rather than failing `listUploadsQuerySchema.parse` inside it on every single retry
+// forever (that failure happens before any network call, so treating it as a
+// transient blip and retrying could never succeed).
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // Story 2.11 (FR-C-11), AC #1. This codebase's first polling UI — no react-query/swr
 // precedent exists anywhere; a plain setInterval matches every other page's existing
 // plain-fetch convention (see useNotifications.tsx) rather than adding a new dependency.
@@ -25,9 +31,16 @@ type FileResult = { fileName: string; kind: "success"; document: UploadedDocumen
  * File upload, pasted text, and URL import all share the same attestation checkbox and
  * running `results`/count — from `uploaded_documents`' perspective they're the same
  * kind of thing (Story 2.8's Dev Notes).
+ *
+ * Story 2.14 (FR-C-14): also renders at `/courses/:courseId/notes`, attaching personal
+ * notes to an EXISTING catalog course instead of building a new custom course. Unlike
+ * `customCourseId` (only learned from the first upload's response), `courseId` is known
+ * immediately from the route — so this mode's polling/list fetch fires on mount, and no
+ * "Review outline" link is ever shown (that flow doesn't exist for catalog-attached notes).
  */
 export function UploadPage() {
   const { session } = useAuth();
+  const { courseId: routeCourseId } = useParams<{ courseId?: string }>();
   const [customCourseId, setCustomCourseId] = useState<string | undefined>(undefined);
   const [copyrightAttested, setCopyrightAttested] = useState(false);
   const [results, setResults] = useState<FileResult[]>([]);
@@ -37,34 +50,48 @@ export function UploadPage() {
   const [documents, setDocuments] = useState<UploadedDocumentResponse[]>([]);
   const [removeError, setRemoveError] = useState<string | undefined>(undefined);
   const [removingIds, setRemovingIds] = useState<ReadonlySet<string>>(new Set());
+  const [loadError, setLoadError] = useState<string | undefined>(undefined);
 
   const accessToken = session?.accessToken;
+  const routeCourseIdIsMalformed = Boolean(routeCourseId) && !UUID_PATTERN.test(routeCourseId as string);
+  const activeGroupKey: UploadGroupKey | undefined =
+    routeCourseId && !routeCourseIdIsMalformed ? { courseId: routeCourseId } : customCourseId ? { customCourseId } : undefined;
 
   // Story 2.11 (FR-C-11), AC #1: fetches the durable, server-side status list once a
-  // customCourseId is known, then polls while any listed document hasn't reached a
-  // status this codebase can currently advance it past (see ingestionStatus.ts).
+  // grouping key is known, then polls while any listed document hasn't reached a status
+  // this codebase can currently advance it past (see ingestionStatus.ts). In courseId
+  // mode the grouping key is known immediately from the route, so this fires on mount;
+  // in customCourseId mode it waits for the first upload's response to learn one.
   // Review finding: re-runs on every new `results` entry too, not just on
-  // accessToken/customCourseId — customCourseId is set once from the FIRST upload and
+  // accessToken/the grouping key — customCourseId is set once from the FIRST upload and
   // never changes value for later files in the same batch, so without this dependency
   // a fast-completing first document could stop the effect from ever fetching files
   // #2+ into `documents` at all.
   useEffect(() => {
-    if (!accessToken || !customCourseId) return;
+    if (!accessToken || !activeGroupKey) return;
     let cancelled = false;
     const { apiUrl } = getWebConfig();
     let intervalId: ReturnType<typeof setInterval> | undefined;
 
     async function fetchDocuments(): Promise<boolean> {
       try {
-        const list = await listUploads(apiUrl, accessToken as string, customCourseId as string);
+        const list = await listUploads(apiUrl, accessToken as string, activeGroupKey as UploadGroupKey);
         if (cancelled) return true;
         setDocuments(list);
         return list.every((document) => describeIngestionStatus(document.status, document.failureReason).isTerminal);
-      } catch {
-        // Review finding: a transient failure (dropped request, momentary 401/5xx) must
-        // NOT be treated as "all terminal" — that would permanently stop polling on a
-        // single blip. Report "not done" so the caller schedules/keeps the interval and
-        // retries on the next tick, matching AD-17's no-silent-failure discipline.
+      } catch (error) {
+        if (cancelled) return true;
+        // Review finding: a malformed courseId in the URL (a bad/stale link) makes this
+        // request fail with a VALIDATION_ERROR on every single retry, not just once —
+        // unlike a transient blip (dropped request, momentary 401/5xx), retrying this
+        // forever can never succeed. Surface it and stop polling; every other failure
+        // still reports "not done" so the caller keeps retrying, matching AD-17's
+        // no-silent-failure discipline without turning a permanent failure into an
+        // infinite, silent retry loop.
+        if (error instanceof ApiError && error.code === "VALIDATION_ERROR") {
+          setLoadError(errorMessage(error));
+          return true;
+        }
         return false;
       }
     }
@@ -82,7 +109,7 @@ export function UploadPage() {
       cancelled = true;
       if (intervalId !== undefined) clearInterval(intervalId);
     };
-  }, [accessToken, customCourseId, results.length]);
+  }, [accessToken, routeCourseId, customCourseId, results.length]);
 
   async function handleRemove(id: string): Promise<void> {
     if (!accessToken || removingIds.has(id)) return;
@@ -129,6 +156,12 @@ export function UploadPage() {
     return error instanceof ApiError ? error.message : "something went wrong — please try again";
   }
 
+  // Learns customCourseId from the first upload's response in customCourseId mode; a
+  // no-op in courseId mode (the server always returns customCourseId: null there).
+  function learnCustomCourseId(document: UploadedDocumentResponse): void {
+    if (document.customCourseId) setCustomCourseId(document.customCourseId);
+  }
+
   async function handleFiles(files: FileList | null): Promise<void> {
     if (!files || files.length === 0 || !session) return;
     if (!copyrightAttested) {
@@ -159,10 +192,13 @@ export function UploadPage() {
           continue;
         }
         try {
-          const document = await uploadFile(apiUrl, session.accessToken, activeCustomCourseId, file, copyrightAttested);
-          activeCustomCourseId = document.customCourseId;
+          const document = await uploadFile(apiUrl, session.accessToken, activeCustomCourseId, routeCourseId, file, copyrightAttested);
+          // In courseId mode, activeCustomCourseId must stay undefined for every file in
+          // the batch — relying solely on the server always returning customCourseId:
+          // null here would send both ids on the next file the moment that ever drifted.
+          activeCustomCourseId = routeCourseId ? undefined : (document.customCourseId ?? undefined);
           localAcceptedCount += 1;
-          setCustomCourseId(document.customCourseId);
+          learnCustomCourseId(document);
           setResults((previous) => [...previous, { fileName: file.name, kind: "success", document }]);
         } catch (error) {
           setResults((previous) => [...previous, { fileName: file.name, kind: "error", message: errorMessage(error) }]);
@@ -188,8 +224,8 @@ export function UploadPage() {
     setBusy(true);
     try {
       const { apiUrl } = getWebConfig();
-      const document = await pasteText(apiUrl, session.accessToken, customCourseId, pastedText, copyrightAttested);
-      setCustomCourseId(document.customCourseId);
+      const document = await pasteText(apiUrl, session.accessToken, customCourseId, routeCourseId, pastedText, copyrightAttested);
+      learnCustomCourseId(document);
       setResults((previous) => [...previous, { fileName: label, kind: "success", document }]);
       setPastedText("");
     } catch (error) {
@@ -214,8 +250,8 @@ export function UploadPage() {
     setBusy(true);
     try {
       const { apiUrl } = getWebConfig();
-      const document = await importFromUrl(apiUrl, session.accessToken, customCourseId, importUrl, copyrightAttested);
-      setCustomCourseId(document.customCourseId);
+      const document = await importFromUrl(apiUrl, session.accessToken, customCourseId, routeCourseId, importUrl, copyrightAttested);
+      learnCustomCourseId(document);
       setResults((previous) => [...previous, { fileName: label, kind: "success", document }]);
       setImportUrl("");
     } catch (error) {
@@ -227,8 +263,14 @@ export function UploadPage() {
 
   return (
     <main>
-      <h1>Upload your content</h1>
-      <p>Upload PDF, DOCX, PPTX, TXT, or MD files (up to 50 MB and 300 pages each), paste text, or import from a URL to build a custom course.</p>
+      <h1>{routeCourseId ? "Add personal notes to this course" : "Upload your content"}</h1>
+      {routeCourseIdIsMalformed ? <p role="alert">This course link looks invalid — please go back and try again.</p> : null}
+      {loadError ? <p role="alert">{loadError}</p> : null}
+      <p>
+        {routeCourseId
+          ? "Upload PDF, DOCX, PPTX, TXT, or MD files (up to 50 MB and 300 pages each), paste text, or import from a URL to attach your own notes to this course."
+          : "Upload PDF, DOCX, PPTX, TXT, or MD files (up to 50 MB and 300 pages each), paste text, or import from a URL to build a custom course."}
+      </p>
 
       <label>
         <input type="checkbox" checked={copyrightAttested} onChange={(event) => setCopyrightAttested(event.target.checked)} />I confirm I have
@@ -319,8 +361,11 @@ export function UploadPage() {
               one reached "outline ready", the outline review screen has something to
               show — reached from here rather than a persistent nav entry (no AC calls
               for one; this is the one place a learner is already watching this specific
-              custom course's progress). */}
-          {customCourseId &&
+              custom course's progress). Story 2.14: never shown in courseId mode — a
+              personal note attached to a catalog course skips outline proposal
+              entirely and never reaches "outline ready" (see ingestDocument.ts). */}
+          {!routeCourseId &&
+          customCourseId &&
           documents.every((document) => describeIngestionStatus(document.status, document.failureReason).isTerminal) &&
           documents.some((document) => document.status === "outline ready") ? (
             <p>

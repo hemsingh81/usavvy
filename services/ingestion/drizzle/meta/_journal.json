@@ -50,6 +50,13 @@
       "when": 1786009446257,
       "tag": "0006_damp_killer_shrike",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1786011035018,
+      "tag": "0007_majestic_puppet_master",
+      "breakpoints": true
     }
   ]
 }

@@ -64,6 +64,17 @@ describe("createPgvectorAdapter", () => {
     expect(row?.embedding[1535]).toBeCloseTo(1535 / 1536, 5);
   });
 
+  it("persists a null customCourseId alongside a real courseId, for a catalog-course-attached note (Story 2.14, AC #2)", async () => {
+    const { documentId, chunkId } = await insertDocumentWithChunk();
+    const adapter = createPgvectorAdapter(db);
+    const courseId = randomUUID();
+
+    await adapter.upsert([{ chunkId, documentId, customCourseId: null, courseId, conceptId: null, embedding: Array(1536).fill(0) }]);
+
+    const [row] = await db.select().from(chunkEmbeddings).where(eq(chunkEmbeddings.chunkId, chunkId));
+    expect(row).toMatchObject({ customCourseId: null, courseId });
+  });
+
   it("updates in place on a repeat upsert for the same chunkId rather than duplicating", async () => {
     const { documentId, chunkId } = await insertDocumentWithChunk();
     const adapter = createPgvectorAdapter(db);

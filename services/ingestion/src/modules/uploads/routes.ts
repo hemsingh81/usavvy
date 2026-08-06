@@ -2,9 +2,9 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { AppError, type JobQueuePort, type Logger, type StoragePort } from "@usavvy/service-kernel";
 import { ROLES, type Role } from "@usavvy/config";
-import { listUploadsQuerySchema, optionalCustomCourseIdSchema, pasteTextInputSchema, urlImportInputSchema } from "@usavvy/shared-types";
+import { listUploadsQuerySchema, optionalCourseIdSchema, optionalCustomCourseIdSchema, pasteTextInputSchema, urlImportInputSchema } from "@usavvy/shared-types";
 import type { Db } from "../../db/client.js";
-import { deleteUploadedDocument, importFromUrl, importPastedText, listUploadedDocuments, uploadDocument } from "./service.js";
+import { deleteUploadedDocument, importFromUrl, importPastedText, listUploadedDocuments, uploadDocument, type UploadGroupKey } from "./service.js";
 
 // Duplicated from courses' own identically-named private helper (AD-9/AD-13).
 function parseOrThrow<T>(schema: z.ZodType<T>, data: unknown): T {
@@ -90,10 +90,12 @@ export function registerUploadsRoutes(app: FastifyInstance, deps: UploadsRouteDe
     // `.fields` is fully populated for fields already parsed by the time the file
     // stream is drained, which `toBuffer()` above does.
     const customCourseIdValue = parseOrThrow(optionalCustomCourseIdSchema, fieldValue(data.fields, "customCourseId"));
+    const courseIdValue = parseOrThrow(optionalCourseIdSchema, fieldValue(data.fields, "courseId"));
     const copyrightAttested = fieldValue(data.fields, "copyrightAttested") === "true";
 
     const result = await uploadDocument(deps, userId, {
       customCourseId: customCourseIdValue,
+      courseId: courseIdValue,
       fileName: data.filename,
       buffer,
       copyrightAttested,
@@ -103,8 +105,9 @@ export function registerUploadsRoutes(app: FastifyInstance, deps: UploadsRouteDe
 
   app.get("/uploads", async (request) => {
     const { userId } = requireTrustedUser(request);
-    const { customCourseId } = parseOrThrow(listUploadsQuerySchema, request.query);
-    return listUploadedDocuments(deps.db, userId, customCourseId);
+    const { customCourseId, courseId } = parseOrThrow(listUploadsQuerySchema, request.query);
+    const groupKey: UploadGroupKey = courseId ? { kind: "courseId", value: courseId } : { kind: "customCourseId", value: customCourseId as string };
+    return listUploadedDocuments(deps.db, userId, groupKey);
   });
 
   // Story 2.11 (FR-C-11), AC #3: same auth-only, any-authenticated-role gate as every
@@ -123,7 +126,7 @@ export function registerUploadsRoutes(app: FastifyInstance, deps: UploadsRouteDe
     const input = parseOrThrow(pasteTextInputSchema, request.body);
     // Zod's `.optional()` produces an optional key; service.ts's PasteTextInput requires
     // the key present (exactOptionalPropertyTypes) — spread + explicit assignment makes it so.
-    const result = await importPastedText(deps, userId, { ...input, customCourseId: input.customCourseId });
+    const result = await importPastedText(deps, userId, { ...input, customCourseId: input.customCourseId, courseId: input.courseId });
     reply.code(201).send(result);
   });
 
@@ -131,7 +134,7 @@ export function registerUploadsRoutes(app: FastifyInstance, deps: UploadsRouteDe
   app.post("/uploads/url-import", async (request, reply) => {
     const { userId } = requireTrustedUser(request);
     const input = parseOrThrow(urlImportInputSchema, request.body);
-    const result = await importFromUrl(deps, userId, { ...input, customCourseId: input.customCourseId });
+    const result = await importFromUrl(deps, userId, { ...input, customCourseId: input.customCourseId, courseId: input.courseId });
     reply.code(201).send(result);
   });
 }

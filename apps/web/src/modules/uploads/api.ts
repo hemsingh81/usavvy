@@ -22,11 +22,16 @@ export async function uploadFile(
   apiUrl: string,
   accessToken: string,
   customCourseId: string | undefined,
+  courseId: string | undefined,
   file: File,
   copyrightAttested: boolean,
 ): Promise<UploadedDocumentResponse> {
   const formData = new FormData();
   if (customCourseId) formData.set("customCourseId", customCourseId);
+  // Story 2.14 (FR-C-14): attaching a personal note to an EXISTING catalog course —
+  // mutually exclusive with customCourseId, mirroring services/ingestion's own
+  // exactly-one-of invariant (resolveUploadGroupKey).
+  if (courseId) formData.set("courseId", courseId);
   formData.set("copyrightAttested", String(copyrightAttested));
   // The file field must come last — ingestion's multipart parsing only guarantees the
   // OTHER fields are available once the file stream is fully drained (see
@@ -57,12 +62,13 @@ export function pasteText(
   apiUrl: string,
   accessToken: string,
   customCourseId: string | undefined,
+  courseId: string | undefined,
   text: string,
   copyrightAttested: boolean,
 ): Promise<UploadedDocumentResponse> {
   return apiRequest(apiUrl, "/uploads/paste-text", uploadedDocumentResponseSchema, {
     method: "POST",
-    body: { ...(customCourseId ? { customCourseId } : {}), text, copyrightAttested },
+    body: { ...(customCourseId ? { customCourseId } : {}), ...(courseId ? { courseId } : {}), text, copyrightAttested },
     accessToken,
   });
 }
@@ -72,18 +78,25 @@ export function importFromUrl(
   apiUrl: string,
   accessToken: string,
   customCourseId: string | undefined,
+  courseId: string | undefined,
   url: string,
   copyrightAttested: boolean,
 ): Promise<UploadedDocumentResponse> {
   return apiRequest(apiUrl, "/uploads/url-import", uploadedDocumentResponseSchema, {
     method: "POST",
-    body: { ...(customCourseId ? { customCourseId } : {}), url, copyrightAttested },
+    body: { ...(customCourseId ? { customCourseId } : {}), ...(courseId ? { courseId } : {}), url, copyrightAttested },
     accessToken,
   });
 }
 
-export async function listUploads(apiUrl: string, accessToken: string, customCourseId: string): Promise<UploadedDocumentResponse[]> {
-  const query = new URLSearchParams(listUploadsQuerySchema.parse({ customCourseId }));
+/** Story 2.14 (FR-C-14): exactly one of the two, mirroring services/ingestion's own UploadGroupKey. */
+export type UploadGroupKey = { customCourseId: string } | { courseId: string };
+
+export async function listUploads(apiUrl: string, accessToken: string, groupKey: UploadGroupKey): Promise<UploadedDocumentResponse[]> {
+  // Exactly one key is ever present on groupKey (the discriminated union guarantees
+  // it), so the parsed result is always a single-entry record — safe to narrow for
+  // URLSearchParams, whose type doesn't know that.
+  const query = new URLSearchParams(listUploadsQuerySchema.parse(groupKey) as Record<string, string>);
   let response: Response;
   try {
     response = await fetch(`${apiUrl}/uploads?${query.toString()}`, {

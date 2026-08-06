@@ -15,6 +15,7 @@ export function createPgvectorAdapter(db: Db): VectorStorePort {
             chunkId: entry.chunkId,
             documentId: entry.documentId,
             customCourseId: entry.customCourseId,
+            courseId: entry.courseId,
             conceptId: entry.conceptId,
             embedding: entry.embedding,
           })),
@@ -24,6 +25,7 @@ export function createPgvectorAdapter(db: Db): VectorStorePort {
           set: {
             documentId: sql`excluded.document_id`,
             customCourseId: sql`excluded.custom_course_id`,
+            courseId: sql`excluded.course_id`,
             conceptId: sql`excluded.concept_id`,
             embedding: sql`excluded.embedding`,
           },
