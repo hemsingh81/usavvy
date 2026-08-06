@@ -53,6 +53,10 @@ describe("learning-sessions HTTP lifecycle: create -> pause -> resume -> beat re
           { narration: "First Beat.", boardAction: { kind: "write", text: "First" } },
           { narration: "Second Beat.", boardAction: { kind: "write", text: "Second" } },
         ],
+        checkpointQuestions: [
+          { question: "What stops recursion?", options: ["A base case", "A loop"], correctIndex: 0 },
+          { question: "What builds the call stack?", options: ["Pending calls", "Nothing"], correctIndex: 0 },
+        ],
       },
     });
     expect(createResponse.statusCode).toBe(201);
@@ -93,6 +97,29 @@ describe("learning-sessions HTTP lifecycle: create -> pause -> resume -> beat re
     const resumed = resumeResponse.json() as { status: string; streamRef: string };
     expect(resumed.status).toBe("active");
     expect(typeof resumed.streamRef).toBe("string");
+
+    // Story 3.13: checkpoint questions are answered one at a time; the response after
+    // the LAST one reflects full completion (proving AC #4's resume mechanism has what
+    // it needs — checkpointQuestions/checkpointAnswers travel on every response).
+    const firstAnswerResponse = await app.inject({
+      method: "POST",
+      url: `/learning-sessions/${created.id}/checkpoint-answers`,
+      headers,
+      payload: { questionIndex: 0, selectedOptionIndex: 0, isCorrect: true },
+    });
+    expect(firstAnswerResponse.statusCode).toBe(200);
+    expect((firstAnswerResponse.json() as { checkpointAnswers: unknown[] }).checkpointAnswers).toHaveLength(1);
+
+    const secondAnswerResponse = await app.inject({
+      method: "POST",
+      url: `/learning-sessions/${created.id}/checkpoint-answers`,
+      headers,
+      payload: { questionIndex: 1, selectedOptionIndex: 1, isCorrect: false },
+    });
+    expect(secondAnswerResponse.statusCode).toBe(200);
+    const afterCheckpoint = secondAnswerResponse.json() as { checkpointQuestions: unknown[]; checkpointAnswers: unknown[] };
+    expect(afterCheckpoint.checkpointQuestions).toHaveLength(2);
+    expect(afterCheckpoint.checkpointAnswers).toHaveLength(2);
 
     // Story 3.3: Forward moves to the next Beat, Back moves back — both reset
     // narrationOffsetMs to 0 (jump-then-replay-from-start semantics).

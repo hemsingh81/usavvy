@@ -4,6 +4,7 @@ import {
   createLearningSessionInputSchema,
   learningSessionResponseSchema,
   pauseLearningSessionInputSchema,
+  recordCheckpointAnswerInputSchema,
   resumeLearningSessionResponseSchema,
 } from "../src/learningSessions.js";
 
@@ -41,6 +42,16 @@ describe("createLearningSessionInputSchema", () => {
   it("rejects an empty beats array", () => {
     expect(() => createLearningSessionInputSchema.parse({ conceptId: "concept-1", beats: [] })).toThrow();
   });
+
+  it("accepts an optional checkpointQuestions array (Story 3.13)", () => {
+    expect(() =>
+      createLearningSessionInputSchema.parse({
+        conceptId: "concept-1",
+        beats: [{ narration: "First Beat.", boardAction: { kind: "write" } }],
+        checkpointQuestions: [{ question: "What stops recursion?", options: ["A base case"], correctIndex: 0 }],
+      }),
+    ).not.toThrow();
+  });
 });
 
 describe("learningSessionResponseSchema", () => {
@@ -60,6 +71,28 @@ describe("learningSessionResponseSchema", () => {
         beats: [
           { id: "beat-1", position: 0, narration: "First Beat.", boardAction: { kind: "write" }, audioRef: null, sourceRef: null },
         ],
+        checkpointQuestions: null,
+        checkpointAnswers: null,
+      }),
+    ).not.toThrow();
+  });
+
+  it("accepts checkpointQuestions/checkpointAnswers populated (Story 3.13)", () => {
+    expect(() =>
+      learningSessionResponseSchema.parse({
+        id: "session-1",
+        userId: "user-1",
+        conceptId: "concept-1",
+        status: "ended",
+        currentBeatId: "beat-1",
+        narrationOffsetMs: 0,
+        boardRenderState: null,
+        startedAt: "2026-01-15T00:00:00.000Z",
+        updatedAt: "2026-01-15T00:00:00.000Z",
+        endedAt: "2026-01-15T00:10:00.000Z",
+        beats: [],
+        checkpointQuestions: [{ question: "What stops recursion?", options: ["A base case"], correctIndex: 0 }],
+        checkpointAnswers: [{ questionIndex: 0, selectedOptionIndex: 0, isCorrect: true }],
       }),
     ).not.toThrow();
   });
@@ -125,6 +158,8 @@ describe("resumeLearningSessionResponseSchema", () => {
         updatedAt: "2026-01-15T00:00:00.000Z",
         endedAt: null,
         beats: [],
+        checkpointQuestions: null,
+        checkpointAnswers: null,
         streamRef: "stream-1",
       }),
     ).not.toThrow();
@@ -146,5 +181,19 @@ describe("resumeLearningSessionResponseSchema", () => {
         beats: [],
       }),
     ).toThrow();
+  });
+});
+
+describe("recordCheckpointAnswerInputSchema", () => {
+  it("accepts a valid answer payload", () => {
+    expect(() => recordCheckpointAnswerInputSchema.parse({ questionIndex: 0, selectedOptionIndex: 1, isCorrect: false })).not.toThrow();
+  });
+
+  it("rejects a negative questionIndex", () => {
+    expect(() => recordCheckpointAnswerInputSchema.parse({ questionIndex: -1, selectedOptionIndex: 0, isCorrect: true })).toThrow();
+  });
+
+  it("rejects a missing isCorrect", () => {
+    expect(() => recordCheckpointAnswerInputSchema.parse({ questionIndex: 0, selectedOptionIndex: 0 })).toThrow();
   });
 });

@@ -12,6 +12,7 @@ import {
   getLearningSession,
   pauseLearningSession,
   recordBeatReached,
+  recordCheckpointAnswer,
   replayCurrentBeat,
   resumeLearningSession,
   stepBeat,
@@ -541,5 +542,135 @@ describe("getLearningSession", () => {
     const session = await createOrResumeLearningSession(db, OWNER_ID, randomUUID(), SAMPLE_BEATS);
 
     await expect(getLearningSession(db, "someone-else", session.id)).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+});
+
+describe("recordCheckpointAnswer", () => {
+  const SAMPLE_QUESTIONS = [
+    { question: "What stops recursion?", options: ["A base case", "A loop"], correctIndex: 0 },
+    { question: "What builds the call stack?", options: ["Pending calls", "Nothing"], correctIndex: 0 },
+  ];
+
+  // Code review finding: the original version had no locking around the
+  // read-merge-write, so two DIFFERENT questions submitted at the exact same instant
+  // could each read the same starting array and overwrite each other — a genuine lost
+  // update. `SELECT ... FOR UPDATE` inside a transaction should serialize these.
+  it("does not lose either answer when two different questions are submitted concurrently", async () => {
+    const session = await createOrResumeLearningSession(db, OWNER_ID, randomUUID(), SAMPLE_BEATS, SAMPLE_QUESTIONS);
+    const { port } = pubSubPort();
+
+    await Promise.all([
+      recordCheckpointAnswer(db, OWNER_ID, session.id, { questionIndex: 0, selectedOptionIndex: 0, isCorrect: true }, port),
+      recordCheckpointAnswer(db, OWNER_ID, session.id, { questionIndex: 1, selectedOptionIndex: 1, isCorrect: false }, port),
+    ]);
+
+    const [row] = await db.select().from(learningSessions).where(eq(learningSessions.id, session.id));
+    expect(row?.checkpointAnswers).toHaveLength(2);
+    expect(row?.checkpointAnswers).toEqual(
+      expect.arrayContaining([
+        { questionIndex: 0, selectedOptionIndex: 0, isCorrect: true },
+        { questionIndex: 1, selectedOptionIndex: 1, isCorrect: false },
+      ]),
+    );
+  });
+
+  it("records an answer and returns it in the response (AC #2)", async () => {
+    const session = await createOrResumeLearningSession(db, OWNER_ID, randomUUID(), SAMPLE_BEATS, SAMPLE_QUESTIONS);
+    const { port } = pubSubPort();
+
+    const result = await recordCheckpointAnswer(db, OWNER_ID, session.id, { questionIndex: 0, selectedOptionIndex: 0, isCorrect: true }, port);
+
+    expect(result.checkpointAnswers).toEqual([{ questionIndex: 0, selectedOptionIndex: 0, isCorrect: true }]);
+    const events = await db.select().from(sessionEvents).where(and(eq(sessionEvents.sessionId, session.id), eq(sessionEvents.type, "checkpoint_answered")));
+    expect(events).toHaveLength(1);
+  });
+
+  it("publishes concept.checkpoint_completed exactly once, with every result, once the last question is answered (AC #3)", async () => {
+    const conceptId = randomUUID();
+    const session = await createOrResumeLearningSession(db, OWNER_ID, conceptId, SAMPLE_BEATS, SAMPLE_QUESTIONS);
+    const { port, published } = pubSubPort();
+
+    await recordCheckpointAnswer(db, OWNER_ID, session.id, { questionIndex: 0, selectedOptionIndex: 0, isCorrect: true }, port);
+    expect(published).toEqual([]);
+    await recordCheckpointAnswer(db, OWNER_ID, session.id, { questionIndex: 1, selectedOptionIndex: 1, isCorrect: false }, port);
+
+    expect(published).toEqual([
+      {
+        type: "concept.checkpoint_completed",
+        payload: {
+          sessionId: session.id,
+          userId: OWNER_ID,
+          conceptId,
+          results: [
+            { questionIndex: 0, selectedOptionIndex: 0, isCorrect: true },
+            { questionIndex: 1, selectedOptionIndex: 1, isCorrect: false },
+          ],
+        },
+      },
+    ]);
+  });
+
+  it("re-submitting an already-answered question overwrites it without re-publishing completion (code-review-lesson-applied-up-front)", async () => {
+    const session = await createOrResumeLearningSession(db, OWNER_ID, randomUUID(), SAMPLE_BEATS, SAMPLE_QUESTIONS);
+    const { port, published } = pubSubPort();
+    await recordCheckpointAnswer(db, OWNER_ID, session.id, { questionIndex: 0, selectedOptionIndex: 0, isCorrect: true }, port);
+    await recordCheckpointAnswer(db, OWNER_ID, session.id, { questionIndex: 1, selectedOptionIndex: 1, isCorrect: false }, port);
+    expect(published).toHaveLength(1);
+
+    const result = await recordCheckpointAnswer(db, OWNER_ID, session.id, { questionIndex: 1, selectedOptionIndex: 0, isCorrect: true }, port);
+
+    expect(result.checkpointAnswers).toEqual([
+      { questionIndex: 0, selectedOptionIndex: 0, isCorrect: true },
+      { questionIndex: 1, selectedOptionIndex: 0, isCorrect: true },
+    ]);
+    expect(published).toHaveLength(1);
+  });
+
+  it("a partially-answered checkpoint's response contains exactly the answered subset, proving AC #4's resume mechanism has what it needs", async () => {
+    const session = await createOrResumeLearningSession(db, OWNER_ID, randomUUID(), SAMPLE_BEATS, SAMPLE_QUESTIONS);
+    const { port } = pubSubPort();
+
+    await recordCheckpointAnswer(db, OWNER_ID, session.id, { questionIndex: 0, selectedOptionIndex: 0, isCorrect: true }, port);
+    const fetched = await getLearningSession(db, OWNER_ID, session.id);
+
+    expect(fetched.checkpointQuestions).toEqual(SAMPLE_QUESTIONS);
+    expect(fetched.checkpointAnswers).toEqual([{ questionIndex: 0, selectedOptionIndex: 0, isCorrect: true }]);
+  });
+
+  it("rejects an out-of-range questionIndex", async () => {
+    const session = await createOrResumeLearningSession(db, OWNER_ID, randomUUID(), SAMPLE_BEATS, SAMPLE_QUESTIONS);
+    const { port } = pubSubPort();
+
+    await expect(
+      recordCheckpointAnswer(db, OWNER_ID, session.id, { questionIndex: 5, selectedOptionIndex: 0, isCorrect: true }, port),
+    ).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+  });
+
+  it("rejects when the session has no checkpoint questions", async () => {
+    const session = await createOrResumeLearningSession(db, OWNER_ID, randomUUID(), SAMPLE_BEATS);
+    const { port } = pubSubPort();
+
+    await expect(
+      recordCheckpointAnswer(db, OWNER_ID, session.id, { questionIndex: 0, selectedOptionIndex: 0, isCorrect: true }, port),
+    ).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+  });
+
+  it("rejects on an already-ended session", async () => {
+    const session = await createOrResumeLearningSession(db, OWNER_ID, randomUUID(), SAMPLE_BEATS, SAMPLE_QUESTIONS);
+    const { port } = pubSubPort();
+    await endLearningSession(db, OWNER_ID, session.id, port);
+
+    await expect(
+      recordCheckpointAnswer(db, OWNER_ID, session.id, { questionIndex: 0, selectedOptionIndex: 0, isCorrect: true }, port),
+    ).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+  });
+
+  it("404s for another learner's session", async () => {
+    const session = await createOrResumeLearningSession(db, OWNER_ID, randomUUID(), SAMPLE_BEATS, SAMPLE_QUESTIONS);
+    const { port } = pubSubPort();
+
+    await expect(
+      recordCheckpointAnswer(db, "someone-else", session.id, { questionIndex: 0, selectedOptionIndex: 0, isCorrect: true }, port),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 });

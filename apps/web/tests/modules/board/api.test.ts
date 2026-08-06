@@ -5,6 +5,7 @@ import {
   getLearningSession,
   pauseLearningSession,
   recordBeatReached,
+  recordCheckpointAnswer,
   replayCurrentBeat,
   resumeLearningSession,
   stepBack,
@@ -23,6 +24,8 @@ const SESSION = {
   updatedAt: "2026-01-15T00:00:00.000Z",
   endedAt: null,
   beats: [{ id: "beat-1", position: 0, narration: "First Beat.", boardAction: { kind: "write" }, audioRef: null, sourceRef: null }],
+  checkpointQuestions: null,
+  checkpointAnswers: null,
 };
 
 describe("board api", () => {
@@ -140,5 +143,20 @@ describe("board api", () => {
 
     expect(fetchMock).toHaveBeenCalledWith("http://localhost:3000/learning-sessions/session-1/end", expect.objectContaining({ method: "POST" }));
     expect(result).toEqual(ended);
+  });
+
+  it("recordCheckpointAnswer posts the answer to the checkpoint-answers endpoint", async () => {
+    const updated = { ...SESSION, checkpointAnswers: [{ questionIndex: 0, selectedOptionIndex: 1, isCorrect: false }] };
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve(updated) } as unknown as Response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const answer = { questionIndex: 0, selectedOptionIndex: 1, isCorrect: false };
+    const result = await recordCheckpointAnswer("http://localhost:3000", "a-token", "session-1", answer);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:3000/learning-sessions/session-1/checkpoint-answers",
+      expect.objectContaining({ method: "POST", body: JSON.stringify(answer) }),
+    );
+    expect(result).toEqual(updated);
   });
 });

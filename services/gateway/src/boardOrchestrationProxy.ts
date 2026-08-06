@@ -84,4 +84,13 @@ export function registerBoardOrchestrationProxyRoutes(app: FastifyInstance, deps
     const result = await deps.forwardToBoardOrchestration("POST", `/learning-sessions/${id}/end`, { headers: trustedHeaders(request) });
     reply.code(result.status).send(result.body);
   });
+
+  app.post("/learning-sessions/:id/checkpoint-answers", { preHandler: requireAuth }, async (request, reply) => {
+    const id = requireValidId((request.params as { id: string }).id);
+    const result = await deps.forwardToBoardOrchestration("POST", `/learning-sessions/${id}/checkpoint-answers`, {
+      body: request.body,
+      headers: trustedHeaders(request),
+    });
+    reply.code(result.status).send(result.body);
+  });
 }

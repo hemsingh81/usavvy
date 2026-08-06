@@ -22,9 +22,14 @@ export const beatResponseSchema = z.object({
 
 export type BeatResponse = z.infer<typeof beatResponseSchema>;
 
+// Story 3.13 (FR-B-24). Opaque, caller-supplied checkpoint content — exactly like
+// `beats`, this service never interprets the shape beyond bounds-checking an index
+// against its length (see the story's own CRITICAL SCOPE NOTE on why it doesn't grade
+// answers itself).
 export const createLearningSessionInputSchema = z.object({
   conceptId: z.string().min(1),
   beats: z.array(beatInputSchema).min(1),
+  checkpointQuestions: z.array(z.record(z.string(), z.unknown())).optional(),
 });
 
 export type CreateLearningSessionInput = z.infer<typeof createLearningSessionInputSchema>;
@@ -41,9 +46,21 @@ export const learningSessionResponseSchema = z.object({
   updatedAt: z.string(),
   endedAt: z.string().nullable(),
   beats: z.array(beatResponseSchema),
+  checkpointQuestions: z.array(z.record(z.string(), z.unknown())).nullable(),
+  checkpointAnswers: z.array(z.record(z.string(), z.unknown())).nullable(),
 });
 
 export type LearningSessionResponse = z.infer<typeof learningSessionResponseSchema>;
+
+// Story 3.13, AC #2: what the caller reports back after grading the answer itself —
+// this service stores it verbatim, never recomputes `isCorrect`.
+export const recordCheckpointAnswerInputSchema = z.object({
+  questionIndex: z.number().int().nonnegative(),
+  selectedOptionIndex: z.number().int().nonnegative(),
+  isCorrect: z.boolean(),
+});
+
+export type RecordCheckpointAnswerInput = z.infer<typeof recordCheckpointAnswerInputSchema>;
 
 // Story 3.1, AC #1: the paused-state fields the client persists on Pause.
 export const pauseLearningSessionInputSchema = z.object({

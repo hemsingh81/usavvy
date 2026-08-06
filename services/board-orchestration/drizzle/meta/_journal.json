@@ -15,6 +15,13 @@
       "when": 1786022902979,
       "tag": "0001_aromatic_pandemic",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1786034336097,
+      "tag": "0002_yellow_nico_minoru",
+      "breakpoints": true
     }
   ]
 }

@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { AppError, type Logger } from "@usavvy/service-kernel";
 import { ROLES, type Role } from "@usavvy/config";
-import { createLearningSessionInputSchema, pauseLearningSessionInputSchema } from "@usavvy/shared-types";
+import { createLearningSessionInputSchema, pauseLearningSessionInputSchema, recordCheckpointAnswerInputSchema } from "@usavvy/shared-types";
 import type { Db } from "../../db/client.js";
 import type { VoicePort } from "../voice/index.js";
 import type { PubSubPort } from "../pubsub/index.js";
@@ -12,6 +12,7 @@ import {
   getLearningSession,
   pauseLearningSession,
   recordBeatReached,
+  recordCheckpointAnswer,
   replayCurrentBeat,
   resumeLearningSession,
   stepBeat,
@@ -71,7 +72,7 @@ export function registerLearningSessionsRoutes(app: FastifyInstance, deps: Learn
     // exactOptionalPropertyTypes-sensitive); the service module's own BeatInput expects
     // string | null, matching its DB-column shape.
     const beatInputs = body.beats.map((beat) => ({ ...beat, audioRef: beat.audioRef ?? null, sourceRef: beat.sourceRef ?? null }));
-    const session = await createOrResumeLearningSession(deps.db, userId, body.conceptId, beatInputs);
+    const session = await createOrResumeLearningSession(deps.db, userId, body.conceptId, beatInputs, body.checkpointQuestions);
     reply.code(201).send(session);
   });
 
@@ -122,5 +123,12 @@ export function registerLearningSessionsRoutes(app: FastifyInstance, deps: Learn
     const { userId } = requireTrustedUser(request);
     const id = requireValidId((request.params as { id: string }).id);
     return endLearningSession(deps.db, userId, id, deps.pubSubPort);
+  });
+
+  app.post("/learning-sessions/:id/checkpoint-answers", async (request) => {
+    const { userId } = requireTrustedUser(request);
+    const id = requireValidId((request.params as { id: string }).id);
+    const body = parseOrThrow(recordCheckpointAnswerInputSchema, request.body);
+    return recordCheckpointAnswer(deps.db, userId, id, body, deps.pubSubPort);
   });
 }

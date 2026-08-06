@@ -29,6 +29,13 @@ export const learningSessions = pgTable(
     // convention as `checkpointQuestions`/`availability` elsewhere in this codebase.
     narrationOffsetMs: integer("narration_offset_ms"),
     boardRenderState: jsonb("board_render_state").$type<Record<string, unknown>>(),
+    // Story 3.13 (FR-B-24). Caller-supplied at session creation, exactly like `beats` —
+    // opaque jsonb, never interpreted by this service (this service does not grade
+    // answers; the caller already knows correctness, see the story's own CRITICAL SCOPE
+    // NOTE). `checkpointAnswers` is an array of `{ questionIndex, selectedOptionIndex,
+    // isCorrect }` entries, one per answered question, not a fixed-size/sparse array.
+    checkpointQuestions: jsonb("checkpoint_questions").$type<Record<string, unknown>[]>(),
+    checkpointAnswers: jsonb("checkpoint_answers").$type<Record<string, unknown>[]>(),
     startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
     endedAt: timestamp("ended_at", { withTimezone: true }),

@@ -13,8 +13,18 @@ import { apiRequest } from "../../shared/apiClient.js";
  * yet, per the story's own CRITICAL SCOPE NOTE; this module exists so the real backend
  * is reachable and testable ahead of that future rewiring story.
  */
-export function createOrResumeLearningSession(apiUrl: string, accessToken: string, conceptId: string, beats: BeatInput[]): Promise<LearningSessionResponse> {
-  return apiRequest(apiUrl, "/learning-sessions", learningSessionResponseSchema, { method: "POST", body: { conceptId, beats }, accessToken });
+export function createOrResumeLearningSession(
+  apiUrl: string,
+  accessToken: string,
+  conceptId: string,
+  beats: BeatInput[],
+  checkpointQuestions?: Record<string, unknown>[],
+): Promise<LearningSessionResponse> {
+  return apiRequest(apiUrl, "/learning-sessions", learningSessionResponseSchema, {
+    method: "POST",
+    body: { conceptId, beats, ...(checkpointQuestions ? { checkpointQuestions } : {}) },
+    accessToken,
+  });
 }
 
 export function getLearningSession(apiUrl: string, accessToken: string, sessionId: string): Promise<LearningSessionResponse> {
@@ -55,4 +65,14 @@ export function recordBeatReached(apiUrl: string, accessToken: string, sessionId
 
 export function endLearningSession(apiUrl: string, accessToken: string, sessionId: string): Promise<LearningSessionResponse> {
   return apiRequest(apiUrl, `/learning-sessions/${sessionId}/end`, learningSessionResponseSchema, { method: "POST", accessToken });
+}
+
+/** Story 3.13 (FR-B-24). */
+export function recordCheckpointAnswer(
+  apiUrl: string,
+  accessToken: string,
+  sessionId: string,
+  answer: { questionIndex: number; selectedOptionIndex: number; isCorrect: boolean },
+): Promise<LearningSessionResponse> {
+  return apiRequest(apiUrl, `/learning-sessions/${sessionId}/checkpoint-answers`, learningSessionResponseSchema, { method: "POST", body: answer, accessToken });
 }

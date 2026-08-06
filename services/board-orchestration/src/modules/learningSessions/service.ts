@@ -24,6 +24,18 @@ export interface LearningSessionResponse {
   updatedAt: string;
   endedAt: string | null;
   beats: BeatResponse[];
+  checkpointQuestions: Record<string, unknown>[] | null;
+  checkpointAnswers: Record<string, unknown>[] | null;
+}
+
+// Story 3.13 (FR-B-24). Opaque — this service never reads `questionIndex`'s meaning
+// beyond bounds-checking it against `checkpointQuestions.length`, and never interprets
+// `isCorrect` (the caller already knows correctness; see the story's own CRITICAL SCOPE
+// NOTE on why this service doesn't grade answers itself).
+export interface CheckpointAnswerInput {
+  questionIndex: number;
+  selectedOptionIndex: number;
+  isCorrect: boolean;
 }
 
 export interface BeatResponse {
@@ -102,6 +114,8 @@ async function toResponse(db: Db, session: typeof learningSessions.$inferSelect)
     updatedAt: session.updatedAt.toISOString(),
     endedAt: session.endedAt ? session.endedAt.toISOString() : null,
     beats: beatRows.map(toBeatResponse),
+    checkpointQuestions: session.checkpointQuestions ?? null,
+    checkpointAnswers: session.checkpointAnswers ?? null,
   };
 }
 
@@ -120,7 +134,13 @@ async function toResponse(db: Db, session: typeof learningSessions.$inferSelect)
  * session instead of erroring, matching `outline/service.ts`'s `confirmOutline()`
  * precedent for this exact race shape.
  */
-export async function createOrResumeLearningSession(db: Db, userId: string, conceptId: string, beatInputs: BeatInput[]): Promise<LearningSessionResponse> {
+export async function createOrResumeLearningSession(
+  db: Db,
+  userId: string,
+  conceptId: string,
+  beatInputs: BeatInput[],
+  checkpointQuestions?: Record<string, unknown>[],
+): Promise<LearningSessionResponse> {
   const existing = await findActiveOrPausedSession(db, userId, conceptId);
   if (existing) {
     return toResponse(db, existing);
@@ -133,7 +153,10 @@ export async function createOrResumeLearningSession(db: Db, userId: string, conc
   let session: typeof learningSessions.$inferSelect;
   try {
     session = await db.transaction(async (tx) => {
-      const [inserted] = await tx.insert(learningSessions).values({ userId, conceptId, status: "active" }).returning();
+      const [inserted] = await tx
+        .insert(learningSessions)
+        .values({ userId, conceptId, status: "active", checkpointQuestions: checkpointQuestions ?? null })
+        .returning();
       if (!inserted) {
         throw new AppError("INTERNAL_ERROR", "failed to create learning session", 500);
       }
@@ -480,6 +503,89 @@ export async function recordBeatReached(db: Db, userId: string, sessionId: strin
   if (lastBeat && lastBeat.id === beatId) {
     const ended = await endLearningSessionInternal(db, updated, pubSubPort);
     return toResponse(db, ended);
+  }
+
+  return toResponse(db, updated);
+}
+
+/**
+ * Story 3.13 (FR-B-24), AC #2-#4. `checkpointQuestions`/`checkpointAnswers` are opaque
+ * jsonb the caller supplies and already knows how to grade — this function never reads
+ * `correctIndex` or computes `isCorrect` itself (see the story's own CRITICAL SCOPE
+ * NOTE). Publishes `concept.checkpoint_completed` on `pubSubPort` exactly once, the
+ * moment every question first has an answer — re-submitting an already-answered
+ * question (an idempotent overwrite, matching this codebase's established
+ * freely-re-editable-content convention) must never re-publish it.
+ *
+ * Code-review finding: the original version read `checkpointAnswers` outside any lock,
+ * then wrote back a merged array guarded only by `status <> "ended"` — that WHERE
+ * clause protects the status transition, not the jsonb value being merged. Two
+ * DIFFERENT questions submitted at the exact same instant could both read the same
+ * starting array and each write back a two-answer array missing the OTHER's answer — a
+ * genuine lost update (an answer silently disappears), not merely a duplicate publish as
+ * the story's own CRITICAL SCOPE NOTE originally (incorrectly) described it as. Unlike
+ * every other write in this module, this one folds a prior read into the new value
+ * rather than just transitioning a scalar column, so the established
+ * `WHERE status <> "ended"` pattern alone doesn't cover it. `SELECT ... FOR UPDATE`
+ * inside a transaction serializes concurrent submissions for the SAME session,
+ * closing the gap properly rather than re-describing it as smaller than it is.
+ */
+export async function recordCheckpointAnswer(
+  db: Db,
+  userId: string,
+  sessionId: string,
+  answer: CheckpointAnswerInput,
+  pubSubPort: PubSubPort,
+): Promise<LearningSessionResponse> {
+  const { updated, wasComplete, isNowComplete, nextAnswers, conceptId } = await db.transaction(async (tx) => {
+    const [session] = await tx
+      .select()
+      .from(learningSessions)
+      .where(and(eq(learningSessions.id, sessionId), eq(learningSessions.userId, userId)))
+      .for("update");
+    if (!session) {
+      throw new AppError("NOT_FOUND", "learning session not found", 404);
+    }
+    if (session.status === "ended") {
+      throw new AppError("VALIDATION_ERROR", "this learning session has already ended", 400);
+    }
+    const questions = session.checkpointQuestions;
+    if (!questions || questions.length === 0) {
+      throw new AppError("VALIDATION_ERROR", "this learning session has no checkpoint questions", 400);
+    }
+    if (answer.questionIndex < 0 || answer.questionIndex >= questions.length) {
+      throw new AppError("VALIDATION_ERROR", `questionIndex ${answer.questionIndex} is out of range for this session's checkpoint`, 400);
+    }
+
+    const existingAnswers = session.checkpointAnswers ?? [];
+    const wasComplete = existingAnswers.length >= questions.length;
+    const nextAnswers = [...existingAnswers.filter((a) => a.questionIndex !== answer.questionIndex), answer as unknown as Record<string, unknown>].sort(
+      (a, b) => (a.questionIndex as number) - (b.questionIndex as number),
+    );
+    const isNowComplete = nextAnswers.length >= questions.length;
+
+    const [updatedRow] = await tx
+      .update(learningSessions)
+      .set({ checkpointAnswers: nextAnswers, updatedAt: new Date() })
+      .where(eq(learningSessions.id, sessionId))
+      .returning();
+    if (!updatedRow) {
+      throw new AppError("INTERNAL_ERROR", "failed to record checkpoint answer", 500);
+    }
+
+    await tx.insert(sessionEvents).values({ sessionId, type: "checkpoint_answered", payload: answer as unknown as Record<string, unknown> });
+
+    return { updated: updatedRow, wasComplete, isNowComplete, nextAnswers, conceptId: session.conceptId };
+  });
+
+  // Published after the transaction commits, matching this codebase's established
+  // convention (services/core's user.deletion_requested, this module's own
+  // learning_session.ended) — never inside the transaction itself.
+  if (isNowComplete && !wasComplete) {
+    await pubSubPort.publish({
+      type: "concept.checkpoint_completed",
+      payload: { sessionId, userId, conceptId, results: nextAnswers },
+    });
   }
 
   return toResponse(db, updated);

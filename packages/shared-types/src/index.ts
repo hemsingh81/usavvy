@@ -167,4 +167,6 @@ export {
   type PauseLearningSessionInput,
   resumeLearningSessionResponseSchema,
   type ResumeLearningSessionResponse,
+  recordCheckpointAnswerInputSchema,
+  type RecordCheckpointAnswerInput,
 } from "./learningSessions.js";
