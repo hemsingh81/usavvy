@@ -7,6 +7,12 @@ import { baseServiceEnvSchema } from "@usavvy/config";
  */
 const storageAdapterSchema = z.enum(["mock", "seaweedfs"]);
 const jobQueueAdapterSchema = z.enum(["mock", "pgboss"]);
+// Story 2.12: only "mock" exists for GenerationPort today (no real provider chosen or
+// funded — ARCHITECTURE-SPINE.md Deferred); VectorStorePort's real adapter (pgvector)
+// already exists. Still config-driven, matching every other port's selection
+// convention in this file, rather than hardcoded at the call site.
+const generationAdapterSchema = z.enum(["mock"]);
+const vectorStoreAdapterSchema = z.enum(["mock", "pgvector"]);
 
 const ingestionEnvSchema = baseServiceEnvSchema.extend({
   PORT: z.coerce.number().int().positive().default(3003),
@@ -18,6 +24,8 @@ const ingestionEnvSchema = baseServiceEnvSchema.extend({
   STORAGE_ADAPTER: storageAdapterSchema.default("seaweedfs"),
   STORAGE_BUCKET: z.string().min(1).default("uploads"),
   JOB_QUEUE_ADAPTER: jobQueueAdapterSchema.default("pgboss"),
+  GENERATION_ADAPTER: generationAdapterSchema.default("mock"),
+  VECTOR_STORE_ADAPTER: vectorStoreAdapterSchema.default("pgvector"),
 });
 
 export interface IngestionConfig {
@@ -28,6 +36,8 @@ export interface IngestionConfig {
   storageAdapter: z.infer<typeof storageAdapterSchema>;
   storageBucket: string;
   jobQueueAdapter: z.infer<typeof jobQueueAdapterSchema>;
+  generationAdapter: z.infer<typeof generationAdapterSchema>;
+  vectorStoreAdapter: z.infer<typeof vectorStoreAdapterSchema>;
 }
 
 export function loadIngestionConfig(env: Record<string, string | undefined>): IngestionConfig {
@@ -40,5 +50,7 @@ export function loadIngestionConfig(env: Record<string, string | undefined>): In
     storageAdapter: parsed.STORAGE_ADAPTER,
     storageBucket: parsed.STORAGE_BUCKET,
     jobQueueAdapter: parsed.JOB_QUEUE_ADAPTER,
+    generationAdapter: parsed.GENERATION_ADAPTER,
+    vectorStoreAdapter: parsed.VECTOR_STORE_ADAPTER,
   };
 }

@@ -7,9 +7,11 @@ import postgres from "postgres";
 import { eq } from "drizzle-orm";
 import { createLogger, createMockStorageAdapter } from "@usavvy/service-kernel";
 import { createDb, type Db } from "../../../../src/db/client.js";
-import { contentChunks, uploadedDocuments } from "../../../../src/db/schema.js";
+import { contentChunks, proposedConcepts, proposedTopics, uploadedDocuments } from "../../../../src/db/schema.js";
 import { loadIngestionConfig } from "../../../../src/config.js";
 import { ingestDocument } from "../../../../src/modules/uploads/jobs/ingestDocument.js";
+import { createMockGenerationAdapter } from "../../../../src/modules/generation/mock.js";
+import { createMockVectorStoreAdapter } from "../../../../src/modules/generation/vectorStoreMock.js";
 
 const fixturesDir = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "fixtures");
 const fixture = (name: string) => readFileSync(join(fixturesDir, name));
@@ -54,21 +56,28 @@ async function insertDocument(fileType: string, storageKey: string): Promise<str
   return row.id;
 }
 
+// Story 2.12 (FR-C-9): every IngestJobDeps call site now needs a GenerationPort and a
+// VectorStorePort — mocks here, matching storagePort's own mock-by-default test
+// convention. Real-adapter coverage lives in vectorStorePgvector.test.ts instead.
+function generationDeps() {
+  return { generationPort: createMockGenerationAdapter(), vectorStorePort: createMockVectorStoreAdapter() };
+}
+
 async function depsWithStoredFixture(storageKey: string, buffer: Buffer) {
   const storagePort = createMockStorageAdapter();
   await storagePort.putObject(storageKey, buffer, "application/octet-stream");
-  return { db, storagePort, logger: createLogger("test") };
+  return { db, storagePort, logger: createLogger("test"), ...generationDeps() };
 }
 
 describe("ingestDocument", () => {
   it(
-    "parses a valid PDF, inserts ContentChunks linked to the document with page ranges, and marks it parsed (AC #1)",
+    "parses a valid PDF, inserts ContentChunks, embeds them, and reaches outline ready with a Topic/Concept per heading (AC #1, #2)",
     async () => {
       const storageKey = `test/${randomUUID()}.pdf`;
       const documentId = await insertDocument("pdf", storageKey);
-      const { storagePort, logger } = await depsWithStoredFixture(storageKey, fixture("valid-text.pdf"));
+      const deps = await depsWithStoredFixture(storageKey, fixture("valid-text.pdf"));
 
-      await ingestDocument({ db, storagePort, logger }, { uploadedDocumentId: documentId });
+      await ingestDocument(deps, { uploadedDocumentId: documentId });
 
       const chunks = await db.select().from(contentChunks).where(eq(contentChunks.documentId, documentId));
       expect(chunks.length).toBeGreaterThan(0);
@@ -77,7 +86,21 @@ describe("ingestDocument", () => {
       expect(chunks.every((c) => c.safetyStatus === "clear" && c.safetyCategory === null)).toBe(true);
 
       const [document] = await db.select().from(uploadedDocuments).where(eq(uploadedDocuments.id, documentId));
-      expect(document).toMatchObject({ status: "parsed", failureReason: null });
+      expect(document).toMatchObject({ status: "outline ready", failureReason: null });
+
+      // deps.vectorStorePort is the in-memory mock — assert against its own entries
+      // map, not the real chunk_embeddings table (that's vectorStorePgvector.test.ts's
+      // job, against the real pgvector adapter).
+      expect(deps.vectorStorePort.entries.size).toBe(chunks.length);
+      expect([...deps.vectorStorePort.entries.values()].every((e) => e.embedding.length === 1536 && e.conceptId === null && e.customCourseId)).toBe(true);
+
+      const topics = await db.select().from(proposedTopics).where(eq(proposedTopics.documentId, documentId));
+      expect(topics.map((t) => t.title).sort()).toEqual(["Chapter One", "Chapter Two"]);
+      for (const topic of topics) {
+        const concepts = await db.select().from(proposedConcepts).where(eq(proposedConcepts.proposedTopicId, topic.id));
+        expect(concepts).toHaveLength(1);
+        expect(concepts[0]?.safetyFlagged).toBe(false);
+      }
     },
     30_000,
   );
@@ -87,9 +110,9 @@ describe("ingestDocument", () => {
     async () => {
       const storageKey = `test/${randomUUID()}.pdf`;
       const documentId = await insertDocument("pdf", storageKey);
-      const { storagePort, logger } = await depsWithStoredFixture(storageKey, fixture("encrypted.pdf"));
+      const deps = await depsWithStoredFixture(storageKey, fixture("encrypted.pdf"));
 
-      await ingestDocument({ db, storagePort, logger }, { uploadedDocumentId: documentId });
+      await ingestDocument(deps, { uploadedDocumentId: documentId });
 
       const chunks = await db.select().from(contentChunks).where(eq(contentChunks.documentId, documentId));
       expect(chunks).toHaveLength(0);
@@ -105,9 +128,9 @@ describe("ingestDocument", () => {
     async () => {
       const storageKey = `test/${randomUUID()}.pdf`;
       const documentId = await insertDocument("pdf", storageKey);
-      const { storagePort, logger } = await depsWithStoredFixture(storageKey, fixture("corrupt.pdf"));
+      const deps = await depsWithStoredFixture(storageKey, fixture("corrupt.pdf"));
 
-      await ingestDocument({ db, storagePort, logger }, { uploadedDocumentId: documentId });
+      await ingestDocument(deps, { uploadedDocumentId: documentId });
 
       const chunks = await db.select().from(contentChunks).where(eq(contentChunks.documentId, documentId));
       expect(chunks).toHaveLength(0);
@@ -119,20 +142,20 @@ describe("ingestDocument", () => {
   );
 
   it(
-    "runs OCR for a scanned PDF page with no text layer and stores the OCR text as a chunk (AC #2)",
+    "runs OCR for a scanned PDF page with no text layer, stores the OCR text as a chunk, and reaches outline ready (AC #2)",
     async () => {
       const storageKey = `test/${randomUUID()}.pdf`;
       const documentId = await insertDocument("pdf", storageKey);
-      const { storagePort, logger } = await depsWithStoredFixture(storageKey, fixture("scanned-no-text.pdf"));
+      const deps = await depsWithStoredFixture(storageKey, fixture("scanned-no-text.pdf"));
 
-      await ingestDocument({ db, storagePort, logger }, { uploadedDocumentId: documentId });
+      await ingestDocument(deps, { uploadedDocumentId: documentId });
 
       const chunks = await db.select().from(contentChunks).where(eq(contentChunks.documentId, documentId));
       expect(chunks.length).toBeGreaterThan(0);
       expect(chunks[0]?.text.toUpperCase()).toContain("HELLO WORLD");
 
       const [document] = await db.select().from(uploadedDocuments).where(eq(uploadedDocuments.id, documentId));
-      expect(document?.status).toBe("parsed");
+      expect(document?.status).toBe("outline ready");
     },
     30_000,
   );
@@ -141,72 +164,85 @@ describe("ingestDocument", () => {
     const storagePort = createMockStorageAdapter();
     const logger = createLogger("test");
 
-    await expect(ingestDocument({ db, storagePort, logger }, { uploadedDocumentId: randomUUID() })).resolves.toBeUndefined();
+    await expect(ingestDocument({ db, storagePort, logger, ...generationDeps() }, { uploadedDocumentId: randomUUID() })).resolves.toBeUndefined();
   });
 
-  it("parses a valid DOCX end-to-end through the real job handler", async () => {
+  it("parses a valid DOCX end-to-end through the real job handler and reaches outline ready", async () => {
     const storageKey = `test/${randomUUID()}.docx`;
     const documentId = await insertDocument("docx", storageKey);
-    const { storagePort, logger } = await depsWithStoredFixture(storageKey, fixture("valid-structured.docx"));
+    const deps = await depsWithStoredFixture(storageKey, fixture("valid-structured.docx"));
 
-    await ingestDocument({ db, storagePort, logger }, { uploadedDocumentId: documentId });
+    await ingestDocument(deps, { uploadedDocumentId: documentId });
 
     const chunks = await db.select().from(contentChunks).where(eq(contentChunks.documentId, documentId));
     expect(chunks.some((c) => c.heading === "Introduction")).toBe(true);
     expect(chunks.every((c) => c.safetyStatus === "clear" && c.safetyCategory === null)).toBe(true);
     const [document] = await db.select().from(uploadedDocuments).where(eq(uploadedDocuments.id, documentId));
-    expect(document?.status).toBe("parsed");
+    expect(document?.status).toBe("outline ready");
   });
 
-  it("parses a valid PPTX end-to-end through the real job handler", async () => {
+  it("parses a valid PPTX end-to-end through the real job handler and reaches outline ready", async () => {
     const storageKey = `test/${randomUUID()}.pptx`;
     const documentId = await insertDocument("pptx", storageKey);
-    const { storagePort, logger } = await depsWithStoredFixture(storageKey, fixture("valid-structured.pptx"));
+    const deps = await depsWithStoredFixture(storageKey, fixture("valid-structured.pptx"));
 
-    await ingestDocument({ db, storagePort, logger }, { uploadedDocumentId: documentId });
+    await ingestDocument(deps, { uploadedDocumentId: documentId });
 
     const chunks = await db.select().from(contentChunks).where(eq(contentChunks.documentId, documentId));
     expect(chunks.some((c) => c.heading === "Slide One Title" && c.pageRangeStart === 1)).toBe(true);
     expect(chunks.every((c) => c.safetyStatus === "clear" && c.safetyCategory === null)).toBe(true);
     const [document] = await db.select().from(uploadedDocuments).where(eq(uploadedDocuments.id, documentId));
-    expect(document?.status).toBe("parsed");
+    expect(document?.status).toBe("outline ready");
   });
 
-  it("parses a plain TXT document end-to-end (no headings, one chunk)", async () => {
+  it("parses a plain TXT document end-to-end and produces the minimal viable one-Topic-one-Concept outline (AC #3)", async () => {
     const storageKey = `test/${randomUUID()}.txt`;
     const documentId = await insertDocument("txt", storageKey);
-    const { storagePort, logger } = await depsWithStoredFixture(storageKey, Buffer.from("Just plain content for this test document."));
+    const deps = await depsWithStoredFixture(storageKey, Buffer.from("Just plain content for this test document."));
 
-    await ingestDocument({ db, storagePort, logger }, { uploadedDocumentId: documentId });
+    await ingestDocument(deps, { uploadedDocumentId: documentId });
 
     const chunks = await db.select().from(contentChunks).where(eq(contentChunks.documentId, documentId));
     expect(chunks).toHaveLength(1);
     expect(chunks[0]).toMatchObject({ heading: null, text: "Just plain content for this test document." });
+
+    const [document] = await db.select().from(uploadedDocuments).where(eq(uploadedDocuments.id, documentId));
+    expect(document?.status).toBe("outline ready");
+
+    const topics = await db.select().from(proposedTopics).where(eq(proposedTopics.documentId, documentId));
+    expect(topics).toHaveLength(1);
+    const concepts = await db.select().from(proposedConcepts).where(eq(proposedConcepts.proposedTopicId, topics[0]?.id ?? ""));
+    expect(concepts).toHaveLength(1);
+    expect(concepts[0]).toMatchObject({ sourcePageRangeStart: null, sourcePageRangeEnd: null, safetyFlagged: false });
   });
 
   it(
-    "is idempotent under redelivery — running the job twice for the same document does not duplicate ContentChunk rows (review finding)",
+    "is idempotent under redelivery — running the job twice for the same document does not duplicate ContentChunk or proposed-outline rows (review finding)",
     async () => {
       const storageKey = `test/${randomUUID()}.pdf`;
       const documentId = await insertDocument("pdf", storageKey);
-      const { storagePort, logger } = await depsWithStoredFixture(storageKey, fixture("valid-text.pdf"));
+      const deps = await depsWithStoredFixture(storageKey, fixture("valid-text.pdf"));
 
-      await ingestDocument({ db, storagePort, logger }, { uploadedDocumentId: documentId });
+      await ingestDocument(deps, { uploadedDocumentId: documentId });
       const firstRunChunks = await db.select().from(contentChunks).where(eq(contentChunks.documentId, documentId));
+      const firstRunTopics = await db.select().from(proposedTopics).where(eq(proposedTopics.documentId, documentId));
 
       // Simulates pg-boss's at-least-once delivery redelivering a job whose earlier
-      // attempt already committed — the document is now "parsed", not "queued".
-      await ingestDocument({ db, storagePort, logger }, { uploadedDocumentId: documentId });
+      // attempt already committed — the document is now "outline ready", a terminal
+      // status, so this second call must be a pure no-op skip.
+      await ingestDocument(deps, { uploadedDocumentId: documentId });
       const secondRunChunks = await db.select().from(contentChunks).where(eq(contentChunks.documentId, documentId));
+      const secondRunTopics = await db.select().from(proposedTopics).where(eq(proposedTopics.documentId, documentId));
 
       expect(secondRunChunks).toHaveLength(firstRunChunks.length);
       expect(secondRunChunks.map((c) => c.id).sort()).toEqual(firstRunChunks.map((c) => c.id).sort());
+      expect(secondRunTopics.map((t) => t.id).sort()).toEqual(firstRunTopics.map((t) => t.id).sort());
     },
     30_000,
   );
 
   it(
-    "marks only the blocked chunk 'blocked' in a multi-chunk document, leaves the other chunk's own status intact, and halts the document (AC #1, #2)",
+    "marks only the blocked chunk 'blocked' in a multi-chunk document, halts the document, and never runs embedding/outline (AC #1, #2)",
     async () => {
       const storageKey = `test/${randomUUID()}.md`;
       const documentId = await insertDocument("md", storageKey);
@@ -217,9 +253,9 @@ describe("ingestDocument", () => {
         "# Section Two",
         "Here is how to kill yourself using household items.",
       ].join("\n");
-      const { storagePort, logger } = await depsWithStoredFixture(storageKey, Buffer.from(text));
+      const deps = await depsWithStoredFixture(storageKey, Buffer.from(text));
 
-      await ingestDocument({ db, storagePort, logger }, { uploadedDocumentId: documentId });
+      await ingestDocument(deps, { uploadedDocumentId: documentId });
 
       const chunks = await db.select().from(contentChunks).where(eq(contentChunks.documentId, documentId));
       expect(chunks).toHaveLength(2);
@@ -230,12 +266,18 @@ describe("ingestDocument", () => {
 
       const [document] = await db.select().from(uploadedDocuments).where(eq(uploadedDocuments.id, documentId));
       expect(document).toMatchObject({ status: "blocked", failureReason: "blocked: self-harm-instructions" });
+
+      // AC #1: embedding/outline only ever runs for a document that passed the safety
+      // scan — a "blocked" document must produce neither embeddings nor a proposed outline.
+      expect(deps.vectorStorePort.entries.size).toBe(0);
+      const topics = await db.select().from(proposedTopics).where(eq(proposedTopics.documentId, documentId));
+      expect(topics).toHaveLength(0);
     },
     30_000,
   );
 
   it(
-    "proceeds to 'parsed' when only a minority of chunks in a multi-chunk document are flagged as borderline, marking only that chunk (AC #3)",
+    "proceeds to outline ready when only a minority of chunks are flagged as borderline, and marks only that Concept safetyFlagged (AC #3, #4)",
     async () => {
       const storageKey = `test/${randomUUID()}.md`;
       const documentId = await insertDocument("md", storageKey);
@@ -246,9 +288,9 @@ describe("ingestDocument", () => {
         "# Section Two",
         "This is a damn good example.",
       ].join("\n");
-      const { storagePort, logger } = await depsWithStoredFixture(storageKey, Buffer.from(text));
+      const deps = await depsWithStoredFixture(storageKey, Buffer.from(text));
 
-      await ingestDocument({ db, storagePort, logger }, { uploadedDocumentId: documentId });
+      await ingestDocument(deps, { uploadedDocumentId: documentId });
 
       const chunks = await db.select().from(contentChunks).where(eq(contentChunks.documentId, documentId));
       expect(chunks).toHaveLength(2);
@@ -258,43 +300,129 @@ describe("ingestDocument", () => {
       expect(sectionTwo).toMatchObject({ safetyStatus: "flagged", safetyCategory: "profanity" });
 
       const [document] = await db.select().from(uploadedDocuments).where(eq(uploadedDocuments.id, documentId));
-      expect(document).toMatchObject({ status: "parsed", failureReason: null });
+      expect(document).toMatchObject({ status: "outline ready", failureReason: null });
+
+      const topics = await db.select().from(proposedTopics).where(eq(proposedTopics.documentId, documentId));
+      const topicOne = topics.find((t) => t.title === "Section One");
+      const topicTwo = topics.find((t) => t.title === "Section Two");
+      const conceptsOne = await db.select().from(proposedConcepts).where(eq(proposedConcepts.proposedTopicId, topicOne?.id ?? ""));
+      const conceptsTwo = await db.select().from(proposedConcepts).where(eq(proposedConcepts.proposedTopicId, topicTwo?.id ?? ""));
+      expect(conceptsOne[0]?.safetyFlagged).toBe(false);
+      expect(conceptsTwo[0]?.safetyFlagged).toBe(true);
     },
     30_000,
   );
 
-  it("marks every chunk 'clear' and status 'parsed' for a document with no safety concerns (AC #4)", async () => {
+  it("marks every chunk 'clear' and reaches outline ready for a document with no safety concerns (AC #4)", async () => {
     const storageKey = `test/${randomUUID()}.txt`;
     const documentId = await insertDocument("txt", storageKey);
-    const { storagePort, logger } = await depsWithStoredFixture(storageKey, Buffer.from("Just plain content for this test document."));
+    const deps = await depsWithStoredFixture(storageKey, Buffer.from("Just plain content for this test document."));
 
-    await ingestDocument({ db, storagePort, logger }, { uploadedDocumentId: documentId });
+    await ingestDocument(deps, { uploadedDocumentId: documentId });
 
     const chunks = await db.select().from(contentChunks).where(eq(contentChunks.documentId, documentId));
     expect(chunks).toHaveLength(1);
     expect(chunks[0]).toMatchObject({ safetyStatus: "clear", safetyCategory: null });
 
     const [document] = await db.select().from(uploadedDocuments).where(eq(uploadedDocuments.id, documentId));
-    expect(document).toMatchObject({ status: "parsed", failureReason: null });
+    expect(document).toMatchObject({ status: "outline ready", failureReason: null });
   });
 
-  it("skips a document that isn't 'queued' without touching storage or re-parsing (review finding)", async () => {
+  it(
+    "resumes straight to embedding for a document already at 'parsed' with committed chunks, without re-touching storage (AC #1, crash-recovery)",
+    async () => {
+      const storageKey = `test/${randomUUID()}.pdf`;
+      const documentId = await insertDocument("pdf", storageKey);
+      // Simulates a document whose parse/chunk/safety-scan transaction already
+      // committed in an earlier run — insert real ContentChunk rows directly and park
+      // the document at "parsed", bypassing the parse step entirely.
+      await db.insert(contentChunks).values([
+        { documentId, chunkIndex: 0, text: "First section text.", heading: "First", pageRangeStart: 1, pageRangeEnd: 1, safetyStatus: "clear" },
+        { documentId, chunkIndex: 1, text: "Second section text.", heading: "Second", pageRangeStart: 2, pageRangeEnd: 2, safetyStatus: "clear" },
+      ]);
+      await db.update(uploadedDocuments).set({ status: "parsed" }).where(eq(uploadedDocuments.id, documentId));
+      const storagePort = createMockStorageAdapter();
+      const getObjectSpy = vi.spyOn(storagePort, "getObject");
+      const logger = createLogger("test");
+      const { generationPort, vectorStorePort } = generationDeps();
+
+      await ingestDocument({ db, storagePort, logger, generationPort, vectorStorePort }, { uploadedDocumentId: documentId });
+
+      expect(getObjectSpy).not.toHaveBeenCalled();
+      const [document] = await db.select().from(uploadedDocuments).where(eq(uploadedDocuments.id, documentId));
+      expect(document?.status).toBe("outline ready");
+      expect(vectorStorePort.entries.size).toBe(2);
+      const topics = await db.select().from(proposedTopics).where(eq(proposedTopics.documentId, documentId));
+      expect(topics.map((t) => t.title).sort()).toEqual(["First", "Second"]);
+    },
+    30_000,
+  );
+
+  it(
+    "reprocesses a document stuck at 'embedding' after an interrupted prior run, without re-touching storage or duplicating proposed-outline rows (AC #1, crash-recovery)",
+    async () => {
+      const storageKey = `test/${randomUUID()}.pdf`;
+      const documentId = await insertDocument("pdf", storageKey);
+      await db.insert(contentChunks).values([{ documentId, chunkIndex: 0, text: "Only section text.", heading: "Only", pageRangeStart: 1, pageRangeEnd: 1, safetyStatus: "clear" }]);
+      await db.update(uploadedDocuments).set({ status: "embedding" }).where(eq(uploadedDocuments.id, documentId));
+      const storagePort = createMockStorageAdapter();
+      const getObjectSpy = vi.spyOn(storagePort, "getObject");
+      const logger = createLogger("test");
+      const { generationPort, vectorStorePort } = generationDeps();
+
+      await ingestDocument({ db, storagePort, logger, generationPort, vectorStorePort }, { uploadedDocumentId: documentId });
+
+      expect(getObjectSpy).not.toHaveBeenCalled();
+      const [document] = await db.select().from(uploadedDocuments).where(eq(uploadedDocuments.id, documentId));
+      expect(document?.status).toBe("outline ready");
+      const topics = await db.select().from(proposedTopics).where(eq(proposedTopics.documentId, documentId));
+      expect(topics).toHaveLength(1);
+      expect(vectorStorePort.entries.size).toBe(1);
+    },
+    30_000,
+  );
+
+  it("marks a document 'failed' with 'no extractable content' instead of a hollow outline ready when it has zero ContentChunk rows (AC #3, review finding)", async () => {
     const storageKey = `test/${randomUUID()}.pdf`;
     const documentId = await insertDocument("pdf", storageKey);
+    // Simulates a document that parsed successfully but produced zero chunks (e.g. a
+    // whitespace-only upload) — chunks already "committed" (there are none), parked at
+    // "parsed" per the resume path.
     await db.update(uploadedDocuments).set({ status: "parsed" }).where(eq(uploadedDocuments.id, documentId));
     const storagePort = createMockStorageAdapter();
     const getObjectSpy = vi.spyOn(storagePort, "getObject");
     const logger = createLogger("test");
 
-    await ingestDocument({ db, storagePort, logger }, { uploadedDocumentId: documentId });
+    await ingestDocument({ db, storagePort, logger, ...generationDeps() }, { uploadedDocumentId: documentId });
 
     expect(getObjectSpy).not.toHaveBeenCalled();
-    const chunks = await db.select().from(contentChunks).where(eq(contentChunks.documentId, documentId));
-    expect(chunks).toHaveLength(0);
+    const [document] = await db.select().from(uploadedDocuments).where(eq(uploadedDocuments.id, documentId));
+    expect(document).toMatchObject({ status: "failed", failureReason: "no extractable content" });
+    const topics = await db.select().from(proposedTopics).where(eq(proposedTopics.documentId, documentId));
+    expect(topics).toHaveLength(0);
+  });
+
+  it("marks a document 'failed' rather than stranding it at 'embedding' forever when embedding/outline generation throws (AD-17, review finding)", async () => {
+    const storageKey = `test/${randomUUID()}.pdf`;
+    const documentId = await insertDocument("pdf", storageKey);
+    await db.insert(contentChunks).values([{ documentId, chunkIndex: 0, text: "Only section text.", heading: "Only", pageRangeStart: 1, pageRangeEnd: 1, safetyStatus: "clear" }]);
+    await db.update(uploadedDocuments).set({ status: "parsed" }).where(eq(uploadedDocuments.id, documentId));
+    const storagePort = createMockStorageAdapter();
+    const logger = createLogger("test");
+    const generationPort = createMockGenerationAdapter();
+    vi.spyOn(generationPort, "embed").mockRejectedValue(new Error("provider unavailable"));
+    const vectorStorePort = createMockVectorStoreAdapter();
+
+    await ingestDocument({ db, storagePort, logger, generationPort, vectorStorePort }, { uploadedDocumentId: documentId });
+
+    const [document] = await db.select().from(uploadedDocuments).where(eq(uploadedDocuments.id, documentId));
+    expect(document).toMatchObject({ status: "failed", failureReason: "embedding failed" });
+    const topics = await db.select().from(proposedTopics).where(eq(proposedTopics.documentId, documentId));
+    expect(topics).toHaveLength(0);
   });
 
   it(
-    "makes 'parsing' observable via a real DB read before storage is fetched (AC #1)",
+    "makes 'parsing' observable via a real DB read before storage is fetched, and still reaches outline ready (AC #1)",
     async () => {
       const storageKey = `test/${randomUUID()}.txt`;
       const documentId = await insertDocument("txt", storageKey);
@@ -308,21 +436,21 @@ describe("ingestDocument", () => {
         return Buffer.from("Just plain content for this test document.");
       });
 
-      await ingestDocument({ db, storagePort, logger }, { uploadedDocumentId: documentId });
+      await ingestDocument({ db, storagePort, logger, ...generationDeps() }, { uploadedDocumentId: documentId });
 
       expect(getObjectSpy).toHaveBeenCalledTimes(1);
       const [finalDocument] = await db.select().from(uploadedDocuments).where(eq(uploadedDocuments.id, documentId));
-      expect(finalDocument).toMatchObject({ status: "parsed" });
+      expect(finalDocument).toMatchObject({ status: "outline ready" });
     },
     30_000,
   );
 
   it(
-    "writes 'parsing' then 'safety scan' via standalone db.update calls, in order, before the final transaction (AC #1)",
+    "writes 'parsing' then 'safety scan' then 'embedding' via standalone db.update calls, in order, before the final transaction (AC #1)",
     async () => {
       const storageKey = `test/${randomUUID()}.txt`;
       const documentId = await insertDocument("txt", storageKey);
-      const { storagePort, logger } = await depsWithStoredFixture(storageKey, Buffer.from("Just plain content for this test document."));
+      const deps = await depsWithStoredFixture(storageKey, Buffer.from("Just plain content for this test document."));
 
       const statusUpdates: string[] = [];
       const originalUpdate = db.update.bind(db);
@@ -338,12 +466,12 @@ describe("ingestDocument", () => {
       });
 
       try {
-        await ingestDocument({ db, storagePort, logger }, { uploadedDocumentId: documentId });
+        await ingestDocument(deps, { uploadedDocumentId: documentId });
       } finally {
         updateSpy.mockRestore();
       }
 
-      expect(statusUpdates).toEqual(["parsing", "safety scan"]);
+      expect(statusUpdates).toEqual(["parsing", "safety scan", "embedding"]);
     },
     30_000,
   );
@@ -354,14 +482,14 @@ describe("ingestDocument", () => {
       const storageKey = `test/${randomUUID()}.pdf`;
       const documentId = await insertDocument("pdf", storageKey);
       await db.update(uploadedDocuments).set({ status: "parsing" }).where(eq(uploadedDocuments.id, documentId));
-      const { storagePort, logger } = await depsWithStoredFixture(storageKey, fixture("valid-text.pdf"));
-      const getObjectSpy = vi.spyOn(storagePort, "getObject");
+      const deps = await depsWithStoredFixture(storageKey, fixture("valid-text.pdf"));
+      const getObjectSpy = vi.spyOn(deps.storagePort, "getObject");
 
-      await ingestDocument({ db, storagePort, logger }, { uploadedDocumentId: documentId });
+      await ingestDocument(deps, { uploadedDocumentId: documentId });
 
       expect(getObjectSpy).toHaveBeenCalled();
       const [document] = await db.select().from(uploadedDocuments).where(eq(uploadedDocuments.id, documentId));
-      expect(document?.status).toBe("parsed");
+      expect(document?.status).toBe("outline ready");
     },
     30_000,
   );
@@ -372,14 +500,14 @@ describe("ingestDocument", () => {
       const storageKey = `test/${randomUUID()}.pdf`;
       const documentId = await insertDocument("pdf", storageKey);
       await db.update(uploadedDocuments).set({ status: "safety scan" }).where(eq(uploadedDocuments.id, documentId));
-      const { storagePort, logger } = await depsWithStoredFixture(storageKey, fixture("valid-text.pdf"));
-      const getObjectSpy = vi.spyOn(storagePort, "getObject");
+      const deps = await depsWithStoredFixture(storageKey, fixture("valid-text.pdf"));
+      const getObjectSpy = vi.spyOn(deps.storagePort, "getObject");
 
-      await ingestDocument({ db, storagePort, logger }, { uploadedDocumentId: documentId });
+      await ingestDocument(deps, { uploadedDocumentId: documentId });
 
       expect(getObjectSpy).toHaveBeenCalled();
       const [document] = await db.select().from(uploadedDocuments).where(eq(uploadedDocuments.id, documentId));
-      expect(document?.status).toBe("parsed");
+      expect(document?.status).toBe("outline ready");
     },
     30_000,
   );
@@ -392,7 +520,7 @@ describe("ingestDocument", () => {
     const getObjectSpy = vi.spyOn(storagePort, "getObject");
     const logger = createLogger("test");
 
-    await ingestDocument({ db, storagePort, logger }, { uploadedDocumentId: documentId });
+    await ingestDocument({ db, storagePort, logger, ...generationDeps() }, { uploadedDocumentId: documentId });
 
     expect(getObjectSpy).not.toHaveBeenCalled();
     const [document] = await db.select().from(uploadedDocuments).where(eq(uploadedDocuments.id, documentId));
@@ -407,12 +535,30 @@ describe("ingestDocument", () => {
     const getObjectSpy = vi.spyOn(storagePort, "getObject");
     const logger = createLogger("test");
 
-    await ingestDocument({ db, storagePort, logger }, { uploadedDocumentId: documentId });
+    await ingestDocument({ db, storagePort, logger, ...generationDeps() }, { uploadedDocumentId: documentId });
 
     expect(getObjectSpy).not.toHaveBeenCalled();
     const chunks = await db.select().from(contentChunks).where(eq(contentChunks.documentId, documentId));
     expect(chunks).toHaveLength(0);
     const [document] = await db.select().from(uploadedDocuments).where(eq(uploadedDocuments.id, documentId));
     expect(document).toMatchObject({ status: "blocked", failureReason: "blocked: self-harm-instructions" });
+  });
+
+  it("skips a document that is already 'outline ready' without touching storage, re-embedding, or duplicating proposed-outline rows (Story 2.12)", async () => {
+    const storageKey = `test/${randomUUID()}.pdf`;
+    const documentId = await insertDocument("pdf", storageKey);
+    await db.update(uploadedDocuments).set({ status: "outline ready" }).where(eq(uploadedDocuments.id, documentId));
+    const storagePort = createMockStorageAdapter();
+    const getObjectSpy = vi.spyOn(storagePort, "getObject");
+    const { generationPort, vectorStorePort } = generationDeps();
+    const embedSpy = vi.spyOn(generationPort, "embed");
+    const logger = createLogger("test");
+
+    await ingestDocument({ db, storagePort, logger, generationPort, vectorStorePort }, { uploadedDocumentId: documentId });
+
+    expect(getObjectSpy).not.toHaveBeenCalled();
+    expect(embedSpy).not.toHaveBeenCalled();
+    const topics = await db.select().from(proposedTopics).where(eq(proposedTopics.documentId, documentId));
+    expect(topics).toHaveLength(0);
   });
 });

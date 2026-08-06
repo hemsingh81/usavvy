@@ -1,9 +1,16 @@
-import { boolean, integer, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { boolean, integer, pgTable, text, timestamp, uuid, vector } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 // Story 2.7 (FR-C-7/FR-C-12). Same uuidv7() default every other service's tables use
 // (Consistency Conventions).
 const uuidv7Default = sql`uuidv7()`;
+
+// Story 2.12 (FR-C-9), AC #1. 1536 chosen to match a plausible real embedding provider's
+// dimensionality (e.g. OpenAI text-embedding-3-small) so no dimension migration is
+// needed once a real GenerationPort adapter lands. Exported so the mock adapter
+// (services/ingestion/src/modules/generation/mock.ts) produces vectors of the exact
+// same width the DB column requires.
+export const EMBEDDING_DIMENSIONS = 1536;
 
 export const uploadedDocuments = pgTable("uploaded_documents", {
   id: uuid("id").primaryKey().default(uuidv7Default),
@@ -54,5 +61,61 @@ export const contentChunks = pgTable("content_chunks", {
   safetyStatus: text("safety_status").notNull().default("clear"),
   // The policy category that matched; null when safetyStatus is "clear".
   safetyCategory: text("safety_category"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// Story 2.12 (FR-C-9), AC #1. VectorStorePort's pgvector adapter owns this table — one
+// embedding row per chunk, never queried outside that port (see
+// modules/generation/vectorStorePgvector.ts).
+export const chunkEmbeddings = pgTable("chunk_embeddings", {
+  id: uuid("id").primaryKey().default(uuidv7Default),
+  chunkId: uuid("chunk_id")
+    .notNull()
+    .unique()
+    .references(() => contentChunks.id, { onDelete: "cascade" }),
+  // Denormalized from the chunk — a query path that doesn't need a join.
+  documentId: uuid("document_id")
+    .notNull()
+    .references(() => uploadedDocuments.id, { onDelete: "cascade" }),
+  // Same bare, non-FK convention as uploadedDocuments.customCourseId — see that column's
+  // own comment for why (no real `courses` row exists yet).
+  customCourseId: uuid("custom_course_id").notNull(),
+  // AC #1's "conceptId placeholder" — always null until a future story creates real
+  // Concepts (Story 2.13 or later; see this story's Scope Note).
+  conceptId: uuid("concept_id"),
+  embedding: vector("embedding", { dimensions: EMBEDDING_DIMENSIONS }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// Story 2.12 (FR-C-9), AC #2/#3. customCourseId is the aggregation key — a custom course
+// can hold multiple UploadedDocuments (Stories 2.7/2.8), and each document's own
+// ingestion job independently contributes its own Topics to the same growing pool for
+// that custom course. No service/route layer exists yet for these tables (Story 2.13's
+// job — see this story's Scope Note).
+export const proposedTopics = pgTable("proposed_topics", {
+  id: uuid("id").primaryKey().default(uuidv7Default),
+  customCourseId: uuid("custom_course_id").notNull(),
+  documentId: uuid("document_id")
+    .notNull()
+    .references(() => uploadedDocuments.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  // Insertion order within this document's own contribution.
+  position: integer("position").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const proposedConcepts = pgTable("proposed_concepts", {
+  id: uuid("id").primaryKey().default(uuidv7Default),
+  proposedTopicId: uuid("proposed_topic_id")
+    .notNull()
+    .references(() => proposedTopics.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  position: integer("position").notNull(),
+  // AC #2: "linked to the source page/section range it was derived from". Null for
+  // formats with no page concept (DOCX/TXT/MD), matching contentChunks' own convention.
+  sourcePageRangeStart: integer("source_page_range_start"),
+  sourcePageRangeEnd: integer("source_page_range_end"),
+  // AC #4: true if any contributing chunk's safetyStatus was "flagged".
+  safetyFlagged: boolean("safety_flagged").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });

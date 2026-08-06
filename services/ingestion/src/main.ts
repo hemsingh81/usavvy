@@ -4,6 +4,7 @@ import { loadIngestionConfig } from "./config.js";
 import { buildApp } from "./app.js";
 import { createDb } from "./db/client.js";
 import { ingestDocument } from "./modules/uploads/index.js";
+import { createGenerationAdapter, createVectorStoreAdapter } from "./modules/generation/index.js";
 
 const config = loadIngestionConfig(process.env);
 const logger = createLogger("ingestion");
@@ -13,9 +14,11 @@ export const db = createDb(sql);
 
 const storagePort = createStorageAdapter(config.storageAdapter, config.storageEndpoint, config.storageBucket, logger);
 const jobQueuePort = await createJobQueueAdapter(config.jobQueueAdapter, config.databaseUrl, logger);
+const generationPort = createGenerationAdapter(config.generationAdapter);
+const vectorStorePort = createVectorStoreAdapter(config.vectorStoreAdapter, db);
 
 // Story 2.9: the first JobQueuePort consumer this codebase has ever registered.
-await jobQueuePort.work("ingest-document", (payload) => ingestDocument({ db, storagePort, logger }, payload));
+await jobQueuePort.work("ingest-document", (payload) => ingestDocument({ db, storagePort, logger, generationPort, vectorStorePort }, payload));
 
 const app = buildApp({
   checkDb: () => pingDb(() => sql`select 1`, logger),
