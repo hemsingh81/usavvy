@@ -14,3 +14,8 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname usavvy_core -c 'CRE
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" <<-EOSQL
   CREATE DATABASE usavvy_courses;
 EOSQL
+
+# Story 2.7: ingestion (UploadedDocument/ContentChunk, AD-14).
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" <<-EOSQL
+  CREATE DATABASE usavvy_ingestion;
+EOSQL

@@ -118,3 +118,9 @@ export {
   updateToLatestVersionResponseSchema,
   type UpdateToLatestVersionResponse,
 } from "./courseVersioning.js";
+export {
+  uploadedDocumentResponseSchema,
+  type UploadedDocumentResponse,
+  listUploadsQuerySchema,
+  type ListUploadsQuery,
+} from "./uploads.js";

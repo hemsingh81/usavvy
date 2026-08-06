@@ -1,0 +1,31 @@
+{
+  "name": "@usavvy/ingestion",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch --env-file-if-exists=.env src/main.ts",
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx --env-file-if-exists=.env src/db/migrate.ts"
+  },
+  "dependencies": {
+    "@fastify/multipart": "^10.1.0",
+    "@usavvy/config": "workspace:*",
+    "@usavvy/service-kernel": "workspace:*",
+    "@usavvy/shared-types": "workspace:*",
+    "drizzle-orm": "^0.45.2",
+    "fastify": "^5.11.2",
+    "postgres": "^3.4.9",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.2",
+    "drizzle-kit": "^0.31.10",
+    "tsx": "^4.23.5",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
+  }
+}
