@@ -7,6 +7,7 @@ import { registerJwtPlugin } from "./authPlugin.js";
 import { registerAuthProxyRoutes } from "./authProxy.js";
 import { registerCoursesProxyRoutes } from "./coursesProxy.js";
 import { registerIngestionProxyRoutes } from "./ingestionProxy.js";
+import { registerOutlineConfirmationProxyRoutes } from "./outlineConfirmationProxy.js";
 
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 
@@ -54,6 +55,13 @@ export function buildApp(deps: BuildAppDeps) {
   registerIngestionProxyRoutes(app, {
     forwardToIngestion: deps.forwardToIngestion,
     forwardMultipartToIngestion: deps.forwardMultipartToIngestion,
+  });
+  // Story 2.13 (FR-C-10): the first cross-service-aggregating proxy in this codebase —
+  // see outlineConfirmationProxy.ts's own Dev Notes.
+  registerOutlineConfirmationProxyRoutes(app, {
+    forwardToIngestion: deps.forwardToIngestion,
+    forwardToCourses: deps.forwardToCourses,
+    logger: deps.logger,
   });
 
   return app;

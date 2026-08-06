@@ -60,4 +60,45 @@ export function registerIngestionProxyRoutes(app: FastifyInstance, deps: Ingesti
     const result = await deps.forwardToIngestion("DELETE", `/uploads/${id}`, { headers: trustedHeaders(request) });
     reply.code(result.status).send(result.body);
   });
+
+  // Story 2.13 (FR-C-10): plain 1:1 forwards, matching every other route in this file —
+  // only the confirm step (outlineConfirmationProxy.ts) needs cross-service orchestration.
+  app.get("/uploads/outline", { preHandler: requireAuth }, async (request, reply) => {
+    const result = await deps.forwardToIngestion("GET", request.url, { headers: trustedHeaders(request) });
+    reply.code(result.status).send(result.body);
+  });
+
+  app.patch("/uploads/outline/topics/:id", { preHandler: requireAuth }, async (request, reply) => {
+    const id = requireValidId((request.params as { id: string }).id);
+    const result = await deps.forwardToIngestion("PATCH", `/uploads/outline/topics/${id}`, { body: request.body, headers: trustedHeaders(request) });
+    reply.code(result.status).send(result.body);
+  });
+
+  app.patch("/uploads/outline/concepts/:id", { preHandler: requireAuth }, async (request, reply) => {
+    const id = requireValidId((request.params as { id: string }).id);
+    const result = await deps.forwardToIngestion("PATCH", `/uploads/outline/concepts/${id}`, { body: request.body, headers: trustedHeaders(request) });
+    reply.code(result.status).send(result.body);
+  });
+
+  app.delete("/uploads/outline/topics/:id", { preHandler: requireAuth }, async (request, reply) => {
+    const id = requireValidId((request.params as { id: string }).id);
+    const result = await deps.forwardToIngestion("DELETE", `/uploads/outline/topics/${id}`, { headers: trustedHeaders(request) });
+    reply.code(result.status).send(result.body);
+  });
+
+  app.delete("/uploads/outline/concepts/:id", { preHandler: requireAuth }, async (request, reply) => {
+    const id = requireValidId((request.params as { id: string }).id);
+    const result = await deps.forwardToIngestion("DELETE", `/uploads/outline/concepts/${id}`, { headers: trustedHeaders(request) });
+    reply.code(result.status).send(result.body);
+  });
+
+  app.put("/uploads/outline/topics/reorder", { preHandler: requireAuth }, async (request, reply) => {
+    const result = await deps.forwardToIngestion("PUT", "/uploads/outline/topics/reorder", { body: request.body, headers: trustedHeaders(request) });
+    reply.code(result.status).send(result.body);
+  });
+
+  app.post("/uploads/outline/concepts/merge", { preHandler: requireAuth }, async (request, reply) => {
+    const result = await deps.forwardToIngestion("POST", "/uploads/outline/concepts/merge", { body: request.body, headers: trustedHeaders(request) });
+    reply.code(result.status).send(result.body);
+  });
 }

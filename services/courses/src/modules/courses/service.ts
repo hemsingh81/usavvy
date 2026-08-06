@@ -84,6 +84,48 @@ export async function createCourse(db: Db, role: Role, input: CreateCourseInput)
   };
 }
 
+/**
+ * Story 2.13 (FR-C-10). Materializes a learner-confirmed custom-course outline into a
+ * real, privately-owned Course. Deliberately NOT gated by requireCourseHierarchyWriteAccess
+ * — this is the caller's own resource, the same "auth-only, own-resource" pattern
+ * saveCourseCustomization/startCourse already use, not a courseHierarchy content-ops
+ * write (see this story's CRITICAL SCOPE NOTE on why that RBAC resource is the wrong
+ * shape here). Creates exactly one default Module (the outline data has no Module
+ * level — see Scope Note) nesting every confirmed Topic/Concept under it. `priority`/
+ * `sourcePageRangeStart`/`sourcePageRangeEnd` are accepted in `topics` (the review step's
+ * own editable fields) but deliberately not persisted here — no column for either exists
+ * on `topics`/`concepts` today, and nothing downstream reads them once materialized;
+ * only `title`/`position` carry through, matching createTopic/createConcept's own
+ * minimal shape. Not called directly by `apps/web` — only `gateway`'s outline-
+ * confirmation orchestration calls this, after `ingestion` has already validated the
+ * outline (AC #3's "at least one Topic" check happens there, not duplicated here).
+ */
+export async function createCustomCourseFromOutline(
+  db: Db,
+  ownerId: string,
+  title: string,
+  outlineTopics: { title: string; concepts: { title: string }[] }[],
+): Promise<string> {
+  return db.transaction(async (tx) => {
+    const [course] = await tx.insert(courses).values({ ownerId, title, status: "draft" }).returning({ id: courses.id });
+    if (!course) {
+      throw new AppError("INTERNAL_ERROR", "failed to create custom course", 500);
+    }
+    const [module_] = await tx.insert(modules).values({ courseId: course.id, title, position: 0 }).returning({ id: modules.id });
+    if (!module_) {
+      throw new AppError("INTERNAL_ERROR", "failed to create custom course", 500);
+    }
+    for (const [topicIndex, topic] of outlineTopics.entries()) {
+      const [topicRow] = await tx.insert(topics).values({ moduleId: module_.id, title: topic.title, position: topicIndex }).returning({ id: topics.id });
+      if (!topicRow) continue;
+      await tx.insert(concepts).values(
+        topic.concepts.map((concept, conceptIndex) => ({ topicId: topicRow.id, title: concept.title, position: conceptIndex })),
+      );
+    }
+    return course.id;
+  });
+}
+
 export async function createModule(db: Db, role: Role, courseId: string, input: CreateModuleInput): Promise<ModuleResponse> {
   requireCourseHierarchyWriteAccess(role, "create");
   const [course] = await db.select().from(courses).where(eq(courses.id, courseId));
@@ -252,15 +294,41 @@ export async function archiveModule(db: Db, role: Role, moduleId: string): Promi
 }
 
 /**
- * AC #4: returns the full nested tree. Each concept's prerequisites carry a computed
- * `archived` flag (AC #3) rather than a stored one — derived here from whether the
- * referenced concept (guaranteed, per AC #2, to be in this same course) is archived.
+ * Story 2.13 (FR-C-10). Review finding: the original ownership check was written
+ * directly inside `getCourse` only — every sibling function that also resolves a
+ * course row by raw id (`getCourseTopicGraph`, backing `getCourseCustomization`/
+ * `saveCourseCustomization`/`scorePlacementCheck`; `getPlacementCheckQuestions`;
+ * `startCourse`) had no check at all, letting any authenticated caller confirm a
+ * private course id exists (an existence oracle via `GET .../customization`'s two
+ * different 404 messages, `GET .../placement-check`'s 200-vs-404), successfully write
+ * a `courseCustomizations` row against someone else's private course, or pin
+ * themselves to it via `startCourse` — all despite `getCourse` itself being correctly
+ * gated. This shared helper is now the one place every course-resolving function in
+ * this file goes through. `callerUserId` is optional and purely additive — when
+ * `course.ownerId` is null (every catalog-content row, unchanged since Story 2.1),
+ * it's never even inspected; only a privately-owned custom course is checked, and only
+ * against its owner — 404, not 403, matching this codebase's ownership-check
+ * convention everywhere else (services/core's notification functions,
+ * services/ingestion's deleteUploadedDocument).
  */
-export async function getCourse(db: Db, courseId: string): Promise<CourseResponse> {
+async function requireCourseAccessible(db: Db, courseId: string, callerUserId?: string): Promise<typeof courses.$inferSelect> {
   const [course] = await db.select().from(courses).where(eq(courses.id, courseId));
   if (!course) {
     throw new AppError("NOT_FOUND", "course not found", 404);
   }
+  if (course.ownerId !== null && course.ownerId !== callerUserId) {
+    throw new AppError("NOT_FOUND", "course not found", 404);
+  }
+  return course;
+}
+
+/**
+ * AC #4: returns the full nested tree. Each concept's prerequisites carry a computed
+ * `archived` flag (AC #3) rather than a stored one — derived here from whether the
+ * referenced concept (guaranteed, per AC #2, to be in this same course) is archived.
+ */
+export async function getCourse(db: Db, courseId: string, callerUserId?: string): Promise<CourseResponse> {
+  const course = await requireCourseAccessible(db, courseId, callerUserId);
 
   // Review finding (Edge Case Hunter): `position` alone gives Postgres no ordering
   // guarantee when two siblings share the same value — `id` (uuidv7, time-ordered) as a
@@ -381,6 +449,11 @@ export async function searchCourses(db: Db, params: CatalogSearchParams): Promis
   // group") is ever returned.
   const conditions: SQL[] = [
     sql`c.status = 'published'`,
+    // Story 2.13 (FR-C-10): defense-in-depth — a privately-owned custom course is always
+    // "draft" (never published), so this is already unreachable via the status filter
+    // alone, but a learner-owned row must never appear in the shared catalog even if a
+    // future bug flips its status.
+    sql`c.owner_id IS NULL`,
     sql`c.id = (
       SELECT c2.id FROM courses c2
       WHERE COALESCE(c2.version_group_id, c2.id) = COALESCE(c.version_group_id, c.id)
@@ -466,11 +539,8 @@ interface CourseTopicGraph {
  * Topic-level dependency conflicts (AC #3) at request time, rather than duplicating a
  * second prerequisite model.
  */
-async function getCourseTopicGraph(db: Db, courseId: string): Promise<CourseTopicGraph> {
-  const [course] = await db.select().from(courses).where(eq(courses.id, courseId));
-  if (!course) {
-    throw new AppError("NOT_FOUND", "course not found", 404);
-  }
+async function getCourseTopicGraph(db: Db, courseId: string, callerUserId?: string): Promise<CourseTopicGraph> {
+  const course = await requireCourseAccessible(db, courseId, callerUserId);
 
   const moduleRows = await db.select({ id: modules.id }).from(modules).where(eq(modules.courseId, courseId));
   const moduleIds = moduleRows.map((m) => m.id);
@@ -609,7 +679,7 @@ function toCourseCustomizationResponse(
  * misleading message, matching saveCourseCustomization's identical ordering.
  */
 export async function getCourseCustomization(db: Db, userId: string, courseId: string): Promise<CourseCustomizationResponse | null> {
-  const graph = await getCourseTopicGraph(db, courseId);
+  const graph = await getCourseTopicGraph(db, courseId, userId);
   const [row] = await db
     .select()
     .from(courseCustomizations)
@@ -626,7 +696,7 @@ export async function saveCourseCustomization(
   courseId: string,
   input: SaveCourseCustomizationInput,
 ): Promise<CourseCustomizationResponse> {
-  const graph = await getCourseTopicGraph(db, courseId);
+  const graph = await getCourseTopicGraph(db, courseId, userId);
 
   // Review-lesson from Story 2.3, applied proactively: dedupe id arrays at the write layer.
   const deselectedTopicIds = input.deselectedTopicIds !== undefined ? [...new Set(input.deselectedTopicIds)] : undefined;
@@ -714,11 +784,8 @@ const MAX_PLACEMENT_CHECK_QUESTIONS = 8;
  * skipping any Topic with no checkpoint question on any of its Concepts — no question bank
  * or generation exists; this samples Story 2.1's existing checkpointQuestions as-is.
  */
-export async function getPlacementCheckQuestions(db: Db, courseId: string): Promise<PlacementCheckQuestion[]> {
-  const [course] = await db.select().from(courses).where(eq(courses.id, courseId));
-  if (!course) {
-    throw new AppError("NOT_FOUND", "course not found", 404);
-  }
+export async function getPlacementCheckQuestions(db: Db, courseId: string, callerUserId?: string): Promise<PlacementCheckQuestion[]> {
+  await requireCourseAccessible(db, courseId, callerUserId);
 
   const moduleRows = await db.select({ id: modules.id }).from(modules).where(eq(modules.courseId, courseId));
   const moduleIds = moduleRows.map((m) => m.id);
@@ -790,8 +857,8 @@ function difficultyTierFromMasteryRatio(masteryRatio: number): DifficultyTier {
  * applies (or discards) this proposal through the existing saveCourseCustomization
  * (Story 2.4) instead.
  */
-export async function scorePlacementCheck(db: Db, courseId: string, answers: PlacementCheckAnswerInput[]): Promise<PlacementCheckProposal> {
-  const graph = await getCourseTopicGraph(db, courseId);
+export async function scorePlacementCheck(db: Db, courseId: string, answers: PlacementCheckAnswerInput[], callerUserId?: string): Promise<PlacementCheckProposal> {
+  const graph = await getCourseTopicGraph(db, courseId, callerUserId);
 
   for (const answer of answers) {
     if (!graph.topicIds.has(answer.topicId)) {
@@ -925,7 +992,7 @@ export async function createCourseVersion(db: Db, role: Role, sourceCourseId: st
  * learning session (see Dev Notes). A second start is a no-op, not an error.
  */
 export async function startCourse(db: Db, userId: string, courseId: string): Promise<StartCourseResponse> {
-  const course = await getCourseRowOrThrow(db, courseId);
+  const course = await requireCourseAccessible(db, courseId, userId);
   const groupKey = groupKeyOf(course);
 
   const [existing] = await db
@@ -964,7 +1031,7 @@ export async function resolveCourseForLearner(db: Db, userId: string, requestedC
   const effectiveCourseId = pin?.pinnedCourseId ?? requestedCourseId;
   const effectiveRow = effectiveCourseId === requested.id ? requested : await getCourseRowOrThrow(db, effectiveCourseId);
 
-  const course = await getCourse(db, effectiveCourseId);
+  const course = await getCourse(db, effectiveCourseId, userId);
   // Compared by versionNumber, not id-equality: a pin sitting on something whose OWN
   // version number is already >= the latest published one (a rare case — e.g. pinned
   // directly to a draft ahead of any published release) must never be reported as

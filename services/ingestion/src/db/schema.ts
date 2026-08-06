@@ -99,8 +99,13 @@ export const proposedTopics = pgTable("proposed_topics", {
     .notNull()
     .references(() => uploadedDocuments.id, { onDelete: "cascade" }),
   title: text("title").notNull(),
-  // Insertion order within this document's own contribution.
+  // Insertion order within this document's own contribution — Story 2.13's reorder
+  // endpoint rewrites this to a global order across the whole customCourseId the first
+  // time a learner reorders, superseding the per-document-local meaning it starts with.
   position: integer("position").notNull(),
+  // Story 2.13 (FR-C-10), AC #1: "mark any of them as priority" — learner-editable, set
+  // by the outline review screen, never by the ingestion job itself.
+  priority: boolean("priority").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -117,5 +122,36 @@ export const proposedConcepts = pgTable("proposed_concepts", {
   sourcePageRangeEnd: integer("source_page_range_end"),
   // AC #4: true if any contributing chunk's safetyStatus was "flagged".
   safetyFlagged: boolean("safety_flagged").notNull().default(false),
+  // Story 2.13 (FR-C-10), AC #1: same learner-editable priority flag as proposedTopics,
+  // independently settable at the Concept level.
+  priority: boolean("priority").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// Story 2.13 (FR-C-10), AC #2. Records the materialization of a customCourseId into a
+// real courses.id (services/courses, via gateway's orchestration — ingestion never
+// calls courses directly, AD-13). customCourseId is the primary key.
+//
+// Review finding: the original design only wrote this row AFTER `courses` successfully
+// created the real row, checking for an existing row as the sole idempotency signal —
+// two concurrent confirm calls could both observe "not yet confirmed" and both create a
+// real, permanent, duplicate Course before either write ever landed here. `courseId` is
+// now nullable specifically so `confirmOutline` can atomically CLAIM this row (insert
+// with courseId still null, ON CONFLICT DO NOTHING) BEFORE any `courses` call happens —
+// only the caller whose insert actually wins ever proceeds to materialize a course.
+// `recordOutlineConfirmation` is now an UPDATE of the already-claimed row (setting
+// courseId), not an insert. A claim that never gets its courseId recorded (gateway
+// crashes between claiming and calling courses, or the courses call itself fails) leaves
+// a permanently unconfirmable customCourseId — an accepted, documented gap of the same
+// class this codebase already tolerates elsewhere (e.g. domain events' "at least once"
+// framing), and vastly preferable to silently creating two real Courses for one outline.
+export const customCourseConfirmations = pgTable("custom_course_confirmations", {
+  customCourseId: uuid("custom_course_id").primaryKey(),
+  // Same bare, non-FK convention as uploadedDocuments.ownerId.
+  ownerId: text("owner_id").notNull(),
+  // Null while claimed-but-not-yet-materialized; set once `courses` successfully
+  // returns a real courseId. Opaque cross-service reference (AD-14 forbids cross-service
+  // FKs).
+  courseId: uuid("course_id"),
+  confirmedAt: timestamp("confirmed_at", { withTimezone: true }).notNull().defaultNow(),
 });

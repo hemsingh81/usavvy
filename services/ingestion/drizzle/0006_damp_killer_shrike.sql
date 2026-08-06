@@ -1,0 +1,1 @@
+ALTER TABLE "custom_course_confirmations" ALTER COLUMN "course_id" DROP NOT NULL;

@@ -4,6 +4,7 @@ import type { HealthStatus } from "@usavvy/shared-types";
 import { AppError, registerErrorHandler, type JobQueuePort, type Logger, type StoragePort } from "@usavvy/service-kernel";
 import type { Db } from "./db/client.js";
 import { registerUploadsRoutes } from "./modules/uploads/index.js";
+import { registerOutlineRoutes } from "./modules/uploads/outline/index.js";
 
 const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024;
 
@@ -50,6 +51,9 @@ export function buildApp(deps: BuildAppDeps) {
   });
 
   registerUploadsRoutes(app, { db: deps.db, storagePort: deps.storagePort, jobQueuePort: deps.jobQueuePort, logger: deps.logger });
+  // Story 2.13 (FR-C-10): outline editing is its own module, distinct from uploads/'s
+  // upload-and-ingest job pipeline.
+  registerOutlineRoutes(app, { db: deps.db });
 
   return app;
 }

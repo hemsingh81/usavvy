@@ -43,6 +43,13 @@
       "when": 1785970128106,
       "tag": "0005_polite_odin",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1786003624959,
+      "tag": "0006_groovy_bishop",
+      "breakpoints": true
     }
   ]
 }

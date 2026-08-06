@@ -36,6 +36,20 @@
       "when": 1785993925893,
       "tag": "0004_chubby_justin_hammer",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1786004026718,
+      "tag": "0005_striped_stranger",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1786009446257,
+      "tag": "0006_damp_killer_shrike",
+      "breakpoints": true
     }
   ]
 }

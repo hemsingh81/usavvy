@@ -6,6 +6,7 @@ import {
   catalogSearchParamsSchema,
   createConceptInputSchema,
   createCourseInputSchema,
+  createCustomCourseInputSchema,
   createModuleInputSchema,
   createTopicInputSchema,
   saveCourseCustomizationInputSchema,
@@ -17,6 +18,7 @@ import {
   createConcept,
   createCourse,
   createCourseVersion,
+  createCustomCourseFromOutline,
   createModule,
   createTopic,
   getCourseCustomization,
@@ -72,6 +74,17 @@ export function registerCoursesRoutes(app: FastifyInstance, deps: CoursesRouteDe
     const { role } = requireTrustedUser(request);
     const body = parseOrThrow(createCourseInputSchema, request.body);
     reply.send(await createCourse(deps.db, role, body));
+  });
+
+  // Story 2.13 (FR-C-10): the learner's own resource (their confirmed custom-course
+  // outline) — no RBAC gate, matching saveCourseCustomization/startCourse's identical
+  // auth-only precedent, not a courseHierarchy content-ops action. Internal-only: called
+  // by gateway's outline-confirmation orchestration, never directly by apps/web.
+  app.post("/courses/custom", async (request, reply) => {
+    const { userId } = requireTrustedUser(request);
+    const body = parseOrThrow(createCustomCourseInputSchema, request.body);
+    const courseId = await createCustomCourseFromOutline(deps.db, userId, body.title, body.topics);
+    reply.send({ courseId });
   });
 
   app.post("/courses/:id/modules", async (request, reply) => {
@@ -133,18 +146,18 @@ export function registerCoursesRoutes(app: FastifyInstance, deps: CoursesRouteDe
 
   // Story 2.5: auth-only, matching GET/PUT .../customization's identical precedent.
   app.get("/courses/:id/placement-check", async (request, reply) => {
-    requireTrustedUser(request);
+    const { userId } = requireTrustedUser(request);
     const { id } = parseOrThrow(idParamsSchema, request.params);
-    reply.send(await getPlacementCheckQuestions(deps.db, id));
+    reply.send(await getPlacementCheckQuestions(deps.db, id, userId));
   });
 
   // Stateless — no persistence (AC #2's "review before confirming"; the caller applies
   // this via PUT .../customization instead).
   app.post("/courses/:id/placement-check/score", async (request, reply) => {
-    requireTrustedUser(request);
+    const { userId } = requireTrustedUser(request);
     const { id } = parseOrThrow(idParamsSchema, request.params);
     const body = parseOrThrow(scorePlacementCheckInputSchema, request.body);
-    reply.send(await scorePlacementCheck(deps.db, id, body.answers));
+    reply.send(await scorePlacementCheck(deps.db, id, body.answers, userId));
   });
 
   // Story 2.6: "publishing a new version" — same RBAC as createCourse (a whole new courses

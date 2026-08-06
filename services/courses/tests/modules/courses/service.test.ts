@@ -5,7 +5,15 @@ import { can } from "@usavvy/config";
 import { createDb, type Db } from "../../../src/db/client.js";
 import { concepts, conceptPrerequisites, courses, modules, topics } from "../../../src/db/schema.js";
 import { loadCoursesConfig } from "../../../src/config.js";
-import { archiveModule, createConcept, createCourse, createModule, createTopic, getCourse } from "../../../src/modules/courses/service.js";
+import {
+  archiveModule,
+  createConcept,
+  createCourse,
+  createCustomCourseFromOutline,
+  createModule,
+  createTopic,
+  getCourse,
+} from "../../../src/modules/courses/service.js";
 
 // Review finding (Blind Hunter): every write function checked can(role, "create", ...)
 // regardless of what it actually does — archiveModule is semantically a delete but never
@@ -423,5 +431,47 @@ describe("getCourse", () => {
   it("is available to any role (read is not RBAC-gated)", async () => {
     const course = await seedCourse();
     await expect(getCourse(db, course.id)).resolves.toMatchObject({ id: course.id });
+  });
+
+  it("a null-ownerId (catalog) course's behavior is unaffected by the callerUserId parameter — fetchable by anyone regardless of what's passed (Story 2.13, review-additive)", async () => {
+    const course = await seedCourse();
+    await expect(getCourse(db, course.id, "some-random-user")).resolves.toMatchObject({ id: course.id });
+    await expect(getCourse(db, course.id, undefined)).resolves.toMatchObject({ id: course.id });
+  });
+
+  it("a privately-owned custom course is fetchable by its owner and 404s for anyone else (Story 2.13, AC #2)", async () => {
+    const courseId = await createCustomCourseFromOutline(db, "owner-1", "My Notes", [{ title: "Topic A", concepts: [{ title: "Concept A" }] }]);
+    createdCourseIds.push(courseId);
+
+    await expect(getCourse(db, courseId, "owner-1")).resolves.toMatchObject({ id: courseId, title: "My Notes" });
+    await expect(getCourse(db, courseId, "someone-else")).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(getCourse(db, courseId, undefined)).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+});
+
+describe("createCustomCourseFromOutline (Story 2.13, AC #1, #2, #3, #4)", () => {
+  it("creates a draft, owned course with one default Module nesting every confirmed Topic/Concept in order", async () => {
+    const courseId = await createCustomCourseFromOutline(db, "owner-2", "Chapter Notes", [
+      { title: "Chapter One", concepts: [{ title: "Intro" }, { title: "Details" }] },
+      { title: "Chapter Two", concepts: [{ title: "Summary" }] },
+    ]);
+    createdCourseIds.push(courseId);
+
+    const [row] = await db.select().from(courses).where(eq(courses.id, courseId));
+    expect(row).toMatchObject({ ownerId: "owner-2", title: "Chapter Notes", status: "draft" });
+
+    const result = await getCourse(db, courseId, "owner-2");
+    expect(result.modules).toHaveLength(1);
+    expect(result.modules[0]?.topics.map((t) => t.title)).toEqual(["Chapter One", "Chapter Two"]);
+    expect(result.modules[0]?.topics[0]?.concepts.map((c) => c.title)).toEqual(["Intro", "Details"]);
+    expect(result.modules[0]?.topics[1]?.concepts.map((c) => c.title)).toEqual(["Summary"]);
+  });
+
+  it("is reachable with a plain student role — proving no RBAC gate blocks it (review-required check)", async () => {
+    // createCustomCourseFromOutline takes no `role` parameter at all — this test exists
+    // to document that fact explicitly, matching the story's own CRITICAL SCOPE NOTE.
+    const courseId = await createCustomCourseFromOutline(db, "student-owner", "Student's course", [{ title: "T", concepts: [{ title: "C" }] }]);
+    createdCourseIds.push(courseId);
+    await expect(getCourse(db, courseId, "student-owner")).resolves.toMatchObject({ title: "Student's course" });
   });
 });

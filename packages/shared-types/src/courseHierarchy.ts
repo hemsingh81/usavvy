@@ -139,3 +139,36 @@ export const createConceptInputSchema = z.object({
 });
 
 export type CreateConceptInput = z.infer<typeof createConceptInputSchema>;
+
+// Story 2.13 (FR-C-10). The nested tree `gateway`'s outline-confirmation orchestration
+// sends to `courses`' internal-only `POST /courses/custom` — one call materializes an
+// entire learner-confirmed outline (course + one default module + every topic/concept)
+// rather than the multi-call shape createCourseInputSchema/createModuleInputSchema/etc.
+// use for catalog-content authoring, since the caller here already has the whole tree.
+export const createCustomCourseConceptInputSchema = z.object({
+  title: z.string().min(1),
+  priority: z.boolean(),
+  sourcePageRangeStart: z.number().int().nullable(),
+  sourcePageRangeEnd: z.number().int().nullable(),
+});
+
+export type CreateCustomCourseConceptInput = z.infer<typeof createCustomCourseConceptInputSchema>;
+
+export const createCustomCourseTopicInputSchema = z.object({
+  title: z.string().min(1),
+  priority: z.boolean(),
+  concepts: z.array(createCustomCourseConceptInputSchema).min(1),
+});
+
+export type CreateCustomCourseTopicInput = z.infer<typeof createCustomCourseTopicInputSchema>;
+
+export const createCustomCourseInputSchema = z.object({
+  title: z.string().min(1),
+  topics: z.array(createCustomCourseTopicInputSchema).min(1),
+});
+
+export type CreateCustomCourseInput = z.infer<typeof createCustomCourseInputSchema>;
+
+export const createCustomCourseResponseSchema = z.object({ courseId: z.string() });
+
+export type CreateCustomCourseResponse = z.infer<typeof createCustomCourseResponseSchema>;

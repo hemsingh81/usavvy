@@ -8,6 +8,7 @@ import {
   archiveModule,
   createCourse,
   createCourseVersion,
+  createCustomCourseFromOutline,
   createModule,
   createTopic,
   resolveCourseForLearner,
@@ -95,6 +96,13 @@ describe("createCourseVersion", () => {
 });
 
 describe("startCourse", () => {
+  it("404s for a privately-owned custom course when the caller isn't its owner (Story 2.13, AC #2)", async () => {
+    const courseId = await createCustomCourseFromOutline(db, "owner-1", "My Notes", [{ title: "Topic A", concepts: [{ title: "Concept A" }] }]);
+    createdCourseIds.push(courseId);
+
+    await expect(startCourse(db, "someone-else", courseId)).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
   it("pins the exact requested version on first start", async () => {
     const course = await seedCourse();
 

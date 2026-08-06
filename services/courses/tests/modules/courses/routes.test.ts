@@ -407,3 +407,59 @@ describe("Story 2.6: versioning, pinning, and GET /courses/:id resolution", () =
     await app.close();
   });
 });
+
+describe("POST /courses/custom (Story 2.13, AC #1, #2, #3, #4)", () => {
+  const studentHeaders = { ...internalHeaders, "x-user-id": "student-1", "x-user-role": "student" };
+  const VALID_PAYLOAD = {
+    title: "My uploaded notes",
+    topics: [{ title: "Chapter One", priority: false, concepts: [{ title: "Intro", priority: false, sourcePageRangeStart: 1, sourcePageRangeEnd: 2 }] }],
+  };
+
+  it("requires the internal secret (401 without it)", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+
+    const response = await app.inject({ method: "POST", url: "/courses/custom", payload: VALID_PAYLOAD });
+
+    expect(response.statusCode).toBe(401);
+    await app.close();
+  });
+
+  it("succeeds for a plain student — no RBAC gate, unlike POST /courses (AC #2)", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+
+    const response = await app.inject({ method: "POST", url: "/courses/custom", headers: studentHeaders, payload: VALID_PAYLOAD });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json() as { courseId: string };
+    createdCourseIds.push(body.courseId);
+    expect(body.courseId).toBeTruthy();
+    await app.close();
+  });
+
+  it("the created course is only fetchable by the student who created it", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+    const createResponse = await app.inject({ method: "POST", url: "/courses/custom", headers: studentHeaders, payload: VALID_PAYLOAD });
+    const { courseId } = createResponse.json() as { courseId: string };
+    createdCourseIds.push(courseId);
+
+    const ownerResponse = await app.inject({ method: "GET", url: `/courses/${courseId}`, headers: studentHeaders });
+    const otherResponse = await app.inject({
+      method: "GET",
+      url: `/courses/${courseId}`,
+      headers: { ...internalHeaders, "x-user-id": "student-2", "x-user-role": "student" },
+    });
+
+    expect(ownerResponse.statusCode).toBe(200);
+    expect(otherResponse.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it("rejects a payload with zero topics", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+
+    const response = await app.inject({ method: "POST", url: "/courses/custom", headers: studentHeaders, payload: { title: "x", topics: [] } });
+
+    expect(response.statusCode).toBe(400);
+    await app.close();
+  });
+});

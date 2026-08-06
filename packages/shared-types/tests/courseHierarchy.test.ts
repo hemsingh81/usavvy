@@ -5,6 +5,7 @@ import {
   courseResponseSchema,
   createConceptInputSchema,
   createCourseInputSchema,
+  createCustomCourseInputSchema,
   createModuleInputSchema,
   createTopicInputSchema,
   difficultyTierSchema,
@@ -184,5 +185,39 @@ describe("create*InputSchema", () => {
         prerequisiteConceptIds: ["c0"],
       }),
     ).not.toThrow();
+  });
+});
+
+describe("createCustomCourseInputSchema (Story 2.13)", () => {
+  const VALID_INPUT = {
+    title: "My uploaded notes",
+    topics: [
+      {
+        title: "Section One",
+        priority: false,
+        concepts: [{ title: "Section One", priority: false, sourcePageRangeStart: 1, sourcePageRangeEnd: 2 }],
+      },
+    ],
+  };
+
+  it("accepts a fully-populated outline tree", () => {
+    expect(() => createCustomCourseInputSchema.parse(VALID_INPUT)).not.toThrow();
+  });
+
+  it("accepts null source page ranges (DOCX/TXT/MD-shaped input)", () => {
+    expect(() =>
+      createCustomCourseInputSchema.parse({
+        ...VALID_INPUT,
+        topics: [{ ...VALID_INPUT.topics[0], concepts: [{ ...VALID_INPUT.topics[0]?.concepts[0], sourcePageRangeStart: null, sourcePageRangeEnd: null }] }],
+      }),
+    ).not.toThrow();
+  });
+
+  it("rejects zero topics", () => {
+    expect(() => createCustomCourseInputSchema.parse({ ...VALID_INPUT, topics: [] })).toThrow();
+  });
+
+  it("rejects a topic with zero concepts", () => {
+    expect(() => createCustomCourseInputSchema.parse({ ...VALID_INPUT, topics: [{ title: "Empty", priority: false, concepts: [] }] })).toThrow();
   });
 });

@@ -8,6 +8,7 @@ import {
   archiveModule,
   createConcept,
   createCourse,
+  createCustomCourseFromOutline,
   createModule,
   createTopic,
   getPlacementCheckQuestions,
@@ -125,6 +126,14 @@ describe("getPlacementCheckQuestions", () => {
 
     expect(questions).toHaveLength(8);
   });
+
+  it("404s for a privately-owned custom course when the caller isn't its owner (Story 2.13, AC #2)", async () => {
+    const courseId = await createCustomCourseFromOutline(db, "owner-1", "My Notes", [{ title: "Topic A", concepts: [{ title: "Concept A" }] }]);
+    createdCourseIds.push(courseId);
+
+    await expect(getPlacementCheckQuestions(db, courseId, "someone-else")).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(getPlacementCheckQuestions(db, courseId, "owner-1")).resolves.toEqual([]);
+  });
 });
 
 describe("scorePlacementCheck", () => {
@@ -209,5 +218,13 @@ describe("scorePlacementCheck", () => {
     // over 1 unique topic, not 2 raw answers padding the denominator.
     expect(proposal.proposedStartingDifficultyTier).toBe("beginner");
     expect(proposal.proposedDeselectedTopicIds).toEqual([]);
+  });
+
+  it("404s for a privately-owned custom course when the caller isn't its owner (Story 2.13, AC #2)", async () => {
+    const courseId = await createCustomCourseFromOutline(db, "owner-1", "My Notes", [{ title: "Topic A", concepts: [{ title: "Concept A" }] }]);
+    createdCourseIds.push(courseId);
+
+    await expect(scorePlacementCheck(db, courseId, [], "someone-else")).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(scorePlacementCheck(db, courseId, [], "owner-1")).resolves.toMatchObject({ proposedDeselectedTopicIds: [] });
   });
 });

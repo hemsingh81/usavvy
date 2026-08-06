@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { createDb, type Db } from "../../../src/db/client.js";
 import { concepts, conceptPrerequisites, courses, modules, topics } from "../../../src/db/schema.js";
 import { loadCoursesConfig } from "../../../src/config.js";
-import { createConcept, createCourse, createModule, createTopic, searchCourses } from "../../../src/modules/courses/service.js";
+import { createConcept, createCourse, createCustomCourseFromOutline, createModule, createTopic, searchCourses } from "../../../src/modules/courses/service.js";
 
 const config = loadCoursesConfig(process.env);
 const sql = postgres(config.databaseUrl);
@@ -55,6 +55,18 @@ describe("searchCourses", () => {
 
     expect(result.map((c) => c.title)).toContain("Published Course");
     expect(result.map((c) => c.title)).not.toContain("Draft Course");
+  });
+
+  it("never returns a privately-owned custom course, even if its status were somehow 'published' (Story 2.13, defense-in-depth)", async () => {
+    const courseId = await createCustomCourseFromOutline(db, "owner-catalog-test", "Owner's Published-By-Accident Course", [
+      { title: "T", concepts: [{ title: "C" }] },
+    ]);
+    createdCourseIds.push(courseId);
+    await db.update(courses).set({ status: "published" }).where(eq(courses.id, courseId));
+
+    const result = await searchCourses(db, {});
+
+    expect(result.map((c) => c.title)).not.toContain("Owner's Published-By-Accident Course");
   });
 
   it("narrows by subject alone", async () => {

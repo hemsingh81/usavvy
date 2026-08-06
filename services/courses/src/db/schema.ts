@@ -10,6 +10,12 @@ export const courses = pgTable("courses", {
   id: uuid("id").primaryKey().default(uuidv7Default),
   title: text("title").notNull(),
   description: text("description"),
+  // Story 2.13 (FR-C-10): nullable, opaque cross-service reference (services/core owns the
+  // real User row) — same convention as courseCustomizations.userId. Null means "shared
+  // catalog content" (existing behavior, completely unchanged); set means "a learner's own
+  // private custom course" — see getCourse's new ownership check and searchCourses' new
+  // ownerId IS NULL condition, both added by this story.
+  ownerId: text("owner_id"),
   // Story 2.2 (FR-C-2): catalog-facet fields, added incrementally to this same table —
   // no AC in Story 2.1 named them, the same "don't pre-build for a story that hasn't
   // started" convention this table's own Concept-level fields already follow.

@@ -217,3 +217,100 @@ describe("DELETE /uploads/:id", () => {
     await app.close();
   });
 });
+
+describe("GET /uploads/outline (Story 2.13)", () => {
+  it("returns 401 with no token and never calls ingestion", async () => {
+    const forwardToIngestion = vi.fn();
+    const app = buildApp(createTestAppDeps({ forwardToIngestion }));
+
+    const response = await app.inject({ method: "GET", url: "/uploads/outline?customCourseId=019fd450-b7cb-7a32-b021-42788045c71f" });
+
+    expect(response.statusCode).toBe(401);
+    expect(forwardToIngestion).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("forwards the full url (including query string) and trusted headers", async () => {
+    const forwardToIngestion = vi.fn().mockResolvedValue({ status: 200, body: [] });
+    const app = buildApp(createTestAppDeps({ forwardToIngestion }));
+    await app.ready();
+    const token = app.jwt.sign({ sub: "u1", role: "student", typ: "access" });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/uploads/outline?customCourseId=019fd450-b7cb-7a32-b021-42788045c71f",
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(forwardToIngestion).toHaveBeenCalledWith("GET", "/uploads/outline?customCourseId=019fd450-b7cb-7a32-b021-42788045c71f", {
+      headers: { "x-user-id": "u1", "x-user-role": "student" },
+    });
+    await app.close();
+  });
+});
+
+describe("PATCH /uploads/outline/topics/:id (Story 2.13)", () => {
+  it("forwards the body and trusted headers", async () => {
+    const forwardToIngestion = vi.fn().mockResolvedValue({ status: 204, body: undefined });
+    const app = buildApp(createTestAppDeps({ forwardToIngestion }));
+    await app.ready();
+    const token = app.jwt.sign({ sub: "u1", role: "student", typ: "access" });
+
+    const response = await app.inject({
+      method: "PATCH",
+      url: "/uploads/outline/topics/019fd450-b7cb-7a32-b021-42788045c71f",
+      headers: { authorization: `Bearer ${token}` },
+      payload: { title: "New Title" },
+    });
+
+    expect(response.statusCode).toBe(204);
+    expect(forwardToIngestion).toHaveBeenCalledWith("PATCH", "/uploads/outline/topics/019fd450-b7cb-7a32-b021-42788045c71f", {
+      body: { title: "New Title" },
+      headers: { "x-user-id": "u1", "x-user-role": "student" },
+    });
+    await app.close();
+  });
+
+  it("rejects an invalid id before ever calling ingestion", async () => {
+    const forwardToIngestion = vi.fn();
+    const app = buildApp(createTestAppDeps({ forwardToIngestion }));
+    await app.ready();
+    const token = app.jwt.sign({ sub: "u1", role: "student", typ: "access" });
+
+    const response = await app.inject({
+      method: "PATCH",
+      url: "/uploads/outline/topics/not-a-uuid",
+      headers: { authorization: `Bearer ${token}` },
+      payload: { title: "x" },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(forwardToIngestion).not.toHaveBeenCalled();
+    await app.close();
+  });
+});
+
+describe("PUT /uploads/outline/topics/reorder (Story 2.13)", () => {
+  it("forwards the body and trusted headers", async () => {
+    const forwardToIngestion = vi.fn().mockResolvedValue({ status: 204, body: undefined });
+    const app = buildApp(createTestAppDeps({ forwardToIngestion }));
+    await app.ready();
+    const token = app.jwt.sign({ sub: "u1", role: "student", typ: "access" });
+
+    const payload = { customCourseId: "019fd450-b7cb-7a32-b021-42788045c71f", orderedTopicIds: ["019fd450-b7cb-7a32-b021-42788045c720"] };
+    const response = await app.inject({
+      method: "PUT",
+      url: "/uploads/outline/topics/reorder",
+      headers: { authorization: `Bearer ${token}` },
+      payload,
+    });
+
+    expect(response.statusCode).toBe(204);
+    expect(forwardToIngestion).toHaveBeenCalledWith("PUT", "/uploads/outline/topics/reorder", {
+      body: payload,
+      headers: { "x-user-id": "u1", "x-user-role": "student" },
+    });
+    await app.close();
+  });
+});

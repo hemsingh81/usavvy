@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Navigate } from "react-router-dom";
+import { Link, Navigate } from "react-router-dom";
 import type { UploadedDocumentResponse } from "@usavvy/shared-types";
 import { ApiError } from "../../shared/apiClient.js";
 import { getWebConfig } from "../../app/config.js";
@@ -315,6 +315,18 @@ export function UploadPage() {
               );
             })}
           </ul>
+          {/* Story 2.13 (FR-C-10): once every listed document is terminal and at least
+              one reached "outline ready", the outline review screen has something to
+              show — reached from here rather than a persistent nav entry (no AC calls
+              for one; this is the one place a learner is already watching this specific
+              custom course's progress). */}
+          {customCourseId &&
+          documents.every((document) => describeIngestionStatus(document.status, document.failureReason).isTerminal) &&
+          documents.some((document) => document.status === "outline ready") ? (
+            <p>
+              <Link to={`/upload-content/${customCourseId}/outline`}>Review outline</Link>
+            </p>
+          ) : null}
         </section>
       ) : null}
     </main>

@@ -8,6 +8,7 @@ import {
   archiveModule,
   createConcept,
   createCourse,
+  createCustomCourseFromOutline,
   createModule,
   createTopic,
   getCourseCustomization,
@@ -226,6 +227,13 @@ describe("saveCourseCustomization", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]?.deselectedTopicIds).toEqual([]);
   });
+
+  it("404s for a privately-owned custom course when the caller isn't its owner (Story 2.13, AC #2)", async () => {
+    const courseId = await createCustomCourseFromOutline(db, "owner-1", "My Notes", [{ title: "Topic A", concepts: [{ title: "Concept A" }] }]);
+    createdCourseIds.push(courseId);
+
+    await expect(saveCourseCustomization(db, "someone-else", courseId, { depth: "overview" })).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
 });
 
 describe("getCourseCustomization", () => {
@@ -283,5 +291,12 @@ describe("getCourseCustomization", () => {
     const result = await getCourseCustomization(db, "user2", course.id);
 
     expect(result).toBeNull();
+  });
+
+  it("404s for a privately-owned custom course when the caller isn't its owner (Story 2.13, AC #2)", async () => {
+    const courseId = await createCustomCourseFromOutline(db, "owner-1", "My Notes", [{ title: "Topic A", concepts: [{ title: "Concept A" }] }]);
+    createdCourseIds.push(courseId);
+
+    await expect(getCourseCustomization(db, "someone-else", courseId)).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 });

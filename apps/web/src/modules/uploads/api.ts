@@ -1,4 +1,12 @@
-import { listUploadsQuerySchema, uploadedDocumentResponseSchema, type UploadedDocumentResponse } from "@usavvy/shared-types";
+import {
+  createCustomCourseResponseSchema,
+  listUploadsQuerySchema,
+  proposedTopicResponseSchema,
+  uploadedDocumentResponseSchema,
+  type CreateCustomCourseResponse,
+  type ProposedTopicResponse,
+  type UploadedDocumentResponse,
+} from "@usavvy/shared-types";
 import { apiRequest, ApiError, throwForErrorResponse } from "../../shared/apiClient.js";
 
 const REQUEST_TIMEOUT_MS = 60_000;
@@ -109,4 +117,113 @@ export async function deleteUpload(apiUrl: string, accessToken: string, id: stri
   if (!response.ok) {
     await throwForErrorResponse(response);
   }
+}
+
+/** Story 2.13 (FR-C-10), AC #1. */
+export async function listOutline(apiUrl: string, accessToken: string, customCourseId: string): Promise<ProposedTopicResponse[]> {
+  const query = new URLSearchParams({ customCourseId });
+  let response: Response;
+  try {
+    response = await fetch(`${apiUrl}/uploads/outline?${query.toString()}`, {
+      headers: { authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+  } catch {
+    throw new ApiError("NETWORK_ERROR", "unable to reach the server");
+  }
+  if (!response.ok) {
+    return throwForErrorResponse(response);
+  }
+  const json: unknown = await response.json().catch(() => undefined);
+  return proposedTopicResponseSchema.array().parse(json);
+}
+
+async function patchOutlineItem(apiUrl: string, accessToken: string, kind: "topics" | "concepts", id: string, body: { title?: string; priority?: boolean }): Promise<void> {
+  let response: Response;
+  try {
+    response = await fetch(`${apiUrl}/uploads/outline/${kind}/${id}`, {
+      method: "PATCH",
+      headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+  } catch {
+    throw new ApiError("NETWORK_ERROR", "unable to reach the server");
+  }
+  if (!response.ok) {
+    await throwForErrorResponse(response);
+  }
+}
+
+export const renameProposedTopic = (apiUrl: string, accessToken: string, id: string, title: string): Promise<void> =>
+  patchOutlineItem(apiUrl, accessToken, "topics", id, { title });
+
+export const renameProposedConcept = (apiUrl: string, accessToken: string, id: string, title: string): Promise<void> =>
+  patchOutlineItem(apiUrl, accessToken, "concepts", id, { title });
+
+export const setProposedTopicPriority = (apiUrl: string, accessToken: string, id: string, priority: boolean): Promise<void> =>
+  patchOutlineItem(apiUrl, accessToken, "topics", id, { priority });
+
+export const setProposedConceptPriority = (apiUrl: string, accessToken: string, id: string, priority: boolean): Promise<void> =>
+  patchOutlineItem(apiUrl, accessToken, "concepts", id, { priority });
+
+async function deleteOutlineItem(apiUrl: string, accessToken: string, kind: "topics" | "concepts", id: string): Promise<void> {
+  let response: Response;
+  try {
+    response = await fetch(`${apiUrl}/uploads/outline/${kind}/${id}`, {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+  } catch {
+    throw new ApiError("NETWORK_ERROR", "unable to reach the server");
+  }
+  if (!response.ok) {
+    await throwForErrorResponse(response);
+  }
+}
+
+export const deleteProposedTopic = (apiUrl: string, accessToken: string, id: string): Promise<void> => deleteOutlineItem(apiUrl, accessToken, "topics", id);
+
+export const deleteProposedConcept = (apiUrl: string, accessToken: string, id: string): Promise<void> => deleteOutlineItem(apiUrl, accessToken, "concepts", id);
+
+/** Story 2.13 (FR-C-10), AC #1: a bulk "here's the new order" call, not per-item drag-and-drop. */
+export async function reorderProposedTopics(apiUrl: string, accessToken: string, customCourseId: string, orderedTopicIds: string[]): Promise<void> {
+  let response: Response;
+  try {
+    response = await fetch(`${apiUrl}/uploads/outline/topics/reorder`, {
+      method: "PUT",
+      headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ customCourseId, orderedTopicIds }),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+  } catch {
+    throw new ApiError("NETWORK_ERROR", "unable to reach the server");
+  }
+  if (!response.ok) {
+    await throwForErrorResponse(response);
+  }
+}
+
+/** Story 2.13 (FR-C-10), AC #4. */
+export async function mergeProposedConcepts(apiUrl: string, accessToken: string, keepConceptId: string, mergeConceptId: string): Promise<void> {
+  let response: Response;
+  try {
+    response = await fetch(`${apiUrl}/uploads/outline/concepts/merge`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ keepConceptId, mergeConceptId }),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+  } catch {
+    throw new ApiError("NETWORK_ERROR", "unable to reach the server");
+  }
+  if (!response.ok) {
+    await throwForErrorResponse(response);
+  }
+}
+
+/** Story 2.13 (FR-C-10), AC #2/#3. Calls gateway's outline-confirmation orchestration route. */
+export function confirmOutline(apiUrl: string, accessToken: string, customCourseId: string): Promise<CreateCustomCourseResponse> {
+  return apiRequest(apiUrl, `/uploads/outline/${customCourseId}/confirm`, createCustomCourseResponseSchema, { method: "POST", accessToken });
 }
