@@ -164,6 +164,62 @@ describe("POST /learning-sessions/:id/replay", () => {
   });
 });
 
+describe("POST /learning-sessions/:id/back", () => {
+  it("returns 401 with no token and never calls board-orchestration", async () => {
+    const forwardToBoardOrchestration = vi.fn();
+    const app = buildApp(createTestAppDeps({ forwardToBoardOrchestration }));
+
+    const response = await app.inject({ method: "POST", url: `/learning-sessions/${VALID_ID}/back` });
+
+    expect(response.statusCode).toBe(401);
+    expect(forwardToBoardOrchestration).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("forwards trusted headers with no body", async () => {
+    const forwardToBoardOrchestration = vi.fn().mockResolvedValue({ status: 200, body: { id: VALID_ID, streamRef: "stream-1" } });
+    const app = buildApp(createTestAppDeps({ forwardToBoardOrchestration }));
+    await app.ready();
+    const token = app.jwt.sign({ sub: "u1", role: "student", typ: "access" });
+
+    const response = await app.inject({ method: "POST", url: `/learning-sessions/${VALID_ID}/back`, headers: { authorization: `Bearer ${token}` } });
+
+    expect(response.statusCode).toBe(200);
+    expect(forwardToBoardOrchestration).toHaveBeenCalledWith("POST", `/learning-sessions/${VALID_ID}/back`, {
+      headers: { "x-user-id": "u1", "x-user-role": "student" },
+    });
+    await app.close();
+  });
+});
+
+describe("POST /learning-sessions/:id/forward", () => {
+  it("returns 401 with no token and never calls board-orchestration", async () => {
+    const forwardToBoardOrchestration = vi.fn();
+    const app = buildApp(createTestAppDeps({ forwardToBoardOrchestration }));
+
+    const response = await app.inject({ method: "POST", url: `/learning-sessions/${VALID_ID}/forward` });
+
+    expect(response.statusCode).toBe(401);
+    expect(forwardToBoardOrchestration).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("forwards trusted headers with no body", async () => {
+    const forwardToBoardOrchestration = vi.fn().mockResolvedValue({ status: 200, body: { id: VALID_ID, streamRef: "stream-1" } });
+    const app = buildApp(createTestAppDeps({ forwardToBoardOrchestration }));
+    await app.ready();
+    const token = app.jwt.sign({ sub: "u1", role: "student", typ: "access" });
+
+    const response = await app.inject({ method: "POST", url: `/learning-sessions/${VALID_ID}/forward`, headers: { authorization: `Bearer ${token}` } });
+
+    expect(response.statusCode).toBe(200);
+    expect(forwardToBoardOrchestration).toHaveBeenCalledWith("POST", `/learning-sessions/${VALID_ID}/forward`, {
+      headers: { "x-user-id": "u1", "x-user-role": "student" },
+    });
+    await app.close();
+  });
+});
+
 describe("POST /learning-sessions/:id/beats/:beatId/reached", () => {
   it("interpolates both id params and forwards trusted headers", async () => {
     const forwardToBoardOrchestration = vi.fn().mockResolvedValue({ status: 200, body: { id: VALID_ID } });

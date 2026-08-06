@@ -335,6 +335,74 @@ export async function replayCurrentBeat(db: Db, userId: string, sessionId: strin
   return { ...response, streamRef };
 }
 
+/**
+ * Story 3.3 (FR-B-3), AC #1-#4. Navigates among Beats that already exist in the
+ * session's fixed, caller-supplied array — never generates a new one (see the story's
+ * CRITICAL SCOPE NOTE: no `GenerationPort` binding exists yet). Semantically "jump, then
+ * Replay-from-start of the target Beat" — reuses `replayCurrentBeat`'s exact
+ * write-ordering discipline and defensive `status <> "ended"` write. Unlike
+ * `recordBeatReached`, stepping NEVER auto-ends the session even when Forward lands on
+ * the last Beat — that's browsing, not "this Beat just finished."
+ */
+export async function stepBeat(
+  db: Db,
+  userId: string,
+  sessionId: string,
+  direction: "back" | "forward",
+  voicePort: VoicePort,
+): Promise<LearningSessionResponse & { streamRef: string }> {
+  const session = await loadSessionOrThrow(db, userId, sessionId);
+  if (session.status === "ended") {
+    throw new AppError("VALIDATION_ERROR", "this learning session has already ended and cannot be navigated", 400);
+  }
+
+  const sessionBeats = await db.select({ id: beats.id }).from(beats).where(eq(beats.sessionId, sessionId)).orderBy(asc(beats.position), asc(beats.id));
+  const currentIndex = sessionBeats.findIndex((b) => b.id === session.currentBeatId);
+  if (currentIndex === -1) {
+    throw new AppError("INTERNAL_ERROR", "learning session's current Beat is missing from its own Beat list", 500);
+  }
+
+  const targetIndex = direction === "back" ? currentIndex - 1 : currentIndex + 1;
+  if (direction === "back" && targetIndex < 0) {
+    throw new AppError("VALIDATION_ERROR", "already at the first Beat", 400);
+  }
+  const target = sessionBeats[targetIndex];
+  if (!target) {
+    // AC #4's boundary — no real Beat-generation-on-demand exists yet (CRITICAL SCOPE
+    // NOTE); this is the honest "nothing further exists yet" signal, not a crash or a
+    // silent no-op.
+    throw new AppError("NO_FURTHER_BEATS", "no additional Beats are available yet for this session", 404);
+  }
+
+  let streamRef: string;
+  try {
+    const stream = await voicePort.reestablishStream(target.id, 0);
+    streamRef = stream.streamRef;
+  } catch (error) {
+    throw new AppError("VOICE_UNAVAILABLE", "unable to reestablish the narration audio stream — try again", 503, {
+      reason: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  const [updated] = await db
+    .update(learningSessions)
+    .set({ status: "active", currentBeatId: target.id, narrationOffsetMs: 0, boardRenderState: null, updatedAt: new Date() })
+    .where(and(eq(learningSessions.id, sessionId), ne(learningSessions.status, "ended")))
+    .returning();
+  if (!updated) {
+    throw new AppError("SESSION_STATE_CHANGED", "this learning session's status changed while navigating — try again", 409);
+  }
+
+  await db.insert(sessionEvents).values({
+    sessionId,
+    type: direction === "back" ? "stepped_back" : "stepped_forward",
+    payload: { fromBeatId: session.currentBeatId, toBeatId: target.id },
+  });
+
+  const response = await toResponse(db, updated);
+  return { ...response, streamRef };
+}
+
 async function endLearningSessionInternal(db: Db, session: typeof learningSessions.$inferSelect, pubSubPort: PubSubPort): Promise<typeof learningSessions.$inferSelect> {
   if (session.status === "ended") {
     return session;

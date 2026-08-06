@@ -94,6 +94,19 @@ describe("learning-sessions HTTP lifecycle: create -> pause -> resume -> beat re
     expect(resumed.status).toBe("active");
     expect(typeof resumed.streamRef).toBe("string");
 
+    // Story 3.3: Forward moves to the next Beat, Back moves back — both reset
+    // narrationOffsetMs to 0 (jump-then-replay-from-start semantics).
+    const forwardResponse = await app.inject({ method: "POST", url: `/learning-sessions/${created.id}/forward`, headers });
+    expect(forwardResponse.statusCode).toBe(200);
+    expect(forwardResponse.json()).toMatchObject({ status: "active", currentBeatId: secondBeatId, narrationOffsetMs: 0 });
+
+    const backResponse = await app.inject({ method: "POST", url: `/learning-sessions/${created.id}/back`, headers });
+    expect(backResponse.statusCode).toBe(200);
+    expect(backResponse.json()).toMatchObject({ status: "active", currentBeatId: firstBeatId, narrationOffsetMs: 0 });
+
+    const backAtFirstBeatResponse = await app.inject({ method: "POST", url: `/learning-sessions/${created.id}/back`, headers });
+    expect(backAtFirstBeatResponse.statusCode).toBe(400);
+
     const reachedResponse = await app.inject({ method: "POST", url: `/learning-sessions/${created.id}/beats/${secondBeatId}/reached`, headers });
     expect(reachedResponse.statusCode).toBe(200);
     // secondBeatId is the last Beat — reaching it auto-ends the session (AC #5).

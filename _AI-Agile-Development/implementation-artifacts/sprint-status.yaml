@@ -84,7 +84,7 @@ development_status:
   epic-3: in-progress
   3-1-pause-and-resume-the-board: done
   3-2-replay-current-beat: done
-  3-3-step-back-and-forward-between-beats: backlog
+  3-3-step-back-and-forward-between-beats: done
   3-4-board-zoom-pan-and-infinite-scroll-with-beat-gutter-markers: backlog
   3-5-progressive-text-writing-synced-to-narration: backlog
   3-6-progressive-math-notation-rendering: backlog

@@ -7,6 +7,8 @@ import {
   recordBeatReached,
   replayCurrentBeat,
   resumeLearningSession,
+  stepBack,
+  stepForward,
 } from "../../../src/modules/board/api.js";
 
 const SESSION = {
@@ -92,6 +94,32 @@ describe("board api", () => {
     const [, callOptions] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(callOptions).not.toHaveProperty("body");
     expect(result).toEqual(replayed);
+  });
+
+  it("stepBack posts with no body to the back endpoint", async () => {
+    const stepped = { ...SESSION, currentBeatId: "beat-0", streamRef: "stream-3" };
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve(stepped) } as unknown as Response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await stepBack("http://localhost:3000", "a-token", "session-1");
+
+    expect(fetchMock).toHaveBeenCalledWith("http://localhost:3000/learning-sessions/session-1/back", expect.objectContaining({ method: "POST" }));
+    const [, callOptions] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(callOptions).not.toHaveProperty("body");
+    expect(result).toEqual(stepped);
+  });
+
+  it("stepForward posts with no body to the forward endpoint", async () => {
+    const stepped = { ...SESSION, currentBeatId: "beat-2", streamRef: "stream-4" };
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve(stepped) } as unknown as Response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await stepForward("http://localhost:3000", "a-token", "session-1");
+
+    expect(fetchMock).toHaveBeenCalledWith("http://localhost:3000/learning-sessions/session-1/forward", expect.objectContaining({ method: "POST" }));
+    const [, callOptions] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(callOptions).not.toHaveProperty("body");
+    expect(result).toEqual(stepped);
   });
 
   it("recordBeatReached posts to the beat's reached endpoint", async () => {

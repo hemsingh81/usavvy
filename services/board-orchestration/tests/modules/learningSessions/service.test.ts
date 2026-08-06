@@ -14,6 +14,7 @@ import {
   recordBeatReached,
   replayCurrentBeat,
   resumeLearningSession,
+  stepBeat,
   type BeatInput,
 } from "../../../src/modules/learningSessions/service.js";
 import { createMockVoiceAdapter } from "../../../src/modules/voice/index.js";
@@ -339,6 +340,122 @@ describe("replayCurrentBeat", () => {
     const session = await createOrResumeLearningSession(db, OWNER_ID, randomUUID(), SAMPLE_BEATS);
 
     await expect(replayCurrentBeat(db, "someone-else", session.id, voicePort())).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+});
+
+describe("stepBeat", () => {
+  const THREE_BEATS: BeatInput[] = [
+    { narration: "First Beat narration.", boardAction: { kind: "write", text: "First" } },
+    { narration: "Second Beat narration.", boardAction: { kind: "write", text: "Second" } },
+    { narration: "Third Beat narration.", boardAction: { kind: "write", text: "Third" } },
+  ];
+
+  it("back from the second Beat moves to the first, resets narrationOffsetMs/boardRenderState, returns a streamRef, records 'stepped_back' (AC #1)", async () => {
+    const session = await createOrResumeLearningSession(db, OWNER_ID, randomUUID(), THREE_BEATS);
+    const [firstBeatId, secondBeatId] = session.beats.map((b) => b.id);
+    await recordBeatReached(db, OWNER_ID, session.id, secondBeatId as string, pubSubPort().port);
+
+    const stepped = await stepBeat(db, OWNER_ID, session.id, "back", voicePort());
+
+    expect(stepped).toMatchObject({ status: "active", currentBeatId: firstBeatId, narrationOffsetMs: 0, boardRenderState: null });
+    expect(stepped.streamRef).toEqual(expect.stringContaining(firstBeatId as string));
+    const events = await db.select().from(sessionEvents).where(eq(sessionEvents.sessionId, session.id));
+    expect(events.map((e) => e.type)).toEqual(["started", "stepped_back"]);
+  });
+
+  it("rejects back from the first Beat, leaving the session unchanged (AC #3's backend boundary)", async () => {
+    const session = await createOrResumeLearningSession(db, OWNER_ID, randomUUID(), THREE_BEATS);
+    const firstBeatId = session.beats[0]?.id as string;
+
+    await expect(stepBeat(db, OWNER_ID, session.id, "back", voicePort())).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+
+    const [row] = await db.select().from(learningSessions).where(eq(learningSessions.id, session.id));
+    expect(row).toMatchObject({ currentBeatId: firstBeatId, narrationOffsetMs: null });
+  });
+
+  it("forward from the first Beat moves to the second, records 'stepped_forward' (AC #2)", async () => {
+    const session = await createOrResumeLearningSession(db, OWNER_ID, randomUUID(), THREE_BEATS);
+    const secondBeatId = session.beats[1]?.id as string;
+
+    const stepped = await stepBeat(db, OWNER_ID, session.id, "forward", voicePort());
+
+    expect(stepped).toMatchObject({ status: "active", currentBeatId: secondBeatId, narrationOffsetMs: 0, boardRenderState: null });
+    const events = await db.select().from(sessionEvents).where(eq(sessionEvents.sessionId, session.id));
+    expect(events.map((e) => e.type)).toEqual(["started", "stepped_forward"]);
+  });
+
+  it("rejects forward from the LAST Beat with NO_FURTHER_BEATS, and does NOT end the session (AC #4's boundary)", async () => {
+    const session = await createOrResumeLearningSession(db, OWNER_ID, randomUUID(), THREE_BEATS);
+    const lastBeatId = session.beats[2]?.id as string;
+    await recordBeatReached(db, OWNER_ID, session.id, session.beats[1]?.id as string, pubSubPort().port);
+    await stepBeat(db, OWNER_ID, session.id, "forward", voicePort());
+
+    await expect(stepBeat(db, OWNER_ID, session.id, "forward", voicePort())).rejects.toMatchObject({ code: "NO_FURTHER_BEATS", statusCode: 404 });
+
+    const [row] = await db.select().from(learningSessions).where(eq(learningSessions.id, session.id));
+    expect(row).toMatchObject({ status: "active", currentBeatId: lastBeatId });
+  });
+
+  // Distinguishes stepBeat from recordBeatReached: manually navigating to the last Beat
+  // is browsing, not "this Beat just finished" — must NOT auto-end (Story 3.1's AC #5
+  // only fires from recordBeatReached).
+  it("forward onto the last Beat succeeds and does NOT end the session", async () => {
+    const session = await createOrResumeLearningSession(db, OWNER_ID, randomUUID(), THREE_BEATS);
+    const lastBeatId = session.beats[2]?.id as string;
+    await stepBeat(db, OWNER_ID, session.id, "forward", voicePort());
+
+    const stepped = await stepBeat(db, OWNER_ID, session.id, "forward", voicePort());
+
+    expect(stepped).toMatchObject({ status: "active", currentBeatId: lastBeatId });
+  });
+
+  it("on VoicePort failure, throws VOICE_UNAVAILABLE and leaves the persisted state byte-for-byte unchanged", async () => {
+    const session = await createOrResumeLearningSession(db, OWNER_ID, randomUUID(), THREE_BEATS);
+    const firstBeatId = session.beats[0]?.id as string;
+    const voice = voicePort();
+    voice.failNext();
+
+    await expect(stepBeat(db, OWNER_ID, session.id, "forward", voice)).rejects.toMatchObject({ code: "VOICE_UNAVAILABLE", statusCode: 503 });
+
+    const [row] = await db.select().from(learningSessions).where(eq(learningSessions.id, session.id));
+    expect(row).toMatchObject({ status: "active", currentBeatId: firstBeatId, narrationOffsetMs: null });
+    const events = await db.select().from(sessionEvents).where(eq(sessionEvents.sessionId, session.id));
+    expect(events.map((e) => e.type)).toEqual(["started"]);
+  });
+
+  it("rejects stepping (both directions) on an already-ended session, leaving it unchanged", async () => {
+    const session = await createOrResumeLearningSession(db, OWNER_ID, randomUUID(), THREE_BEATS);
+    const { port } = pubSubPort();
+    await endLearningSession(db, OWNER_ID, session.id, port);
+
+    await expect(stepBeat(db, OWNER_ID, session.id, "forward", voicePort())).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+    await expect(stepBeat(db, OWNER_ID, session.id, "back", voicePort())).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+
+    const [row] = await db.select().from(learningSessions).where(eq(learningSessions.id, session.id));
+    expect(row).toMatchObject({ status: "ended" });
+  });
+
+  it("rejects with SESSION_STATE_CHANGED, and does not reverse an end that lands while VoicePort is in flight", async () => {
+    const session = await createOrResumeLearningSession(db, OWNER_ID, randomUUID(), THREE_BEATS);
+    const { port } = pubSubPort();
+    const raceyVoicePort = {
+      async reestablishStream(beatId: string, offset: number) {
+        await endLearningSession(db, OWNER_ID, session.id, port);
+        return { streamRef: `mock-stream-${beatId}-${offset}` };
+      },
+    };
+
+    await expect(stepBeat(db, OWNER_ID, session.id, "forward", raceyVoicePort)).rejects.toMatchObject({ code: "SESSION_STATE_CHANGED", statusCode: 409 });
+
+    const [row] = await db.select().from(learningSessions).where(eq(learningSessions.id, session.id));
+    expect(row).toMatchObject({ status: "ended" });
+    expect(row?.endedAt).not.toBeNull();
+  });
+
+  it("404s for another learner's session", async () => {
+    const session = await createOrResumeLearningSession(db, OWNER_ID, randomUUID(), THREE_BEATS);
+
+    await expect(stepBeat(db, "someone-else", session.id, "forward", voicePort())).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 });
 

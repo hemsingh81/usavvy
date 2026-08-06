@@ -14,6 +14,7 @@ import {
   recordBeatReached,
   replayCurrentBeat,
   resumeLearningSession,
+  stepBeat,
 } from "./service.js";
 
 // Duplicated from courses'/ingestion's own identically-named private helper (AD-9/AD-13
@@ -97,6 +98,18 @@ export function registerLearningSessionsRoutes(app: FastifyInstance, deps: Learn
     const { userId } = requireTrustedUser(request);
     const id = requireValidId((request.params as { id: string }).id);
     return replayCurrentBeat(deps.db, userId, id, deps.voicePort);
+  });
+
+  app.post("/learning-sessions/:id/back", async (request) => {
+    const { userId } = requireTrustedUser(request);
+    const id = requireValidId((request.params as { id: string }).id);
+    return stepBeat(deps.db, userId, id, "back", deps.voicePort);
+  });
+
+  app.post("/learning-sessions/:id/forward", async (request) => {
+    const { userId } = requireTrustedUser(request);
+    const id = requireValidId((request.params as { id: string }).id);
+    return stepBeat(deps.db, userId, id, "forward", deps.voicePort);
   });
 
   app.post("/learning-sessions/:id/beats/:beatId/reached", async (request) => {
