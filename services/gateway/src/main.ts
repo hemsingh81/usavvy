@@ -2,18 +2,23 @@ import { createLogger } from "@usavvy/service-kernel";
 import { loadGatewayConfig } from "./config.js";
 import { createCoreClient } from "./coreClient.js";
 import { createCoursesClient } from "./coursesClient.js";
+import { createIngestionClient } from "./ingestionClient.js";
 import { buildApp } from "./app.js";
 
 const config = loadGatewayConfig(process.env);
 const logger = createLogger("gateway");
 const coreClient = createCoreClient(config.coreServiceUrl, logger, config.internalServiceSecret);
 const coursesClient = createCoursesClient(config.coursesServiceUrl, logger, config.internalServiceSecret);
+const ingestionClient = createIngestionClient(config.ingestionServiceUrl, logger, config.internalServiceSecret);
 
 const app = buildApp({
   fetchCoreHealth: () => coreClient.fetchHealth(),
   forwardToCore: (method, path, options) => coreClient.forward(method, path, options),
   forwardBinaryToCore: (method, path, options) => coreClient.forwardBinary(method, path, options),
   forwardToCourses: (method, path, options) => coursesClient.forward(method, path, options),
+  forwardToIngestion: (method, path, options) => ingestionClient.forward(method, path, options),
+  forwardMultipartToIngestion: (path, contentType, rawBody, headers) =>
+    ingestionClient.forwardMultipart(path, contentType, rawBody, { headers }),
   corsOrigin: config.webOrigin,
   jwtSecret: config.jwtSecret,
   logger,

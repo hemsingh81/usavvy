@@ -10,6 +10,8 @@ export function createTestAppDeps(overrides: Partial<BuildAppDeps> = {}): BuildA
       .fn()
       .mockResolvedValue({ status: 200, isBinary: true, body: Buffer.from(""), contentType: "application/pdf", contentDisposition: undefined }),
     forwardToCourses: vi.fn().mockResolvedValue({ status: 200, body: {} }),
+    forwardToIngestion: vi.fn().mockResolvedValue({ status: 200, body: {} }),
+    forwardMultipartToIngestion: vi.fn().mockResolvedValue({ status: 201, body: {} }),
     corsOrigin: "http://localhost:5173",
     jwtSecret: "test-secret",
     logger: createLogger("test"),

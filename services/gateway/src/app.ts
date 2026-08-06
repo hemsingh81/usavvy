@@ -6,12 +6,17 @@ import type { BinaryProxyOptions, BinaryProxyResult, ProxyOptions, ProxyResult }
 import { registerJwtPlugin } from "./authPlugin.js";
 import { registerAuthProxyRoutes } from "./authProxy.js";
 import { registerCoursesProxyRoutes } from "./coursesProxy.js";
+import { registerIngestionProxyRoutes } from "./ingestionProxy.js";
+
+const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 
 export interface BuildAppDeps {
   fetchCoreHealth: () => Promise<DownstreamHealth>;
   forwardToCore: (method: string, path: string, options?: ProxyOptions) => Promise<ProxyResult>;
   forwardBinaryToCore: (method: string, path: string, options?: BinaryProxyOptions) => Promise<BinaryProxyResult>;
   forwardToCourses: (method: string, path: string, options?: ProxyOptions) => Promise<ProxyResult>;
+  forwardToIngestion: (method: string, path: string, options?: ProxyOptions) => Promise<ProxyResult>;
+  forwardMultipartToIngestion: (path: string, contentType: string, rawBody: Buffer, headers: Record<string, string>) => Promise<ProxyResult>;
   corsOrigin: string;
   jwtSecret: string;
   logger: Logger;
@@ -23,6 +28,13 @@ export function buildApp(deps: BuildAppDeps) {
   void app.register(cors, { origin: deps.corsOrigin });
   registerJwtPlugin(app, deps.jwtSecret);
   registerErrorHandler(app, deps.logger);
+
+  // Story 2.7: gateway never parses multipart itself (see ingestionProxy.ts's own Dev
+  // Notes) — this just buffers the raw bytes so they can be forwarded byte-for-byte,
+  // boundary and all, to ingestion (which DOES need to read the individual form fields).
+  app.addContentTypeParser("multipart/form-data", { parseAs: "buffer", bodyLimit: MAX_UPLOAD_BYTES }, (_request, payload, done) => {
+    done(null, payload);
+  });
 
   app.get("/health", async (): Promise<GatewayHealth> => {
     // Defensive backstop (Review finding): today's real fetchCoreHealth() never rejects
@@ -39,6 +51,10 @@ export function buildApp(deps: BuildAppDeps) {
 
   registerAuthProxyRoutes(app, { forwardToCore: deps.forwardToCore, forwardBinaryToCore: deps.forwardBinaryToCore });
   registerCoursesProxyRoutes(app, { forwardToCourses: deps.forwardToCourses });
+  registerIngestionProxyRoutes(app, {
+    forwardToIngestion: deps.forwardToIngestion,
+    forwardMultipartToIngestion: deps.forwardMultipartToIngestion,
+  });
 
   return app;
 }
