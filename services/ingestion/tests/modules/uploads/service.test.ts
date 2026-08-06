@@ -6,11 +6,20 @@ import { createMockJobQueueAdapter, createMockStorageAdapter } from "@usavvy/ser
 import { createDb, type Db } from "../../../src/db/client.js";
 import { uploadedDocuments } from "../../../src/db/schema.js";
 import { loadIngestionConfig } from "../../../src/config.js";
+
+// Decouples importFromUrl's SSRF check (a real DNS lookup) from actual network/DNS
+// availability — a unit test suite shouldn't depend on either. Defaults to a fixed
+// public IP for any hostname; individual tests override this to exercise the
+// private/loopback-blocking behavior itself.
+const lookupMock = vi.fn().mockResolvedValue({ address: "93.184.216.34", family: 4 });
+vi.mock("node:dns/promises", () => ({ lookup: (...args: unknown[]) => lookupMock(...args) }));
+
 import {
   getPdfPageCount,
   importFromUrl,
   importPastedText,
   listUploadedDocuments,
+  MAX_FILE_SIZE_BYTES,
   MAX_FILES_PER_CUSTOM_COURSE,
   stripHtmlToReadableText,
   uploadDocument,
@@ -29,6 +38,7 @@ beforeAll(() => {
 afterEach(async () => {
   await db.delete(uploadedDocuments).where(eq(uploadedDocuments.ownerId, OWNER_ID));
   vi.unstubAllGlobals();
+  lookupMock.mockReset().mockResolvedValue({ address: "93.184.216.34", family: 4 });
 });
 
 afterAll(async () => {
@@ -264,6 +274,19 @@ describe("importPastedText", () => {
     );
   });
 
+  it("accepts exactly MIN_PASTED_TEXT_WORDS words and rejects one fewer (AC #4 exact boundary, review recommendation)", async () => {
+    const d = deps();
+    const tenWords = "one two three four five six seven eight nine ten";
+    const nineWords = "one two three four five six seven eight nine";
+
+    await expect(
+      importPastedText(d, OWNER_ID, { customCourseId: undefined, text: tenWords, copyrightAttested: true }),
+    ).resolves.toMatchObject({ status: "queued" });
+    await expect(
+      importPastedText(d, OWNER_ID, { customCourseId: undefined, text: nineWords, copyrightAttested: true }),
+    ).rejects.toMatchObject({ code: "VALIDATION_ERROR", message: expect.stringContaining("not enough content") });
+  });
+
   it("blocks before any storage/DB write when attestation is unchecked (AC #1's shared attestation requirement)", async () => {
     const d = deps();
     const putObjectSpy = vi.spyOn(d.storagePort, "putObject");
@@ -398,11 +421,115 @@ describe("importFromUrl", () => {
     const rows = await listUploadedDocuments(db, OWNER_ID, fileResult.customCourseId);
     expect(rows).toHaveLength(2);
   });
+
+  it("blocks a literal loopback IP URL before ever calling fetch (review finding: SSRF)", async () => {
+    const d = deps();
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      importFromUrl(d, OWNER_ID, { customCourseId: undefined, url: "http://127.0.0.1/secret", copyrightAttested: true }),
+    ).rejects.toMatchObject({ code: "VALIDATION_ERROR", message: expect.stringContaining("unreachable") });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("blocks a literal cloud-metadata-style link-local IP URL (review finding: SSRF)", async () => {
+    const d = deps();
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      importFromUrl(d, OWNER_ID, { customCourseId: undefined, url: "http://169.254.169.254/latest/meta-data/", copyrightAttested: true }),
+    ).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("blocks the 'localhost' hostname before ever calling fetch (review finding: SSRF)", async () => {
+    const d = deps();
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      importFromUrl(d, OWNER_ID, { customCourseId: undefined, url: "http://localhost:3001/internal", copyrightAttested: true }),
+    ).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("blocks a hostname that RESOLVES to a private IP, not just literal private IPs (review finding: SSRF)", async () => {
+    const d = deps();
+    lookupMock.mockResolvedValueOnce({ address: "10.0.0.5", family: 4 });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      importFromUrl(d, OWNER_ID, { customCourseId: undefined, url: "https://internal.example.com/", copyrightAttested: true }),
+    ).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("allows a hostname that resolves to a public IP (sanity check the SSRF guard isn't overbroad)", async () => {
+    const d = deps();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(htmlResponse(200, `<p>${LONG_ENOUGH_TEXT}</p>`)));
+
+    await expect(
+      importFromUrl(d, OWNER_ID, { customCourseId: undefined, url: "https://example.com/public", copyrightAttested: true }),
+    ).resolves.toMatchObject({ status: "queued" });
+  });
+
+  it("rejects content exceeding the 50 MB limit without buffering it all into a stored document (review finding: unbounded size)", async () => {
+    const d = deps();
+    const putObjectSpy = vi.spyOn(d.storagePort, "putObject");
+    const oversizedChunk = new Uint8Array(MAX_FILE_SIZE_BYTES + 1024);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        body: { getReader: () => ({ read: vi.fn().mockResolvedValueOnce({ done: false, value: oversizedChunk }), cancel: vi.fn() }) },
+      } as unknown as Response),
+    );
+
+    await expect(
+      importFromUrl(d, OWNER_ID, { customCourseId: undefined, url: "https://example.com/huge", copyrightAttested: true }),
+    ).rejects.toMatchObject({ code: "VALIDATION_ERROR", message: expect.stringContaining("50 MB") });
+    expect(putObjectSpy).not.toHaveBeenCalled();
+  });
+
+  it("maps a mid-body-read failure (e.g. a timeout after headers resolved) to 'unreachable', not a raw 500 (review finding)", async () => {
+    const d = deps();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        body: { getReader: () => ({ read: vi.fn().mockRejectedValue(new Error("aborted")) }) },
+      } as unknown as Response),
+    );
+
+    await expect(
+      importFromUrl(d, OWNER_ID, { customCourseId: undefined, url: "https://example.com/stalls", copyrightAttested: true }),
+    ).rejects.toMatchObject({ code: "VALIDATION_ERROR", message: expect.stringContaining("unreachable") });
+  });
 });
 
 describe("stripHtmlToReadableText", () => {
   it("strips script/style blocks and tags, collapsing whitespace", () => {
     const html = "<html><head><style>.a{color:red}</style></head><body><script>alert(1)</script><p>Hello   world</p></body></html>";
     expect(stripHtmlToReadableText(html)).toBe("Hello world");
+  });
+
+  it("does not eat real prose containing bare < / > characters as if they were tags (review finding)", () => {
+    const html = "<p>The formula states x < y and y > z, which is important context for the reader.</p>";
+    const result = stripHtmlToReadableText(html);
+    expect(result).toContain("x < y and y > z");
+    expect(result).toContain("important context for the reader");
+  });
+
+  it("drops everything from an unclosed <script> tag onward rather than leaking raw JS as content (review finding)", () => {
+    const html = "<html><body><p>Real intro text before the broken markup.</p><script>var a = 1; function foo(){ return a; } console.log(foo());";
+    const result = stripHtmlToReadableText(html);
+    expect(result).toContain("Real intro text before the broken markup");
+    expect(result).not.toContain("function foo");
+    expect(result).not.toContain("console.log");
   });
 });

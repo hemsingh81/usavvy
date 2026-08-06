@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
 import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { AppError, type JobQueuePort, type StoragePort } from "@usavvy/service-kernel";
@@ -106,15 +108,111 @@ export function getPdfPageCount(buffer: Buffer): number {
  * decision on its own, out of scope for this story); good enough to prove "some text
  * exists here to build a course from," which is all AC #2 requires. Story 2.9's real
  * content-parsing pipeline can re-process the stored text later if quality ever matters.
+ *
+ * Review findings (Edge Case Hunter):
+ * - The original generic tag pattern (`<[^>]+>`) matched ANY `<...>` span, so ordinary
+ *   prose using bare `<`/`>` (math, code snippets, "<3") got silently deleted as if it
+ *   were a tag. Now requires what follows `<` to actually look like a tag opener (a
+ *   letter, `/`, or `!` for comments/doctype) before treating it as one.
+ * - An unclosed `<script>` (malformed/truncated HTML) had no matching `</script>` for
+ *   the removal pass to find, so its raw JS body survived as if it were page prose.
+ *   Anything from an unclosed `<script`/`<style` onward is now dropped rather than kept.
  */
 export function stripHtmlToReadableText(html: string): string {
-  const withoutScriptsAndStyles = html.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ");
-  const withoutTags = withoutScriptsAndStyles.replace(/<[^>]+>/g, " ");
+  let text = html.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ");
+  text = text.replace(/<(?:script|style)\b[\s\S]*$/gi, " ");
+  const withoutTags = text.replace(/<\/?[a-zA-Z!][^>]*>/g, " ");
   return withoutTags.replace(/\s+/g, " ").trim();
 }
 
 function countWords(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length;
+}
+
+const LOOPBACK_HOSTNAMES = new Set(["localhost"]);
+
+function isPrivateOrLoopbackIp(address: string, family: number): boolean {
+  if (family === 4) {
+    const octets = address.split(".").map(Number);
+    const [a, b] = octets;
+    if (a === undefined || b === undefined) return true;
+    if (a === 127) return true; // loopback
+    if (a === 10) return true; // RFC 1918
+    if (a === 172 && b >= 16 && b <= 31) return true; // RFC 1918
+    if (a === 192 && b === 168) return true; // RFC 1918
+    if (a === 169 && b === 254) return true; // link-local, incl. cloud metadata endpoints
+    if (a === 0) return true;
+    return false;
+  }
+  const lower = address.toLowerCase();
+  return lower === "::1" || lower.startsWith("fc") || lower.startsWith("fd") || lower.startsWith("fe80");
+}
+
+/**
+ * Review finding (Blind Hunter, Story 2.8): `importFromUrl` fetches a caller-supplied
+ * URL from the SERVER — with no check at all, any authenticated learner could point it
+ * at internal infrastructure (a cloud metadata endpoint, an internal service on
+ * localhost, etc.), a classic SSRF. Blocks non-http(s) protocols and any hostname that
+ * IS or RESOLVES TO a private/loopback/link-local address.
+ * Residual, accepted risk: DNS rebinding between this check and the actual `fetch` a
+ * moment later isn't closed by this check alone — fully closing that needs a custom
+ * dispatcher controlling the exact socket connect address, a materially bigger change
+ * than this story's scope. Revisit if URL import needs further hardening.
+ */
+async function assertUrlIsSafeToFetch(url: string): Promise<void> {
+  const parsed = new URL(url);
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new AppError("VALIDATION_ERROR", "invalid URL", 400);
+  }
+  const hostname = parsed.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  if (LOOPBACK_HOSTNAMES.has(hostname)) {
+    throw new AppError("VALIDATION_ERROR", "URL is unreachable", 400);
+  }
+  const literalFamily = isIP(hostname);
+  if (literalFamily !== 0) {
+    if (isPrivateOrLoopbackIp(hostname, literalFamily)) {
+      throw new AppError("VALIDATION_ERROR", "URL is unreachable", 400);
+    }
+    return;
+  }
+  let resolved: { address: string; family: number };
+  try {
+    resolved = await lookup(hostname);
+  } catch {
+    throw new AppError("VALIDATION_ERROR", "URL is unreachable", 400);
+  }
+  if (isPrivateOrLoopbackIp(resolved.address, resolved.family)) {
+    throw new AppError("VALIDATION_ERROR", "URL is unreachable", 400);
+  }
+}
+
+/**
+ * Review finding (Blind Hunter, Story 2.8): the file-upload path is bounded by both
+ * `@fastify/multipart`'s own `limits.fileSize` and the app-level `MAX_FILE_SIZE_BYTES`
+ * check, but URL-imported content had no size cap at all — a malicious/compromised
+ * target server returning a multi-GB response would be buffered entirely into memory,
+ * an easy DoS vector. Streams the body manually with a running byte count rather than
+ * trusting a `Content-Length` header (which can be absent or lied about), aborting the
+ * read the moment the cap is exceeded.
+ */
+async function readBodyWithSizeLimit(response: Response, maxBytes: number): Promise<string> {
+  const reader = response.body?.getReader();
+  if (!reader) {
+    return response.text();
+  }
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    totalBytes += value.byteLength;
+    if (totalBytes > maxBytes) {
+      await reader.cancel();
+      throw new AppError("VALIDATION_ERROR", "content exceeds 50 MB limit", 400);
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk))).toString("utf-8");
 }
 
 function toResponse(row: typeof uploadedDocuments.$inferSelect): UploadedDocumentResponse {
@@ -269,6 +367,8 @@ export async function importFromUrl(deps: UploadDeps, ownerId: string, input: Ur
     throw new AppError("VALIDATION_ERROR", "invalid URL", 400);
   }
 
+  await assertUrlIsSafeToFetch(input.url);
+
   let response: Response;
   try {
     response = await fetch(input.url, { signal: AbortSignal.timeout(URL_FETCH_TIMEOUT_MS) });
@@ -283,7 +383,17 @@ export async function importFromUrl(deps: UploadDeps, ownerId: string, input: Ur
     throw new AppError("VALIDATION_ERROR", "content could not be retrieved", 400);
   }
 
-  const html = await response.text();
+  // Review finding (Blind Hunter): only the initial fetch() call was wrapped — a
+  // connection that resolves headers but stalls/drops mid-body-read threw an uncaught
+  // AbortError (once URL_FETCH_TIMEOUT_MS fired) that fell through to a generic 500
+  // instead of this same "URL is unreachable" mapping.
+  let html: string;
+  try {
+    html = await readBodyWithSizeLimit(response, MAX_FILE_SIZE_BYTES);
+  } catch (error) {
+    if (error instanceof AppError) throw error;
+    throw new AppError("VALIDATION_ERROR", "URL is unreachable", 400);
+  }
   const extractedText = stripHtmlToReadableText(html);
   if (countWords(extractedText) < MIN_PASTED_TEXT_WORDS) {
     throw new AppError("VALIDATION_ERROR", "not enough content to build a course from", 400);

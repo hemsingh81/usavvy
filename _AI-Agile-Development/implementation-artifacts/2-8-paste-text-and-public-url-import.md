@@ -4,7 +4,7 @@ baseline_commit: 6512fde46283cb1f8df823734c1a7ffc70baabcb
 
 # Story 2.8: Paste-text and public-URL import
 
-Status: review
+Status: done
 
 *(Epic 2, FR-C-8. Builds directly on Story 2.7's `services/ingestion` — `uploaded_documents`, `StoragePort`, `JobQueuePort`, the copyright-attestation-first ordering, and the 10-file-per-`customCourseId` advisory-lock transaction are all reused, not reinvented. This story adds two new ways to CREATE an `UploadedDocument` — pasted text and a fetched public URL — alongside Story 2.7's existing file upload, sharing the same downstream validation/storage/queueing core.)*
 
@@ -131,8 +131,41 @@ None — no live-environment bugs found this time (unlike Story 2.7's pg-boss/Se
 - `apps/web/src/modules/uploads/UploadPage.tsx` (modified — paste-text textarea, URL-import input, shared results list)
 - `apps/web/src/modules/uploads/index.ts` (modified — barrel exports)
 - `apps/web/tests/modules/uploads/UploadPage.test.tsx` (modified — new UI tests)
+- `services/ingestion/src/modules/uploads/service.ts` (review round — SSRF guard, size-capped streaming body read, `stripHtmlToReadableText` correctness fixes)
+- `services/ingestion/tests/modules/uploads/service.test.ts` (review round — new SSRF/size-limit/extraction/boundary tests, `node:dns/promises` mocked)
+
+### Post-review patch round (2026-08-06)
+
+3-layer adversarial review (Blind Hunter, Edge Case Hunter, Acceptance Auditor, run in parallel) found 5 confirmed issues — 3 security/robustness gaps in `importFromUrl` and 2 correctness bugs in `stripHtmlToReadableText`. All 5 fixed and proven via fail-then-pass regression tests, then live-verified end-to-end.
+
+- **SSRF — unaddressed, real security gap (Blind Hunter):** `importFromUrl` fetched any caller-supplied URL server-side with no restriction — any authenticated learner (any role) could point it at internal infrastructure (`http://169.254.169.254/...` cloud metadata, `http://localhost:<internal-port>/...`, RFC 1918 ranges) and have the ingestion server fetch it on their behalf, potentially leaking internal responses or probing internal network reachability. Fixed with a new `assertUrlIsSafeToFetch()`: rejects non-http(s) protocols, the literal `localhost` hostname, any literal private/loopback/link-local IP, and (via a real `dns.lookup`) any hostname that RESOLVES to one — closing both the direct-IP and DNS-based routes to the same gap. Documented residual risk: DNS rebinding between the check and the actual `fetch` a moment later isn't fully closed (would need a custom dispatcher controlling the exact connect address) — an accepted, documented trade-off given this story's scope.
+- **Unbounded fetched-content size (Blind Hunter):** unlike file uploads (bounded by both `@fastify/multipart`'s limit and the app-level 50MB check), URL-imported content had no size cap at all — a malicious/compromised target server returning a multi-GB response would be buffered entirely into memory, a straightforward DoS vector. Fixed with `readBodyWithSizeLimit()`: streams the response body manually with a running byte count (not trusting a spoofable `Content-Length` header), aborting the read the instant `MAX_FILE_SIZE_BYTES` is exceeded.
+- **Uncaught mid-body-read failure (Blind Hunter):** only the initial `fetch()` call was wrapped in try/catch — a connection that resolved headers successfully but then stalled/dropped during body streaming threw an uncaught `AbortError` once the timeout fired, producing a generic 500 instead of AC #3's "URL is unreachable". Fixed by wrapping the new streaming body read in the same try/catch, mapped to the same message.
+- **`stripHtmlToReadableText` ate real prose containing bare `<`/`>` characters (Edge Case Hunter):** the original generic tag pattern matched ANY `<...>` span regardless of what was inside it, so ordinary text like "x < y and y > z" got silently deleted as if it were a tag — undermining AC #2's "the page's readable content is fetched" with no error or indication anything was lost. Fixed by requiring what follows `<` to actually look like a tag opener (a letter, `/`, or `!`) before treating it as one.
+- **Unclosed `<script>` leaked raw JS source as "content" (Edge Case Hunter):** the script-removal pass only stripped a `<script>` block when a matching `</script>` existed later in the document — a truncated/malformed page with no closing tag left its entire JS body surviving as plain text, which could then satisfy the word-count minimum and get stored/queued as if it were the page's actual prose. Fixed by dropping everything from an unclosed `<script`/`<style` onward rather than letting it survive.
+- Also closed a minor AC #4 test-coverage gap the Acceptance Auditor flagged (not a code bug): added an exact-boundary test proving 10 words are accepted and 9 are rejected, matching the documented `MIN_PASTED_TEXT_WORDS` threshold precisely.
+- `service.test.ts` now mocks `node:dns/promises` (defaulting to a fixed public IP) so the SSRF guard's real DNS lookup doesn't couple the unit test suite to actual network/DNS availability — individual tests override it to exercise the private-IP-resolution-blocking path deterministically.
+- Live-verified end-to-end through the real gateway → ingestion chain: three SSRF attempts (literal loopback IP, cloud-metadata-style IP, `localhost` hostname) all correctly blocked with "URL is unreachable" before any fetch occurred; a real public URL (`https://example.com`) still imports successfully, confirming the guard isn't overbroad. Test data cleaned up afterward.
+- Final regression after all fixes: 921 tests passing across all 8 workspaces (18 config + 181 shared-types + 31 service-kernel + 224 web + 106 gateway + 54 ingestion + 200 core + 107 courses), `tsc --noEmit` and `eslint .` both clean. No findings deferred this round.
+
+## Senior Developer Review (AI)
+
+**Reviewers:** Blind Hunter, Edge Case Hunter, Acceptance Auditor (parallel adversarial review, 2026-08-06)
+**Outcome:** Changes Requested → all confirmed findings fixed and verified this round
+
+### Action Items
+
+- [x] **[High, security]** SSRF: `importFromUrl` fetches any caller-supplied URL server-side with no protocol/private-IP restriction (Blind Hunter)
+- [x] **[High]** No size cap on URL-imported content — a malicious server response could exhaust memory (Blind Hunter)
+- [x] **[Med]** A mid-body-read failure (timeout after headers resolve) produces a raw 500 instead of AC #3's "URL is unreachable" (Blind Hunter)
+- [x] **[Med]** `stripHtmlToReadableText` silently deletes real prose containing bare `<`/`>` characters, mistaking them for tags (Edge Case Hunter)
+- [x] **[Med]** An unclosed `<script>` tag leaks raw JS source into the extracted "readable content" (Edge Case Hunter)
+- [x] **[Low, test-coverage only]** AC #4's exact 10-word boundary was unverified by the test suite despite correct code (Acceptance Auditor) — added the missing boundary test
+
+See Dev Agent Record → "Post-review patch round" above for fix details, live-verification evidence, and final regression counts. No findings deferred.
 
 ## Change Log
 
 - 2026-08-06: Story drafted (create-story) for Epic 2, Story 2.8. Status → ready-for-dev.
 - 2026-08-06: Implemented Paste-text and public-URL import (Tasks 1-6): refactored uploadDocument's shared tail into finalizeUpload, added importPastedText/importFromUrl, new gateway proxy routes, apps/web UI. No live-environment bugs found this round. Live-verified end-to-end with real external HTTP requests. Status → review.
+- 2026-08-06: 3-layer adversarial review found 5 issues (an unaddressed SSRF gap, unbounded fetched-content size, an uncaught mid-body-read failure, and two stripHtmlToReadableText correctness bugs); all fixed and proven via fail-then-pass regression tests, live-verified end-to-end including real SSRF-blocking checks against the running gateway. Zero findings deferred. Status → done.
