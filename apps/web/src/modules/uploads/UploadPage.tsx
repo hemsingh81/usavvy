@@ -51,7 +51,14 @@ export function UploadPage() {
       // within this loop directly rather than reading back from React state, which
       // wouldn't yet reflect a setResults call from earlier in the same loop.
       for (const file of Array.from(files)) {
-        if (localAcceptedCount >= MAX_FILES) break;
+        if (localAcceptedCount >= MAX_FILES) {
+          // Review finding: silently dropping every remaining file in this selection
+          // (via `break`) left the learner with no indication those specific files were
+          // skipped — every other rejection path names a reason (AD-17); this one must
+          // too, matching AC #3's "the upload is blocked with a message."
+          setResults((previous) => [...previous, { fileName: file.name, kind: "error", message: "10-file-per-course limit reached" }]);
+          continue;
+        }
         try {
           const document = await uploadFile(apiUrl, session.accessToken, activeCustomCourseId, file, copyrightAttested);
           activeCustomCourseId = document.customCourseId;

@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { z } from "zod";
 import { AppError, type JobQueuePort, type StoragePort } from "@usavvy/service-kernel";
 import { ROLES, type Role } from "@usavvy/config";
-import { listUploadsQuerySchema } from "@usavvy/shared-types";
+import { listUploadsQuerySchema, optionalCustomCourseIdSchema } from "@usavvy/shared-types";
 import type { Db } from "../../db/client.js";
 import { listUploadedDocuments, uploadDocument } from "./service.js";
 
@@ -56,13 +56,28 @@ export function registerUploadsRoutes(app: FastifyInstance, deps: UploadsRouteDe
     if (!data) {
       throw new AppError("VALIDATION_ERROR", "no file provided", 400);
     }
-    const buffer = await data.toBuffer();
+
+    let buffer: Buffer;
+    try {
+      buffer = await data.toBuffer();
+    } catch (error) {
+      // Review finding: @fastify/multipart's own `limits.fileSize` (app.ts) doesn't
+      // silently truncate an oversized file — it throws FST_REQ_FILE_TOO_LARGE from
+      // toBuffer(), which isn't an AppError. Left uncaught, this fell through to a
+      // generic 500, meaning the app-level `MAX_FILE_SIZE_BYTES` check in service.ts
+      // was dead code for every REAL oversized upload (only reachable when
+      // uploadDocument() is called directly with a pre-built buffer, i.e. in tests).
+      if (error && typeof error === "object" && "code" in error && error.code === "FST_REQ_FILE_TOO_LARGE") {
+        throw new AppError("VALIDATION_ERROR", "file exceeds 50 MB limit", 400);
+      }
+      throw error;
+    }
 
     // The frontend sends customCourseId/copyrightAttested BEFORE the file field in the
     // FormData (see apps/web's uploads api.ts) — @fastify/multipart only guarantees
     // `.fields` is fully populated for fields already parsed by the time the file
     // stream is drained, which `toBuffer()` above does.
-    const customCourseIdValue = fieldValue(data.fields, "customCourseId");
+    const customCourseIdValue = parseOrThrow(optionalCustomCourseIdSchema, fieldValue(data.fields, "customCourseId"));
     const copyrightAttested = fieldValue(data.fields, "copyrightAttested") === "true";
 
     const result = await uploadDocument(deps, userId, {

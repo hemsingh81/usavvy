@@ -1,8 +1,13 @@
 import { randomUUID } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { AppError, type JobQueuePort, type StoragePort } from "@usavvy/service-kernel";
 import type { Db } from "../../db/client.js";
 import { uploadedDocuments } from "../../db/schema.js";
+
+// Shared shape between the top-level Db and a transaction callback's `tx` handle —
+// countExistingFiles runs inside both (a fast, non-authoritative pre-check outside any
+// transaction, and the authoritative recheck inside the advisory-locked one below).
+type DbOrTx = Db | Parameters<Parameters<Db["transaction"]>[0]>[0];
 
 export const SUPPORTED_FILE_EXTENSIONS = [".pdf", ".docx", ".pptx", ".txt", ".md"] as const;
 export type SupportedFileExtension = (typeof SUPPORTED_FILE_EXTENSIONS)[number];
@@ -85,7 +90,7 @@ function toResponse(row: typeof uploadedDocuments.$inferSelect): UploadedDocumen
   };
 }
 
-async function countExistingFiles(db: Db, ownerId: string, customCourseId: string): Promise<number> {
+async function countExistingFiles(db: DbOrTx, ownerId: string, customCourseId: string): Promise<number> {
   const rows = await db
     .select({ id: uploadedDocuments.id })
     .from(uploadedDocuments)
@@ -117,6 +122,9 @@ export async function uploadDocument(deps: UploadDeps, ownerId: string, input: U
     throw new AppError("VALIDATION_ERROR", "file exceeds 50 MB limit", 400);
   }
 
+  // Fast, non-authoritative pre-check — avoids the storage write and page-count scan
+  // below for the common (non-racing) case where the limit is already exceeded. NOT
+  // sufficient on its own: see the authoritative recheck inside the locked transaction.
   const existingCount = await countExistingFiles(deps.db, ownerId, customCourseId);
   if (existingCount >= MAX_FILES_PER_CUSTOM_COURSE) {
     throw new AppError("VALIDATION_ERROR", "10-file-per-course limit reached", 400);
@@ -129,22 +137,38 @@ export async function uploadDocument(deps: UploadDeps, ownerId: string, input: U
   const storageKey = `${ownerId}/${customCourseId}/${randomUUID()}${extension}`;
   await deps.storagePort.putObject(storageKey, input.buffer, contentTypeFor(extension));
 
-  const [row] = await deps.db
-    .insert(uploadedDocuments)
-    .values({
-      ownerId,
-      customCourseId,
-      fileName: input.fileName,
-      fileType: extension.slice(1),
-      fileSizeBytes: input.buffer.byteLength,
-      storageKey,
-      copyrightAttested: true,
-      status: "queued",
-    })
-    .returning();
-  if (!row) {
-    throw new AppError("INTERNAL_ERROR", "failed to record uploaded document", 500);
-  }
+  // Review finding: the pre-check above and the insert were two separate,
+  // unsynchronized statements — two concurrent uploads to the same customCourseId
+  // could both read count=9 and both insert, breaking AC #3's hard 10-file cap.
+  // pg_advisory_xact_lock serializes concurrent attempts for the SAME customCourseId
+  // (auto-released at transaction end) without blocking uploads to different ones —
+  // the recount+insert inside it is the actual enforcement, not just the pre-check.
+  const row = await deps.db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${customCourseId}))`);
+
+    const authoritativeCount = await countExistingFiles(tx, ownerId, customCourseId);
+    if (authoritativeCount >= MAX_FILES_PER_CUSTOM_COURSE) {
+      throw new AppError("VALIDATION_ERROR", "10-file-per-course limit reached", 400);
+    }
+
+    const [inserted] = await tx
+      .insert(uploadedDocuments)
+      .values({
+        ownerId,
+        customCourseId,
+        fileName: input.fileName,
+        fileType: extension.slice(1),
+        fileSizeBytes: input.buffer.byteLength,
+        storageKey,
+        copyrightAttested: true,
+        status: "queued",
+      })
+      .returning();
+    if (!inserted) {
+      throw new AppError("INTERNAL_ERROR", "failed to record uploaded document", 500);
+    }
+    return inserted;
+  });
 
   await deps.jobQueuePort.enqueue("ingest-document", { uploadedDocumentId: row.id });
 

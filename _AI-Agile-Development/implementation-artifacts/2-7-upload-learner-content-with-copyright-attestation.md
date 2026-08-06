@@ -4,7 +4,7 @@ baseline_commit: 1061386e3f42ab5e6a1786649b64d4115f5a1e4c
 
 # Story 2.7: Upload learner content with copyright attestation
 
-Status: review
+Status: done
 
 *(Epic 2, FR-C-7/FR-C-12. This is the first story to need a real `services/ingestion` (AD-1 scaffold-on-demand, AD-14 owns `UploadedDocument`/`ContentChunk`), the first to need a REAL `StoragePort` implementation (AD-6 — until now only `pingStorage`'s health-check ping existed), and the first to need a REAL `JobQueuePort` implementation (AD-15 — until now only an empty placeholder). It does NOT build the ingestion pipeline itself (parsing/OCR/chunking/embedding/outline — Stories 2.9-2.12) or the outline review screen (Story 2.13) — only accepting, validating, storing, and queueing an upload, per its own four ACs.)*
 
@@ -171,8 +171,46 @@ Claude Sonnet 5
 - `apps/web/src/app/App.tsx` (modified — `/upload-content` route)
 - `apps/web/tests/modules/uploads/UploadPage.test.tsx` (new)
 - `package.json` (modified — root `dev` script includes `ingestion`)
+- `services/ingestion/src/modules/uploads/routes.ts` (review round — oversized-file/malformed-customCourseId fixes)
+- `services/ingestion/src/modules/uploads/service.ts` (review round — advisory-lock transaction for the 10-file limit)
+- `services/ingestion/tests/modules/uploads/{routes,service}.test.ts` (review round — new regression tests, strengthened AC #4 test)
+- `packages/shared-types/src/uploads.ts` (review round — `optionalCustomCourseIdSchema`)
+- `packages/service-kernel/src/errors.ts` (review round — Fastify-framework-error mapping)
+- `packages/service-kernel/tests/errors.test.ts` (review round — new, previously untested)
+- `apps/web/src/modules/uploads/UploadPage.tsx` (review round — per-file message for over-limit files)
+- `apps/web/tests/modules/uploads/UploadPage.test.tsx` (review round — new regression test)
+
+### Post-review patch round (2026-08-06)
+
+3-layer adversarial review (Blind Hunter, Edge Case Hunter, Acceptance Auditor, run in parallel) found 4 confirmed bugs; live end-to-end verification of the fixes surfaced a 5th, distinct bug. All 5 fixed and proven via fail-then-pass regression tests.
+
+- **A — oversized file → raw 500 instead of a clean AC #2 rejection:** `@fastify/multipart`'s own `limits.fileSize` doesn't silently truncate an oversized file — `toBuffer()` throws `FST_REQ_FILE_TOO_LARGE`, which isn't an `AppError`, so it fell through to a generic 500. This made the app-level `MAX_FILE_SIZE_BYTES` check in `service.ts` dead code for every REAL oversized upload (only reachable when `uploadDocument()` is called directly with a pre-built buffer, i.e. in unit tests) — flagged independently by both the Blind Hunter (as "silent truncation") and the Acceptance Auditor (correctly identifying the actual throw-based mechanism, confirmed by reading `@fastify/multipart`'s source). Fixed in `routes.ts`: catch `FST_REQ_FILE_TOO_LARGE` specifically and re-throw as `AppError("VALIDATION_ERROR", "file exceeds 50 MB limit", 400)`.
+- **B — unvalidated `customCourseId` on `POST /uploads` → raw 500:** unlike `GET /uploads` (validated via `listUploadsQuerySchema`), the POST route read `customCourseId` from the multipart field with no format check, letting a malformed value reach a `uuid`-typed DB column and throw a raw Postgres type-cast error. Found independently by both the Blind Hunter and Edge Case Hunter. Fixed with a new `optionalCustomCourseIdSchema` (shared-types) validated via the route's existing `parseOrThrow` helper before the value is used anywhere.
+- **C — TOCTOU race on the 10-file-per-course limit:** the count-check and insert were two separate, unsynchronized statements — two genuinely concurrent uploads to the same `customCourseId` at 9 files could both read count=9 and both insert, breaking AC #3's hard cap. Flagged by both the Blind Hunter and Edge Case Hunter as a real, undocumented gap (unlike this codebase's other accepted "rare, admin-only, last-write-wins" races, this one is learner-facing and violates an explicit numbered AC). Fixed with a `pg_advisory_xact_lock(hashtext(customCourseId))`-guarded transaction wrapping an authoritative recount + insert — serializes concurrent attempts for the SAME `customCourseId` without blocking different ones. Proven with a genuine concurrency test (`Promise.allSettled` over 15 simultaneous uploads to one `customCourseId` against the real dev Postgres): exactly 10 succeed, 5 rejected, exactly 10 rows persisted.
+- **D — files beyond the 10-file cap silently dropped within one multi-file selection:** `UploadPage.tsx`'s loop `break`s once the local count hits 10, giving files beyond that point NO success or error entry at all — contradicting this story's own "a rejected file always names the specific limit violated" standard (Edge Case Hunter finding). Fixed: each file beyond the cap now gets an explicit "10-file-per-course limit reached" result entry (server never contacted for it) instead of vanishing silently.
+- **E — found only during live end-to-end re-verification of fix A, not by any reviewer:** gateway's own custom multipart `addContentTypeParser` (with its own `bodyLimit`) throws Fastify's native `FST_ERR_CTP_BODY_TOO_LARGE` when a request body exceeds it — which also isn't an `AppError`, so it ALSO fell through to a generic 500, this time at the gateway layer, before the request ever reached ingestion. Rather than special-casing this one route, fixed `registerErrorHandler` itself (shared `packages/service-kernel`, used by every service): any uncaught error shaped like a well-known Fastify framework error (a `statusCode` in 400-499 and a `code` starting with `FST_ERR_`) is now mapped to a clean envelope using the framework's own statusCode/code/message, instead of a generic "unexpected error occurred" — a systemic AD-17 improvement, not just a one-off patch, benefiting every service and every future route that could hit a similar Fastify-native limit. `errors.ts` had zero direct test coverage before this fix; added a new `errors.test.ts` (5 tests) covering both the existing AppError-mapping behavior and this new case.
+- Live-verified end-to-end through the real gateway → ingestion chain after all 5 fixes: a malformed `customCourseId` now returns a clean 400 (was 500); a genuinely oversized (50MB+1KB) file now returns a clean 413 with `FST_ERR_CTP_BODY_TOO_LARGE` (was 500) at the gateway layer, before ever reaching ingestion. Test data cleaned up afterward.
+- Final regression after all fixes: 878 tests passing across all 8 workspaces (18 config + 177 shared-types + 31 service-kernel + 220 web + 102 gateway + 23 ingestion + 200 core + 107 courses), `tsc --noEmit` and `eslint .` both clean.
+- No findings deferred this round — all 5 confirmed bugs were fixed, not postponed.
+
+## Senior Developer Review (AI)
+
+**Reviewers:** Blind Hunter, Edge Case Hunter, Acceptance Auditor (parallel adversarial review, 2026-08-06)
+**Outcome:** Changes Requested → all confirmed findings fixed and verified this round (plus one additional bug found during live re-verification of a fix, also resolved)
+
+### Action Items
+
+- [x] **[High]** Oversized file upload returns a raw 500 instead of AC #2's specific rejection — `@fastify/multipart`'s `FST_REQ_FILE_TOO_LARGE` isn't caught (found independently by Blind Hunter and Acceptance Auditor)
+- [x] **[High]** `POST /uploads`'s `customCourseId` field is never format-validated, causing a raw Postgres error → 500 for a malformed value (found independently by Blind Hunter and Edge Case Hunter)
+- [x] **[High]** TOCTOU race lets concurrent uploads exceed the 10-file-per-course cap (AC #3) — no transaction/lock around the count-check + insert (found independently by Blind Hunter and Edge Case Hunter)
+- [x] **[Med]** Frontend silently drops files beyond the 10-file cap within one multi-file selection, with no per-file message (Edge Case Hunter)
+- [x] **[High, found during live re-verification, not by any reviewer]** Gateway's own multipart body-size limit also produces a raw 500 (`FST_ERR_CTP_BODY_TOO_LARGE` uncaught) — fixed systemically in the shared `registerErrorHandler` rather than as a one-off
+
+See Dev Agent Record → "Post-review patch round" above for fix details, live-verification evidence, and final regression counts. No findings deferred.
 
 ## Change Log
 
 - 2026-08-06: Story drafted (create-story) for Epic 2, Story 2.7. Status → ready-for-dev.
+- 2026-08-06: Implemented Upload learner content with copyright attestation (Tasks 1-7): real StoragePort/JobQueuePort in service-kernel, new services/ingestion, gateway multipart passthrough proxy, apps/web upload UI. Found and fixed two live-environment bugs (pg-boss v12 queue-creation requirement; SeaweedFS bucket provisioning) during end-to-end verification. Status → review.
+- 2026-08-06: 3-layer adversarial review found 5 bugs (oversized-file 500, unvalidated customCourseId 500, TOCTOU race on 10-file limit, frontend silently dropping over-limit files, and a gateway-layer body-size-limit 500 found during live re-verification of the first fix); all fixed and proven via fail-then-pass regression tests, live-verified end-to-end. Zero findings deferred. Status → done.
 - 2026-08-06: Implemented Upload learner content with copyright attestation (Tasks 1-7): real StoragePort/JobQueuePort in service-kernel, new services/ingestion, gateway multipart passthrough proxy, apps/web upload UI. Found and fixed two live-environment bugs (pg-boss v12 queue-creation requirement; SeaweedFS bucket provisioning) during end-to-end verification. Status → review.

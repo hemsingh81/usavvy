@@ -116,4 +116,24 @@ describe("UploadPage", () => {
     expect(screen.getByText(/reached the 10-file-per-course limit/i)).toBeInTheDocument();
     expect(realFileInput).toBeDisabled();
   });
+
+  it("shows a per-file limit message for every file beyond 10 selected in a single batch, rather than silently dropping them (review finding)", async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      jsonResponse(201, { id: "d", customCourseId: "cc1", fileName: "x.txt", fileType: "txt", fileSizeBytes: 5, status: "queued", createdAt: "2026-01-15T00:00:00.000Z" }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage({ accessToken: "a-token" });
+    const user = userEvent.setup();
+
+    await user.click(screen.getByLabelText(/right to use this material/i));
+    const realFileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    const twelveFiles = Array.from({ length: 12 }, (_, i) => file(`file-${i}.txt`));
+    await user.upload(realFileInput, twelveFiles);
+
+    await waitFor(() => expect(screen.getByText("10 of 10 files added")).toBeInTheDocument());
+    // Only 10 network calls — files 11/12 are rejected client-side, never sent.
+    expect(fetchMock).toHaveBeenCalledTimes(10);
+    expect(screen.getByText(/file-10\.txt: 10-file-per-course limit reached/)).toBeInTheDocument();
+    expect(screen.getByText(/file-11\.txt: 10-file-per-course limit reached/)).toBeInTheDocument();
+  });
 });

@@ -123,4 +123,5 @@ export {
   type UploadedDocumentResponse,
   listUploadsQuerySchema,
   type ListUploadsQuery,
+  optionalCustomCourseIdSchema,
 } from "./uploads.js";

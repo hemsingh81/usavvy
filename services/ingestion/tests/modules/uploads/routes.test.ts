@@ -101,6 +101,43 @@ describe("POST /uploads", () => {
     expect(response.statusCode).toBe(400);
     expect(response.json().error.message).toContain("unsupported file type");
   });
+
+  it("rejects a genuinely oversized file with a clean 400, not a raw 500 (review finding)", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+    const oversized = Buffer.alloc(50 * 1024 * 1024 + 1024);
+    const { body, contentType } = buildMultipartBody(
+      [{ name: "copyrightAttested", value: "true" }],
+      { fieldName: "file", filename: "huge.txt", contentType: "text/plain", content: oversized },
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/uploads",
+      headers: { ...learnerHeaders, "content-type": contentType },
+      payload: body,
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ error: { code: "VALIDATION_ERROR", message: expect.stringContaining("50 MB") } });
+  });
+
+  it("rejects a malformed customCourseId field with a clean 400, not a raw 500 (review finding)", async () => {
+    const app = buildApp(createTestAppDeps({ db }));
+    const { body, contentType } = buildMultipartBody(
+      [{ name: "customCourseId", value: "not-a-uuid" }, { name: "copyrightAttested", value: "true" }],
+      { fieldName: "file", filename: "notes.txt", contentType: "text/plain", content: Buffer.from("hello") },
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/uploads",
+      headers: { ...learnerHeaders, "content-type": contentType },
+      payload: body,
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error.code).toBe("VALIDATION_ERROR");
+  });
 });
 
 describe("GET /uploads", () => {

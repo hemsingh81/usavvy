@@ -1,4 +1,5 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { randomUUID } from "node:crypto";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import postgres from "postgres";
 import { eq } from "drizzle-orm";
 import { createMockJobQueueAdapter, createMockStorageAdapter } from "@usavvy/service-kernel";
@@ -75,13 +76,23 @@ describe("uploadDocument", () => {
 
   it("blocks the upload before any storage/DB write when attestation is unchecked (AC #4)", async () => {
     const d = deps();
+    // Review finding: the original version of this test only queried an unrelated,
+    // hardcoded customCourseId (a failed attestation check never mints or receives
+    // one) — it proved nothing about THIS call's own side effects. Spying directly on
+    // the storage/queue adapters is the only way to prove they were genuinely never
+    // invoked, not just that some other row doesn't exist.
+    const putObjectSpy = vi.spyOn(d.storagePort, "putObject");
+    const enqueueSpy = vi.spyOn(d.jobQueuePort, "enqueue");
+    const countBefore = (await db.select().from(uploadedDocuments).where(eq(uploadedDocuments.ownerId, OWNER_ID))).length;
 
     await expect(
       uploadDocument(d, OWNER_ID, { customCourseId: undefined, fileName: "a.txt", buffer: Buffer.from("hello"), copyrightAttested: false }),
     ).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
 
-    const rows = await listUploadedDocuments(db, OWNER_ID, "019fd450-b7cb-7a32-b021-42788045c71f");
-    expect(rows).toEqual([]);
+    expect(putObjectSpy).not.toHaveBeenCalled();
+    expect(enqueueSpy).not.toHaveBeenCalled();
+    const countAfter = (await db.select().from(uploadedDocuments).where(eq(uploadedDocuments.ownerId, OWNER_ID))).length;
+    expect(countAfter).toBe(countBefore);
   });
 
   it("rejects an unsupported file type, naming the violated limit (AC #2)", async () => {
@@ -137,6 +148,25 @@ describe("uploadDocument", () => {
     ).rejects.toMatchObject({ code: "VALIDATION_ERROR", message: expect.stringContaining("10-file-per-course limit") });
 
     const rows = await listUploadedDocuments(db, OWNER_ID, customCourseId as string);
+    expect(rows).toHaveLength(MAX_FILES_PER_CUSTOM_COURSE);
+  });
+
+  it("never lets concurrent uploads exceed the 10-file-per-course limit (review finding: TOCTOU race)", async () => {
+    const d = deps();
+    const customCourseId = randomUUID();
+
+    const results = await Promise.allSettled(
+      Array.from({ length: 15 }, (_, i) =>
+        uploadDocument(d, OWNER_ID, { customCourseId, fileName: `race-${i}.txt`, buffer: Buffer.from(`content ${i}`), copyrightAttested: true }),
+      ),
+    );
+
+    const succeeded = results.filter((r) => r.status === "fulfilled");
+    const rejected = results.filter((r) => r.status === "rejected");
+    expect(succeeded).toHaveLength(MAX_FILES_PER_CUSTOM_COURSE);
+    expect(rejected).toHaveLength(15 - MAX_FILES_PER_CUSTOM_COURSE);
+
+    const rows = await listUploadedDocuments(db, OWNER_ID, customCourseId);
     expect(rows).toHaveLength(MAX_FILES_PER_CUSTOM_COURSE);
   });
 

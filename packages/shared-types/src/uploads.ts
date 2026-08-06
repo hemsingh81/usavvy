@@ -18,3 +18,10 @@ export const listUploadsQuerySchema = z.object({
 });
 
 export type ListUploadsQuery = z.infer<typeof listUploadsQuerySchema>;
+
+// Review finding: POST /uploads accepted an unvalidated customCourseId form field,
+// letting a malformed value reach the DB layer as a raw, unhandled Postgres type error
+// (500) instead of a clean 400 — GET already validated it via listUploadsQuerySchema,
+// POST didn't. Optional here (unlike GET's), since the first file of a new batch omits
+// it and the server mints one.
+export const optionalCustomCourseIdSchema = z.uuid().optional();
