@@ -86,12 +86,12 @@ development_status:
   3-2-replay-current-beat: done
   3-3-step-back-and-forward-between-beats: done
   3-4-board-zoom-pan-and-infinite-scroll-with-beat-gutter-markers: done
-  3-5-progressive-text-writing-synced-to-narration: backlog
-  3-6-progressive-math-notation-rendering: backlog
-  3-7-syntax-highlighted-line-synced-code-blocks: backlog
-  3-8-incrementally-drawn-diagrams: backlog
-  3-9-tables-and-comparison-grids: backlog
-  3-10-charts-and-plots-for-quantitative-concepts: backlog
+  3-5-progressive-text-writing-synced-to-narration: done
+  3-6-progressive-math-notation-rendering: done
+  3-7-syntax-highlighted-line-synced-code-blocks: done
+  3-8-incrementally-drawn-diagrams: done
+  3-9-tables-and-comparison-grids: done
+  3-10-charts-and-plots-for-quantitative-concepts: done
   3-11-highlight-spotlight-dimming: backlog
   3-12-speed-volume-and-voice-controls: backlog
   3-13-concept-boundary-checkpoint-questions: backlog
