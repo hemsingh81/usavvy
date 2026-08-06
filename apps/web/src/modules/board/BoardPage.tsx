@@ -57,6 +57,37 @@ function totalUnitsFor(beat: BoardBeat): number {
   return beat.content.reduce((sum, block) => sum + countUnits(block), 0);
 }
 
+// Story 3.11 (FR-B-32). `subIndex` is the discrete line/node/row within the spotlighted
+// block — null for `text`/`math` blocks, whose AC's own example names the whole block as
+// the spotlight unit, not a sub-word/sub-line range.
+export interface Spotlight {
+  blockIndex: number;
+  subIndex: number | null;
+}
+
+// Story 3.11. "Narration reaches that element" — same mock-reveal-timer stand-in as
+// every other "synced to narration" AC in this file (see the story's own CRITICAL SCOPE
+// NOTE); no real narration-timing source exists. Returns null once the Beat is fully
+// revealed — nothing is "currently narrating" anymore once its explanation is done.
+// Exported so tests can exercise multi-block scenarios `mockBoardData.ts` doesn't
+// happen to contain (see the code-review finding this fixed: math was accidentally
+// getting per-line dimming, masked in the mock's own data by math always being the last
+// block of its one Beat, so the fully-revealed guard above hid the bug in practice).
+export function computeSpotlight(beat: BoardBeat, revealedUnitsForBeat: number): Spotlight | null {
+  const total = totalUnitsFor(beat);
+  if (revealedUnitsForBeat <= 0 || revealedUnitsForBeat >= total) return null;
+  let remaining = revealedUnitsForBeat;
+  for (let blockIndex = 0; blockIndex < beat.content.length; blockIndex += 1) {
+    const block = beat.content[blockIndex] as BoardContentBlock;
+    const blockUnits = countUnits(block);
+    if (remaining <= blockUnits) {
+      return { blockIndex, subIndex: block.kind === "text" || block.kind === "math" ? null : remaining - 1 };
+    }
+    remaining -= blockUnits;
+  }
+  return null;
+}
+
 function renderTextBlock(block: { text: string; emphasis?: string[] }, revealedWords: number): React.ReactNode {
   const words = block.text.split(/\s+/).filter(Boolean);
   const shown = words.slice(0, revealedWords).join(" ");
@@ -80,7 +111,12 @@ function renderTextBlock(block: { text: string; emphasis?: string[] }, revealedW
   );
 }
 
-function renderBlock(block: BoardContentBlock, revealedInBlock: number, blockKey: string): React.ReactNode {
+// Story 3.11: `spotlightSubIndex` is only ever passed non-null when THIS block is the
+// one currently spotlighted — it dims every other line/node/row within it. A `null`
+// value means either dimming is inactive, or this whole block isn't the spotlight (in
+// which case the caller's block-wrapper `data-dimmed` already handles it, and no
+// per-element dimming is needed inside here at all).
+function renderBlock(block: BoardContentBlock, revealedInBlock: number, blockKey: string, spotlightSubIndex: number | null): React.ReactNode {
   switch (block.kind) {
     case "text":
       return <div key={blockKey}>{renderTextBlock(block, revealedInBlock)}</div>;
@@ -88,7 +124,9 @@ function renderBlock(block: BoardContentBlock, revealedInBlock: number, blockKey
       return (
         <pre key={blockKey} className="usavvy-board-block-math">
           {block.lines.slice(0, revealedInBlock).map((line, index) => (
-            <div key={index}>{line}</div>
+            <div key={index} data-dimmed={spotlightSubIndex !== null && index !== spotlightSubIndex}>
+              {line}
+            </div>
           ))}
         </pre>
       );
@@ -96,7 +134,12 @@ function renderBlock(block: BoardContentBlock, revealedInBlock: number, blockKey
       return (
         <pre key={blockKey} className="usavvy-board-block-code" aria-label={`${block.language} code`}>
           {block.lines.slice(0, revealedInBlock).map((line, index) => (
-            <div key={index} className="usavvy-board-code-line" data-active={index === revealedInBlock - 1}>
+            <div
+              key={index}
+              className="usavvy-board-code-line"
+              data-active={index === revealedInBlock - 1}
+              data-dimmed={spotlightSubIndex !== null && index !== spotlightSubIndex}
+            >
               {line}
             </div>
           ))}
@@ -108,7 +151,7 @@ function renderBlock(block: BoardContentBlock, revealedInBlock: number, blockKey
       return (
         <div key={blockKey} className="usavvy-board-block-diagram" role="group" aria-label="diagram">
           {revealedNodes.map((node, index) => (
-            <span key={node.id}>
+            <span key={node.id} data-dimmed={spotlightSubIndex !== null && index !== spotlightSubIndex}>
               <span className="usavvy-board-diagram-node">{node.label}</span>
               {index < revealedNodes.length - 1 && block.edges.some((e) => e.from === node.id && revealedIds.has(e.to)) ? (
                 <span className="usavvy-board-diagram-edge" aria-hidden="true">
@@ -134,7 +177,11 @@ function renderBlock(block: BoardContentBlock, revealedInBlock: number, blockKey
             </thead>
             <tbody>
               {block.rows.map((row, rowIndex) => (
-                <tr key={rowIndex} data-revealed={rowIndex < revealedInBlock}>
+                <tr
+                  key={rowIndex}
+                  data-revealed={rowIndex < revealedInBlock}
+                  data-dimmed={spotlightSubIndex !== null && rowIndex !== spotlightSubIndex}
+                >
                   {row.map((cell, cellIndex) => (
                     <td key={cellIndex}>{cell}</td>
                   ))}
@@ -149,7 +196,12 @@ function renderBlock(block: BoardContentBlock, revealedInBlock: number, blockKey
   }
 }
 
-function BeatContent({ beat, revealedUnits }: { beat: BoardBeat; revealedUnits: number }) {
+// Story 3.11: `spotlight` is only passed non-null for the ONE Beat currently containing
+// the spotlighted element (the active lesson Beat, or the overlay Beat) — every other
+// rendered Beat in the stack calls this with `spotlight={null}`, dimming ALL of its own
+// blocks uniformly (via `isSpotlightBlock` always being false), which is exactly
+// "dim everything else on the board" (AC #1) without a separate section-level mechanism.
+function BeatContent({ beat, revealedUnits, dimmingActive, spotlight }: { beat: BoardBeat; revealedUnits: number; dimmingActive: boolean; spotlight: Spotlight | null }) {
   let remaining = revealedUnits;
   return (
     <>
@@ -157,9 +209,10 @@ function BeatContent({ beat, revealedUnits }: { beat: BoardBeat; revealedUnits: 
         const blockUnits = countUnits(block);
         const revealedInBlock = Math.max(0, Math.min(blockUnits, remaining));
         remaining -= blockUnits;
+        const isSpotlightBlock = spotlight?.blockIndex === index;
         return (
-          <div className="usavvy-board-block" key={index}>
-            {renderBlock(block, revealedInBlock, String(index))}
+          <div className="usavvy-board-block" data-dimmed={dimmingActive && !isSpotlightBlock} key={index}>
+            {renderBlock(block, revealedInBlock, String(index), isSpotlightBlock ? spotlight.subIndex : null)}
           </div>
         );
       })}
@@ -194,17 +247,39 @@ export function BoardPage() {
   const [zoomLevel, setZoomLevel] = useState(1);
   const [scrollTargetId, setScrollTargetId] = useState<string | null>(null);
   const [markerPositions, setMarkerPositions] = useState<Record<string, number>>({});
+  const [dimmingSuspendedByScroll, setDimmingSuspendedByScroll] = useState(false);
   const canvasRef = useRef<HTMLElement | null>(null);
   const beatSectionRefs = useRef(new Map<string, HTMLElement>());
+  // Story 3.11, AC #3: distinguishes a learner's own scroll from this component's own
+  // scrollIntoView/scrollTo calls — only the former suspends dimming. Untestable in
+  // jsdom (scrollIntoView never fires a real scroll event there in the first place),
+  // same accepted limitation as Story 3.4's marker-position measurement; correct in a
+  // real browser.
+  const isProgrammaticScrollRef = useRef(false);
 
   function registerBeatSectionRef(beatId: string, el: HTMLElement | null): void {
     if (el) beatSectionRefs.current.set(beatId, el);
     else beatSectionRefs.current.delete(beatId);
   }
 
+  function markProgrammaticScroll(): void {
+    isProgrammaticScrollRef.current = true;
+    window.setTimeout(() => {
+      isProgrammaticScrollRef.current = false;
+    }, 500);
+  }
+
+  function handleCanvasScroll(): void {
+    if (isProgrammaticScrollRef.current) return;
+    setDimmingSuspendedByScroll(true);
+  }
+
   const lessonBeat = concept.beats[lessonBeatIndex] as BoardBeat;
   const displayedBeat = overlayBeat ?? lessonBeat;
   const totalUnits = useMemo(() => totalUnitsFor(displayedBeat), [displayedBeat]);
+  // Story 3.11, AC #1-#3: null (no dimming) while paused or a manual scroll has
+  // suspended it; otherwise the element currently receiving reveal progress.
+  const spotlight = !isPaused && !dimmingSuspendedByScroll ? computeSpotlight(displayedBeat, revealedUnits) : null;
   const isFullyRevealed = revealedUnits >= totalUnits;
   const atConceptEnd = lessonBeatIndex === concept.beats.length - 1 && !overlayBeat && visitedBeatIds.has(lessonBeat.id) && isFullyRevealed;
 
@@ -216,6 +291,10 @@ export function BoardPage() {
     if (isPaused || revealedUnits >= totalUnits) return;
     const intervalId = setInterval(() => {
       setRevealedUnits((current) => Math.min(totalUnits, current + 1));
+      // Story 3.11, AC #3: "resuming when I return to active playback" — a real tick
+      // IS returning to active playback; a timeout-based idle heuristic would be
+      // unfalsifiable in this test suite and isn't what the AC actually asks for.
+      setDimmingSuspendedByScroll(false);
     }, REVEAL_TICK_MS / speed);
     return () => clearInterval(intervalId);
   }, [isPaused, revealedUnits, totalUnits, speed]);
@@ -251,6 +330,7 @@ export function BoardPage() {
   // the ref is guaranteed to exist in the DOM by the time this effect runs.
   useEffect(() => {
     if (!scrollTargetId) return;
+    markProgrammaticScroll();
     beatSectionRefs.current.get(scrollTargetId)?.scrollIntoView({ behavior: "smooth", block: "center" });
     setScrollTargetId(null);
   }, [scrollTargetId, lessonBeatIndex]);
@@ -364,6 +444,7 @@ export function BoardPage() {
     // Element.prototype.scrollTo isn't implemented in jsdom (unlike the softer
     // scrollIntoView no-op) — guarded so this stays safe under test.
     setZoomLevel(1);
+    markProgrammaticScroll();
     if (typeof canvasRef.current?.scrollTo === "function") {
       canvasRef.current.scrollTo({ top: 0 });
     }
@@ -438,14 +519,14 @@ export function BoardPage() {
           ))}
         </nav>
 
-        <main className="usavvy-board-canvas" ref={canvasRef} onWheel={handleCanvasWheel}>
+        <main className="usavvy-board-canvas" ref={canvasRef} onWheel={handleCanvasWheel} onScroll={handleCanvasScroll}>
           <div className="usavvy-board-canvas-zoom-wrapper" style={{ transform: `scale(${zoomLevel})` }}>
             {overlayBeat ? (
               <>
                 <h1 className="usavvy-board-beat-heading">
                   {overlayBeat.title} ({describeRoute(overlayBeat.routeType as ExplanationRouteType)})
                 </h1>
-                <BeatContent beat={overlayBeat} revealedUnits={revealedUnits} />
+                <BeatContent beat={overlayBeat} revealedUnits={revealedUnits} dimmingActive={spotlight !== null} spotlight={spotlight} />
                 {isFullyRevealed ? <p className="usavvy-board-source-tag">Source: {overlayBeat.sourceRef}</p> : null}
                 <button type="button" className="usavvy-board-control-button" onClick={handleBack} style={{ paddingLeft: 0 }}>
                   ← Back to lesson
@@ -465,7 +546,7 @@ export function BoardPage() {
                     className="usavvy-board-beat-section"
                   >
                     <HeadingTag className="usavvy-board-beat-heading">{beat.title}</HeadingTag>
-                    <BeatContent beat={beat} revealedUnits={revealed} />
+                    <BeatContent beat={beat} revealedUnits={revealed} dimmingActive={spotlight !== null} spotlight={isActive ? spotlight : null} />
                     {sectionFullyRevealed ? <p className="usavvy-board-source-tag">Source: {beat.sourceRef}</p> : null}
 
                     {isActive && isFullyRevealed ? (

@@ -745,6 +745,15 @@
   opacity: 0.25;
 }
 
+/* Story 3.11 (FR-B-32): one shared rule for every dimmable unit — whole non-active
+   Beats/blocks, and individual code lines/diagram nodes/table rows/math lines within
+   the spotlighted block. A static opacity state change, not an animation — nothing here
+   needs to respect prefers-reduced-motion (DESIGN.md's Do's and Don'ts) since nothing
+   here animates. */
+[data-dimmed="true"] {
+  opacity: 0.35;
+}
+
 .usavvy-board-source-tag {
   font-family: var(--font-family);
   font-size: 12px;

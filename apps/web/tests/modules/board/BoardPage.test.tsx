@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { BoardPage } from "../../../src/modules/board/BoardPage.js";
+import { BoardPage, computeSpotlight } from "../../../src/modules/board/BoardPage.js";
+import type { BoardBeat } from "../../../src/modules/board/mockBoardData.js";
 
 /**
  * Epic 3 mock-first UX pass (`_AI-Agile-Development/implementation-artifacts/
@@ -222,6 +223,93 @@ describe("BoardPage", () => {
     expect(screen.getByRole("button", { name: "Forward" })).toBeDisabled();
   });
 
+  it(
+    "spotlights the code line currently receiving reveal progress, dimming its own Beat's text block and the earlier Beat's block (Story 3.11, AC #1)",
+    async () => {
+      const { container } = renderBoard();
+      const user = userEvent.setup();
+      await waitFor(() => expect(screen.getByText(/directly\.$/)).toBeInTheDocument(), { timeout: 8000 });
+
+      await user.click(screen.getByRole("button", { name: "Forward" }));
+      await waitFor(() => expect(container.querySelector('.usavvy-board-code-line[data-active="true"]')).toBeTruthy(), { timeout: 8000 });
+
+      const activeLine = container.querySelector('.usavvy-board-code-line[data-active="true"]') as HTMLElement;
+      expect(activeLine.getAttribute("data-dimmed")).not.toBe("true");
+
+      const firstBeatSection = screen.getByRole("heading", { name: "What is recursion?" }).closest("section") as HTMLElement;
+      expect(within(firstBeatSection).getByText(/directly\.$/).closest(".usavvy-board-block")?.getAttribute("data-dimmed")).toBe("true");
+
+      const secondBeatSection = screen.getByRole("heading", { name: "The two parts every recursive function needs" }).closest("section") as HTMLElement;
+      // The Beat's own text block (first .usavvy-board-block) is fully revealed and no
+      // longer the spotlight now that reveal has moved into its code block.
+      expect(secondBeatSection.querySelector(".usavvy-board-block")?.getAttribute("data-dimmed")).toBe("true");
+    },
+    15_000,
+  );
+
+  it(
+    "the spotlight moves to the next code line as the reveal timer advances, de-emphasizing the previous one (Story 3.11, AC #2)",
+    async () => {
+      const { container } = renderBoard();
+      const user = userEvent.setup();
+      await waitFor(() => expect(screen.getByText(/directly\.$/)).toBeInTheDocument(), { timeout: 8000 });
+      await user.click(screen.getByRole("button", { name: "Forward" }));
+      await waitFor(() => expect(container.querySelector('.usavvy-board-code-line[data-active="true"]')).toBeTruthy(), { timeout: 8000 });
+      const firstActiveLine = container.querySelector('.usavvy-board-code-line[data-active="true"]') as HTMLElement;
+      const firstActiveLineText = firstActiveLine.textContent;
+
+      await waitFor(
+        () => {
+          const nowActive = container.querySelector('.usavvy-board-code-line[data-active="true"]') as HTMLElement | null;
+          expect(nowActive?.textContent).not.toBe(firstActiveLineText);
+        },
+        { timeout: 8000 },
+      );
+
+      const lines = container.querySelectorAll(".usavvy-board-code-line");
+      const previousLine = Array.from(lines).find((line) => line.textContent === firstActiveLineText) as HTMLElement;
+      expect(previousLine.getAttribute("data-dimmed")).toBe("true");
+    },
+    15_000,
+  );
+
+  it(
+    "a manual scroll suspends dimming, and the next reveal tick restores it (Story 3.11, AC #3)",
+    async () => {
+      const { container } = renderBoard();
+      const user = userEvent.setup();
+      await waitFor(() => expect(screen.getByText(/directly\.$/)).toBeInTheDocument(), { timeout: 8000 });
+      await user.click(screen.getByRole("button", { name: "Forward" }));
+      await waitFor(() => expect(container.querySelector('.usavvy-board-code-line[data-active="true"]')).toBeTruthy(), { timeout: 8000 });
+      expect(container.querySelector('[data-dimmed="true"]')).toBeTruthy();
+
+      fireEvent.scroll(screen.getByRole("main"));
+      expect(container.querySelector('[data-dimmed="true"]')).toBeFalsy();
+
+      await waitFor(() => expect(container.querySelector('[data-dimmed="true"]')).toBeTruthy(), { timeout: 8000 });
+    },
+    15_000,
+  );
+
+  it(
+    "Pause suspends dimming, and Resume restores it on the next tick (Story 3.11, AC #3)",
+    async () => {
+      const { container } = renderBoard();
+      const user = userEvent.setup();
+      await waitFor(() => expect(screen.getByText(/directly\.$/)).toBeInTheDocument(), { timeout: 8000 });
+      await user.click(screen.getByRole("button", { name: "Forward" }));
+      await waitFor(() => expect(container.querySelector('.usavvy-board-code-line[data-active="true"]')).toBeTruthy(), { timeout: 8000 });
+      expect(container.querySelector('[data-dimmed="true"]')).toBeTruthy();
+
+      await user.click(screen.getByRole("button", { name: "Pause" }));
+      expect(container.querySelector('[data-dimmed="true"]')).toBeFalsy();
+
+      await user.click(screen.getByRole("button", { name: "Resume" }));
+      await waitFor(() => expect(container.querySelector('[data-dimmed="true"]')).toBeTruthy(), { timeout: 8000 });
+    },
+    15_000,
+  );
+
   it("'Explain more' -> 'a different example' swaps in a mocked alternate Beat, with a way back to the lesson (AC: Story 3.17)", async () => {
     renderBoard();
     const user = userEvent.setup();
@@ -305,5 +393,38 @@ describe("BoardPage", () => {
     renderBoard();
 
     expect(screen.getByRole("link", { name: /Exit board/ })).toHaveAttribute("href", "/courses/c1");
+  });
+});
+
+// Code review finding (Story 3.11): `computeSpotlight` gave math blocks per-line
+// sub-spotlighting like code, contradicting the story's own spec (whole-block for
+// text/math). Masked in the real mock data because its one math block is always the
+// LAST block of its Beat — by the time a 2nd line is revealed the whole Beat is fully
+// revealed and computeSpotlight's own early-return hides the symptom. Exercises a
+// constructed multi-block Beat the mock data doesn't happen to contain, to actually
+// catch a regression here.
+describe("computeSpotlight (Story 3.11, code review fix)", () => {
+  const twoBlockBeat: BoardBeat = {
+    id: "test-beat",
+    title: "Test Beat",
+    narrationText: "irrelevant",
+    sourceRef: "test",
+    routeType: null,
+    content: [
+      { kind: "math", lines: ["line one", "line two", "line three"] },
+      { kind: "table", headers: ["a"], rows: [["1"], ["2"]] },
+    ],
+  };
+
+  it("spotlights the whole math block (subIndex null), not a specific line, while revealing its 2nd of 3 lines", () => {
+    expect(computeSpotlight(twoBlockBeat, 2)).toEqual({ blockIndex: 0, subIndex: null });
+  });
+
+  it("spotlights the specific table row once reveal has moved past the math block", () => {
+    expect(computeSpotlight(twoBlockBeat, 4)).toEqual({ blockIndex: 1, subIndex: 0 });
+  });
+
+  it("returns null once the Beat is fully revealed", () => {
+    expect(computeSpotlight(twoBlockBeat, 5)).toBeNull();
   });
 });
