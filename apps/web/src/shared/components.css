@@ -482,3 +482,467 @@
   border-radius: var(--radius-default);
   padding: var(--spacing-3);
 }
+
+/* Epic 3 mock-first UX pass (`_AI-Agile-Development/implementation-artifacts/
+   epic-3-mock-first-ux-pass.md`). DESIGN.md's Board components — fixed dark-canvas
+   tokens (not theme-reactive), board-narration typography (19px Inter), JetBrains Mono
+   for code, floating control bar with focus-ring-on-dark inside the canvas. */
+.usavvy-board-page {
+  background: var(--color-board-dark-bg);
+  color: var(--color-board-dark-on-surface);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.usavvy-board-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-3) var(--spacing-6);
+  gap: var(--spacing-3);
+}
+
+.usavvy-board-topbar a {
+  color: var(--color-board-dark-on-surface);
+}
+
+.usavvy-board-topbar a:focus-visible {
+  outline: 2px solid var(--color-focus-ring-on-dark);
+  outline-offset: 1px;
+}
+
+/* Avatar Presence Indicator — "a simple animated mark/waveform, never a face" per
+   DESIGN.md. idle/listening = secondary teal, speaking = accent coral, thinking = a
+   brief primary-indigo pulse. */
+.usavvy-board-avatar {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  width: 28px;
+  height: 20px;
+}
+
+.usavvy-board-avatar-bar {
+  width: 4px;
+  border-radius: var(--radius-full, 999px);
+  background: var(--color-secondary);
+  height: 6px;
+  transition: height 150ms ease-in-out;
+}
+
+.usavvy-board-avatar[data-state="speaking"] .usavvy-board-avatar-bar {
+  background: var(--color-accent);
+  animation: usavvy-board-avatar-bounce 900ms ease-in-out infinite;
+}
+
+.usavvy-board-avatar[data-state="thinking"] .usavvy-board-avatar-bar {
+  background: var(--color-primary);
+}
+
+.usavvy-board-avatar-bar:nth-child(2) {
+  animation-delay: 150ms;
+}
+
+.usavvy-board-avatar-bar:nth-child(3) {
+  animation-delay: 300ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .usavvy-board-avatar[data-state="speaking"] .usavvy-board-avatar-bar {
+    animation: none;
+    height: 16px;
+  }
+}
+
+@keyframes usavvy-board-avatar-bounce {
+  0%, 100% { height: 6px; }
+  50% { height: 18px; }
+}
+
+.usavvy-board-body {
+  display: flex;
+  flex: 1;
+  gap: var(--spacing-4);
+  padding: 0 var(--spacing-6) 140px;
+  align-items: flex-start;
+}
+
+/* Board Gutter Markers — small dots, neutral outline by default, accent when marking
+   the currently-active Beat; each clickable to jump the viewport there. */
+.usavvy-board-gutter {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--spacing-3);
+  padding-top: var(--spacing-6);
+  flex-shrink: 0;
+}
+
+.usavvy-board-gutter-marker {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--color-outline);
+  border: none;
+  cursor: pointer;
+  padding: 0;
+}
+
+.usavvy-board-gutter-marker[data-active="true"] {
+  background: var(--color-accent);
+  width: 12px;
+  height: 12px;
+}
+
+.usavvy-board-gutter-marker:focus-visible {
+  outline: 2px solid var(--color-focus-ring-on-dark);
+  outline-offset: 2px;
+}
+
+.usavvy-board-canvas {
+  flex: 1;
+  background: var(--color-board-dark-surface);
+  border-radius: var(--radius-lg);
+  padding: var(--spacing-6);
+  max-width: 760px;
+}
+
+.usavvy-board-beat-heading {
+  font-family: var(--font-family);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-secondary-container);
+  margin: 0 0 var(--spacing-3);
+}
+
+.usavvy-board-block {
+  margin-bottom: var(--spacing-4);
+}
+
+.usavvy-board-block-text {
+  font-family: var(--font-family);
+  font-size: 19px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.usavvy-board-emphasis {
+  background: var(--color-accent-container);
+  color: var(--color-on-accent-container);
+  border-radius: 3px;
+  padding: 0 2px;
+}
+
+.usavvy-board-block-math {
+  font-family: var(--font-family-mono);
+  font-size: 17px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: var(--radius-default);
+  padding: var(--spacing-3) var(--spacing-4);
+  margin: 0;
+}
+
+.usavvy-board-block-math div {
+  padding: 2px 0;
+}
+
+.usavvy-board-block-code {
+  font-family: var(--font-family-mono);
+  font-size: 14px;
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: var(--radius-default);
+  padding: var(--spacing-3) var(--spacing-4);
+  margin: 0;
+  overflow-x: auto;
+}
+
+.usavvy-board-code-line {
+  white-space: pre;
+  padding: 1px 0;
+}
+
+.usavvy-board-code-line[data-active="true"] {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 3px;
+}
+
+.usavvy-board-block-diagram {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-2);
+}
+
+.usavvy-board-diagram-node {
+  font-family: var(--font-family-mono);
+  font-size: 13px;
+  background: var(--color-primary-container);
+  color: var(--color-on-primary-container);
+  border-radius: var(--radius-default);
+  padding: var(--spacing-2) var(--spacing-3);
+}
+
+.usavvy-board-diagram-edge {
+  color: var(--color-outline);
+}
+
+.usavvy-board-block-table {
+  width: 100%;
+  overflow-x: auto;
+  display: block;
+}
+
+.usavvy-board-block-table table {
+  border-collapse: collapse;
+  width: 100%;
+  font-family: var(--font-family);
+  font-size: 14px;
+}
+
+.usavvy-board-block-table th,
+.usavvy-board-block-table td {
+  text-align: left;
+  padding: var(--spacing-2) var(--spacing-3);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.usavvy-board-block-table tr[data-revealed="false"] {
+  opacity: 0.25;
+}
+
+.usavvy-board-source-tag {
+  font-family: var(--font-family);
+  font-size: 12px;
+  color: var(--color-secondary-container);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+}
+
+/* Board Control Bar — "always visible, always reachable, floats above the canvas." */
+.usavvy-board-control-bar {
+  position: fixed;
+  bottom: var(--spacing-4);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--color-board-dark-surface);
+  border-radius: var(--radius-lg);
+  padding: var(--spacing-3) var(--spacing-4);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-2);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  z-index: 20;
+  max-width: calc(100vw - var(--spacing-4) * 2);
+}
+
+.usavvy-board-control-button {
+  font-family: var(--font-family);
+  background: transparent;
+  color: var(--color-board-dark-on-surface);
+  border: none;
+  border-radius: var(--radius-default);
+  padding: var(--spacing-2) var(--spacing-3);
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.usavvy-board-control-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.usavvy-board-control-button:focus-visible,
+.usavvy-board-control-bar select:focus-visible,
+.usavvy-board-control-bar input:focus-visible {
+  outline: 2px solid var(--color-focus-ring-on-dark);
+  outline-offset: 1px;
+}
+
+.usavvy-board-control-bar select,
+.usavvy-board-control-bar input[type="range"] {
+  font-family: var(--font-family);
+  font-size: 13px;
+}
+
+/* "Explain more" — "always styled as a primary-weight action... a single expandable
+   cluster off the same [control] bar, not a separate hunt-for-it menu." */
+.usavvy-board-explain-toggle {
+  font-family: var(--font-family);
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+  border: none;
+  border-radius: var(--radius-default);
+  padding: var(--spacing-2) var(--spacing-4);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.usavvy-board-explain-toggle:focus-visible {
+  outline: 2px solid var(--color-focus-ring-on-dark);
+  outline-offset: 1px;
+}
+
+.usavvy-board-explain-cluster {
+  position: fixed;
+  bottom: 76px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--color-board-dark-surface);
+  border-radius: var(--radius-lg);
+  padding: var(--spacing-3);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-2);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  z-index: 20;
+  max-width: calc(100vw - var(--spacing-4) * 2);
+}
+
+.usavvy-board-explain-option {
+  font-family: var(--font-family);
+  background: transparent;
+  color: var(--color-board-dark-on-surface);
+  border: 1px solid var(--color-outline);
+  border-radius: var(--radius-full, 999px);
+  padding: var(--spacing-2) var(--spacing-3);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.usavvy-board-explain-option:focus-visible {
+  outline: 2px solid var(--color-focus-ring-on-dark);
+  outline-offset: 1px;
+}
+
+.usavvy-board-ask-anything-form {
+  display: flex;
+  gap: var(--spacing-2);
+  width: 100%;
+}
+
+.usavvy-board-ask-anything-form input {
+  flex: 1;
+  font-family: var(--font-family);
+  font-size: 14px;
+  border-radius: var(--radius-default);
+  border: 1px solid var(--color-outline);
+  padding: var(--spacing-2) var(--spacing-3);
+  background: transparent;
+  color: var(--color-board-dark-on-surface);
+}
+
+/* Transcript Panel — "search-match highlighting uses accent-container... stays
+   readable." */
+.usavvy-board-transcript-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(360px, 100vw);
+  background: var(--color-surface);
+  color: var(--color-on-surface);
+  padding: var(--spacing-4);
+  overflow-y: auto;
+  box-shadow: -4px 0 16px rgba(0, 0, 0, 0.3);
+  z-index: 30;
+}
+
+.usavvy-board-transcript-entry {
+  margin-bottom: var(--spacing-4);
+}
+
+.usavvy-board-transcript-entry h3 {
+  font-size: 14px;
+  margin: 0 0 var(--spacing-1);
+}
+
+.usavvy-board-transcript-entry p {
+  font-size: 14px;
+  margin: 0;
+}
+
+.usavvy-board-transcript-highlight {
+  background: var(--color-accent-container);
+  color: var(--color-on-accent-container);
+  border-radius: 2px;
+}
+
+/* Checkpoint Modal — "one consistent floating-panel treatment... surface background,
+   lg/md radius, a single accent-colored primary action." */
+.usavvy-board-checkpoint-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 40;
+}
+
+.usavvy-board-checkpoint-panel {
+  background: var(--color-surface);
+  color: var(--color-on-surface);
+  border-radius: var(--radius-lg);
+  padding: var(--spacing-6);
+  max-width: 480px;
+  width: min(480px, calc(100vw - var(--spacing-6) * 2));
+}
+
+.usavvy-board-checkpoint-options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2);
+  margin: var(--spacing-4) 0;
+}
+
+.usavvy-board-checkpoint-option {
+  text-align: left;
+  font-family: var(--font-family);
+  font-size: 15px;
+  border: 1px solid var(--color-outline-variant);
+  border-radius: var(--radius-default);
+  padding: var(--spacing-3);
+  background: transparent;
+  color: var(--color-on-surface);
+  cursor: pointer;
+}
+
+.usavvy-board-checkpoint-option[data-selected="true"] {
+  border-color: var(--color-accent);
+}
+
+/* Progress Disclosure — "never a bare percentage. Always a fill plus the explicit
+   'completed N of M' text." */
+.usavvy-board-progress-disclosure {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+}
+
+.usavvy-board-progress-track {
+  flex: 1;
+  height: 6px;
+  border-radius: var(--radius-full, 999px);
+  background: var(--color-outline-variant);
+  overflow: hidden;
+  min-width: 60px;
+}
+
+.usavvy-board-progress-fill {
+  height: 100%;
+  background: var(--color-secondary);
+  transition: width 100ms linear;
+}
+
+.usavvy-board-progress-label {
+  font-family: var(--font-family);
+  font-size: 12px;
+  color: var(--color-board-dark-on-surface);
+  white-space: nowrap;
+}

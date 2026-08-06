@@ -217,6 +217,14 @@ describe("CourseDetailPage", () => {
     expect(screen.getByRole("link", { name: "Add your personal notes to this course" })).toHaveAttribute("href", "/courses/c1/notes");
   });
 
+  it("links to the mock board preview for this course (Epic 3 mock-first UX pass)", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(await jsonResponse(FULL_COURSE)));
+    renderWithSession({ accessToken: "a-token" });
+
+    await waitFor(() => expect(screen.getByText("Intro to Algebra")).toBeInTheDocument());
+    expect(screen.getByRole("link", { name: "Preview the interactive board (mock)" })).toHaveAttribute("href", "/courses/c1/board");
+  });
+
   it("shows a distinguishable error rather than a blank page when the fetch fails", async () => {
     vi.stubGlobal(
       "fetch",

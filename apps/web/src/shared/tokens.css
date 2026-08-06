@@ -36,6 +36,18 @@
   --spacing-6: 24px;
 
   --font-family: Inter, system-ui, sans-serif;
+  --font-family-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  /* Epic 3 mock-first UX pass (`_AI-Agile-Development/implementation-artifacts/
+     epic-3-mock-first-ux-pass.md`). DESIGN.md's Board Dark canvas — a fixed pair, not
+     theme-reactive: a learner's board-canvas preference (dark vs. "paper" light) is
+     independent of the app-chrome color theme picked in Story 1.9. */
+  --color-board-dark-bg: #14123b;
+  --color-board-dark-surface: #1e1b4b;
+  --color-board-dark-on-surface: #e8e7ff;
+  --color-focus-ring-on-dark: #e8e7ff;
+  --color-accent-container: #ffedd5;
+  --color-on-accent-container: #7c2d12;
 }
 
 /*

@@ -189,6 +189,15 @@ export function CourseDetailPage() {
           <p>
             <Link to={`/courses/${id}/notes`}>Add your personal notes to this course</Link>
           </p>
+
+          {/* Epic 3 mock-first UX pass (`_AI-Agile-Development/implementation-artifacts/
+              epic-3-mock-first-ux-pass.md`) — a click-through preview with entirely
+              mocked content, not the real board (Epic 3's backend hasn't been built
+              yet). Clearly labeled "(preview)" so it's never mistaken for the real
+              learning session Start course above leads toward. */}
+          <p>
+            <Link to={`/courses/${id}/board`}>Preview the interactive board (mock)</Link>
+          </p>
         </>
       ) : null}
     </main>

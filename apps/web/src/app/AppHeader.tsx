@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../modules/auth/index.js";
 import { useNotifications } from "./useNotifications.js";
 
@@ -29,6 +29,7 @@ export function AppHeader() {
   const { notifications, unreadCount, markRead, clear, actionError } = useNotifications();
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
 
   // Review finding: `open` previously survived a logout/login cycle (this component
   // never unmounts, only returns null) — a different learner could log in and find the
@@ -37,7 +38,10 @@ export function AppHeader() {
     if (!session) setOpen(false);
   }, [session]);
 
-  if (!session) {
+  // Epic 3 mock-first UX pass: DESIGN.md is explicit that app chrome "stays quiet so
+  // the Board reads as the one high-energy surface in the product" — the Board's own
+  // dark canvas replaces this header entirely rather than competing with it.
+  if (!session || location.pathname.endsWith("/board")) {
     return null;
   }
 
