@@ -1,6 +1,6 @@
 # Epic 3 mock-first UX pass — the Interactive Board
 
-Status: presented for sign-off
+Status: signed off
 
 *(Process step per `ARCHITECTURE-SPINE.md`'s "Mock-first epic kickoff" convention and `sprint-change-proposal-2026-08-06.md` — not an AC-bearing story with its own FR, a prerequisite gate before Story 3.1 and any other Epic 3 backend work starts. Deliverable: a click-through, mocked-data UI covering the Board's core learner journey, presented for explicit sign-off before backend work begins.)*
 
@@ -45,4 +45,4 @@ Epic 3 has 32 stories. Mocking every control at full fidelity before any sign-of
 
 ## Sign-off
 
-Presented to the user 2026-08-06 — awaiting explicit go-ahead before Story 3.1 and Epic 3's real backend work begins.
+Presented to the user 2026-08-06 — **approved 2026-08-06**. Proceeding to Story 3.1 (Pause and Resume the Board) and Epic 3's real backend work, story-by-story, per the mock-first-epic-kickoff convention.
